@@ -53,6 +53,7 @@ SCHEMA = [
          action TEXT NOT NULL, actor TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
          changes JSONB NOT NULL DEFAULT '{}', created TEXT NOT NULL)""",
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS actor TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE runs ADD COLUMN IF NOT EXISTS cancel_requested BOOLEAN NOT NULL DEFAULT FALSE",
     # Monotonic order for entries written within the same second.
     "ALTER TABLE history ADD COLUMN IF NOT EXISTS n BIGSERIAL",
     """CREATE TABLE IF NOT EXISTS repositories (
@@ -89,7 +90,8 @@ SCHEMA = [
 
 
 def now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    # Millisecond precision keeps "latest run" ordering correct for runs started in the same second.
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
 def new_id() -> str:

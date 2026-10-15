@@ -21,6 +21,8 @@ IDs → human review → epics, features and stories → requirements traceabili
 3. **Stories**: approved requirements become epics → features → user stories with Gherkin
    acceptance criteria, product-class variants and compliance tags. Each story is scored
    against INVEST and a Definition of Ready, and is shown on a story map or a list.
+   **Refine with AI** proposes an improved version of a story that fixes its issues; you
+   review a before/after comparison before applying it. Long AI runs can be cancelled.
 4. **Traceability**: a requirement-to-story matrix with coverage, gaps and orphan stories.
 5. **Audit trail**: every manual edit, review decision, deletion, sync and AI run is recorded
    with who, when and field-level changes.

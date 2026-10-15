@@ -160,7 +160,7 @@ export function drawer({ title, subtitle, body, footer }) {
 
 export function badge(text, tone = "") { return h("span", { class: "badge " + tone }, text); }
 
-export const statusTone = { draft: "", approved: "green", excluded: "red", rejected: "red", running: "blue", done: "green", failed: "red" };
+export const statusTone = { draft: "", approved: "green", excluded: "red", rejected: "red", running: "blue", done: "green", failed: "red", cancelled: "amber" };
 export const typeTone = { business: "violet", functional: "blue", "non-functional": "amber", constraint: "red", rule: "accent" };
 
 export function scorePill(score) {

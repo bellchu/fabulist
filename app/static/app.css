@@ -218,6 +218,8 @@ table.table { width: 100%; border-collapse: collapse; }
   .mobile-nav { display: flex; gap: 6px; }
   .content { padding: 16px; } .topbar { padding: 0 16px; }
   .grid-2, .grid-3, .form-grid { grid-template-columns: 1fr; } .form-grid .span-2 { grid-column: auto; }
-  .stepper { grid-template-columns: 1fr 1fr; }
+  .stepper { display: flex; overflow-x: auto; scrollbar-width: none; }
+  .stepper .step { flex: 0 0 160px; }
+  .crumbs { display: none; }
   .page-head { flex-direction: column; }
 }

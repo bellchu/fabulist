@@ -107,3 +107,17 @@ def test_generate_stories_fails_cleanly_on_persistent_garbage(monkeypatch):
     reqs = [{"key": "REQ-001", "type": "functional", "statement": "The system shall x things.", "epic": "E", "section": "S"}]
     with pytest.raises(ValueError, match="did not return valid JSON"):
         pipeline.generate_stories(reqs, "p", "generic", OPENAI, OPTS, lambda m: None, {"in": 0, "out": 0})
+
+
+def test_refine_story_via_llm_constrains_links(monkeypatch):
+    improved = [{"title": "Cancel open orders", "persona": "buyer", "narrative": "As a buyer, I want to cancel open orders, so that I avoid unwanted deliveries.",
+                 "acceptance_criteria": ["Given an open order, when I cancel it, then its status is Cancelled within 5 seconds."],
+                 "requirement_ids": ["REQ-001", "REQ-777"]}]
+    fake = Fake([chat(json.dumps(improved))])
+    monkeypatch.setattr(llm.httpx, "post", fake)
+    story = {"title": "Cancel", "persona": "user", "narrative": "x", "acceptance_criteria": [], "requirement_ids": ["REQ-001"], "epic": "E", "feature": "F"}
+    reqs = [{"key": "REQ-001", "type": "functional", "statement": "The system shall let buyers cancel open orders.", "actors": ["buyer"]}]
+    out = pipeline.refine_story(story, reqs, [{"message": "No acceptance criteria"}], "generic", OPENAI, OPTS, {"in": 0, "out": 0})
+    assert out["requirement_ids"] == ["REQ-001"] and out["epic"] == "E" and out["persona"] == "buyer"
+    prompt = fake.calls[0]["json"]["messages"][1]["content"]
+    assert "No acceptance criteria" in prompt and "REQ-001 [functional]" in prompt

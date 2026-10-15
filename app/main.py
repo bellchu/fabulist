@@ -265,13 +265,21 @@ def search_documents(pid: str, body: SearchIn):
 
 # ---- runs ----------------------------------------------------------------
 
+class RunCancelled(Exception):
+    pass
+
+
 def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str) -> None:
     started = time.monotonic()
     usage = {"in": 0, "out": 0}
 
     def progress(msg: str) -> None:
-        db.execute("UPDATE runs SET progress=%s, tokens_in=%s, tokens_out=%s WHERE id=%s",
-                   (msg[:200], usage["in"], usage["out"], run_id))
+        # Called between AI requests, so it doubles as the cancellation checkpoint.
+        with db.conn() as c:
+            row = c.execute("UPDATE runs SET progress=%s, tokens_in=%s, tokens_out=%s WHERE id=%s RETURNING cancel_requested",
+                            (msg[:200], usage["in"], usage["out"], run_id)).fetchone()
+        if row and row["cancel_requested"]:
+            raise RunCancelled()
 
     try:
         project = _project(pid)
@@ -286,6 +294,7 @@ def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str
             if not reqs:
                 raise ValueError("No requirements in scope. Extract and review requirements first.")
             items = pipeline.generate_stories(reqs, pid, project["platform"], profile, opts, progress, usage)
+        progress("Saving results")
         if stage == "requirements":
             sql = "INSERT INTO requirements (id, project_id, seq, data) VALUES (%s,%s,%s,%s)"
             params = [(db.new_id(), pid, i, json.dumps(x)) for i, x in enumerate(items)]
@@ -302,6 +311,9 @@ def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str
             c.execute("UPDATE runs SET status='done', item_count=%s, story_count=%s, progress='', tokens_in=%s, "
                       "tokens_out=%s, duration_ms=%s WHERE id=%s",
                       (len(items), len(items), usage["in"], usage["out"], int((time.monotonic() - started) * 1000), run_id))
+    except RunCancelled:
+        db.execute("UPDATE runs SET status='cancelled', error='Cancelled; existing data was kept', progress='', "
+                   "duration_ms=%s WHERE id=%s", (int((time.monotonic() - started) * 1000), run_id))
     except Exception as exc:
         log.exception("run %s failed", run_id)
         msg = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else "Internal error (%s)" % type(exc).__name__
@@ -327,6 +339,16 @@ def start_run(pid: str, body: RunIn, tasks: BackgroundTasks, request: Request):
                (rid, pid, body.stage, profile["name"], profile["model"], history.actor(request), db.now()))
     tasks.add_task(_execute_run, rid, pid, body.stage, profile["id"], body.scope)
     return {"id": rid, "status": "running"}
+
+
+@app.post("/api/projects/{pid}/runs/{rid}/cancel")
+def cancel_run(pid: str, rid: str):
+    with db.conn() as c:
+        row = c.execute("UPDATE runs SET cancel_requested=TRUE, progress='Cancelling…' WHERE id=%s AND project_id=%s "
+                        "AND status='running' RETURNING id", (rid, pid)).fetchone()
+    if not row:
+        raise HTTPException(409, "Run is not running")
+    return {"status": "cancelling"}
 
 
 @app.get("/api/projects/{pid}/runs")
@@ -503,6 +525,31 @@ def create_story(pid: str, request: Request, body: Dict[str, Any] = Body(...)):
 def update_story(pid: str, sid: str, request: Request, body: Dict[str, Any] = Body(...)):
     _save_item("stories", pid, sid, body, history.actor(request))
     return next(s for s in _stories(pid) if s["id"] == sid)
+
+
+class RefineIn(BaseModel):
+    provider_id: Optional[str] = None
+
+
+@app.post("/api/projects/{pid}/stories/{sid}/refine")
+def refine_story(pid: str, sid: str, body: RefineIn):
+    """Propose an improved version of one story. Nothing is saved; the client applies it via PATCH."""
+    project = _project(pid)
+    reqs = _requirements(pid)
+    story = next((s for s in _stories(pid, reqs) if s["id"] == sid), None)
+    if story is None:
+        raise HTTPException(404, "Story not found")
+    profile = settings.get_provider(body.provider_id) if body.provider_id else settings.default_provider()
+    linked = [r for r in reqs if r["key"] in story["requirement_ids"]]
+    usage = {"in": 0, "out": 0}
+    try:
+        proposal = pipeline.refine_story(story, linked, story["issues"], project["platform"], profile, settings.get_settings(), usage)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(502, "Refinement failed: %s" % exc)
+    valid = {r["key"] for r in reqs if r["status"] != "excluded"}
+    issues = quality.story_issues(proposal, valid)
+    return {"story": proposal, "issues": issues, "quality_score": quality.score(issues), "ready": quality.is_ready(issues),
+            "before_score": story["quality_score"], "provider": profile["name"], "usage": usage}
 
 
 @app.delete("/api/projects/{pid}/stories/{sid}", status_code=204)

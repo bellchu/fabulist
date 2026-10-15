@@ -188,3 +188,38 @@ def test_repository_sync_lifecycle(client, tmp_path, monkeypatch):
 
     assert client.delete("/api/projects/%s/repos/%s" % (pid, repo["id"])).status_code == 204
     assert client.get("/api/projects/%s/documents" % pid).json() == []
+
+
+def test_cancel_run_keeps_existing_data(client, monkeypatch):
+    from app import db, pipeline
+    pid = client.post("/api/projects", json={"name": "Cancel", "platform": "generic"}).json()["id"]
+    client.post("/api/projects/%s/documents/text" % pid, json={"name": "b.md", "text": BRD})
+    client.post("/api/projects/%s/runs" % pid, json={"stage": "requirements"})
+    _wait(client, pid)
+    before = client.get("/api/projects/%s/requirements" % pid).json()
+
+    def slow_extract(docs, platform, profile, opts, progress, usage):
+        progress("Reading section 1")
+        db.execute("UPDATE runs SET cancel_requested=TRUE WHERE project_id=%s AND status='running'", (pid,))
+        progress("Reading section 2")
+        raise AssertionError("should have been cancelled")
+    monkeypatch.setattr(pipeline, "extract_requirements", slow_extract)
+    client.post("/api/projects/%s/runs" % pid, json={"stage": "requirements"})
+    run = _wait(client, pid)
+    assert run["status"] == "cancelled" and "kept" in run["error"]
+    assert client.get("/api/projects/%s/requirements" % pid).json() == before
+    assert client.post("/api/projects/%s/runs/%s/cancel" % (pid, run["id"])).status_code == 409
+
+
+def test_refine_story_proposes_without_saving(client):
+    pid = client.post("/api/projects", json={"name": "Refine", "platform": "generic"}).json()["id"]
+    r = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall let buyers cancel open orders.", "actors": ["buyer"]}).json()
+    s = client.post("/api/projects/%s/stories" % pid, json={"title": "Cancel open orders", "persona": "user", "narrative": "cancel orders",
+                                                            "acceptance_criteria": ["order status becomes cancelled"], "requirement_ids": [r["key"]]}).json()
+    assert s["quality_score"] < 70
+    p = client.post("/api/projects/%s/stories/%s/refine" % (pid, s["id"]), json={}).json()
+    assert p["story"]["persona"] == "buyer" and p["story"]["narrative"].startswith("As a buyer, I want to cancel open orders")
+    assert p["story"]["acceptance_criteria"] == ["Then order status becomes cancelled"]
+    assert p["quality_score"] > p["before_score"] and p["story"]["requirement_ids"] == [r["key"]]
+    assert client.get("/api/projects/%s/stories" % pid).json()[0]["narrative"] == "cancel orders", "refine must not save"
+    assert client.post("/api/projects/%s/stories/nope/refine" % pid, json={}).status_code == 404

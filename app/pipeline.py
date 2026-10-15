@@ -280,7 +280,10 @@ def _benefit(req: Dict[str, Any]) -> str:
     tags = req.get("compliance_tags") or []
     if tags:
         return "the business stays compliant with %s obligations" % "/".join(tags)
-    return "%s objectives in '%s' are met" % (req.get("epic", "business"), req.get("section", "this area"))
+    section = (req.get("section") or "").strip()
+    if not section or section == "General":
+        return "the business requirement %s is met" % req.get("key", "")
+    return "%s objectives in '%s' are met" % (req.get("epic") or "business", section)
 
 
 def _short_title(text: str, limit: int = 80) -> str:
@@ -383,3 +386,60 @@ def _finalize(raw: List[Dict[str, Any]], reqs: List[Dict[str, Any]]) -> List[Dic
         _enrich(s, s["title"] + " " + s["narrative"])
         out.append(s)
     return out
+
+
+# ---- single-story refinement ---------------------------------------------
+
+REFINE_SYSTEM = (
+    "You are a senior business analyst improving one agile user story. Fix the listed quality issues while "
+    "keeping the story's scope, epic, feature and requirement links. Follow INVEST, write the narrative as "
+    "'As a <specific role>, I want <goal>, so that <benefit>', write every acceptance criterion in Given/When/Then "
+    "form with concrete, testable outcomes, and replace vague words with measurable criteria taken from the "
+    "requirements. Never invent requirement IDs. Keep unresolved ambiguities in open_questions. Reply with ONLY a "
+    "JSON array containing exactly one story object with the same fields as the input."
+)
+
+
+def _gherkin(line: str) -> str:
+    line = line.strip()
+    if re.match(r"^(given|when|then|and|but)\b", line, re.I):
+        return line
+    return "Then " + line[0].lower() + line[1:] if line else line
+
+
+def mock_refine(story: Dict[str, Any], reqs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Offline heuristic fixes for structural issues; content issues are left to humans."""
+    out = dict(story)
+    actors = [a for r in reqs for a in (r.get("actors") or []) if a and a != "user"]
+    if (out.get("persona") or "user").lower() in ("", "user", "system") and actors:
+        out["persona"] = actors[0]
+    if not re.match(r"^\s*as an?\s+.+?i (want|need|can)\b.+?so that\b", out.get("narrative") or "", re.I | re.S):
+        goal = (out.get("title") or "").rstrip(".…")
+        goal = goal[:1].lower() + goal[1:]
+        benefit = _benefit(reqs[0]) if reqs else "the business requirement is met"
+        out["narrative"] = "As a %s, I want to %s, so that %s." % (out.get("persona") or "user", goal, benefit)
+    out["acceptance_criteria"] = [_gherkin(a) for a in out.get("acceptance_criteria") or []]
+    if not out["acceptance_criteria"] and reqs:
+        out["acceptance_criteria"] = ["Given the feature is available, when it is used, then %s" % reqs[0]["statement"].rstrip(".")[:200] + "."]
+    return out
+
+
+def refine_story(story: Dict[str, Any], reqs: List[Dict[str, Any]], issues: List[Dict[str, str]], platform: str,
+                 profile: Dict[str, Any], opts: Dict[str, Any], usage: Usage) -> Dict[str, Any]:
+    fields = {k: story.get(k) for k in ("epic", "feature", "title", "persona", "narrative", "acceptance_criteria", "priority",
+                                        "story_points", "labels", "requirement_ids", "product_scope", "variant_criteria",
+                                        "compliance_tags", "open_questions", "notes")}
+    if profile["kind"] == "mock":
+        raw = mock_refine(fields, reqs)
+    else:
+        prompt = "%s\n\nQuality issues to fix:\n%s\n\nLinked requirements:\n%s\n\nStory:\n%s" % (
+            _platform_context(platform), "\n".join("- " + i["message"] for i in issues) or "- none (polish wording only)",
+            "\n".join("%s [%s] %s" % (r["key"], r["type"], r["statement"]) for r in reqs) or "none", json.dumps(fields, indent=1))
+        result = _ask(profile, opts, REFINE_SYSTEM, prompt, usage)
+        raw = result[0] if result and isinstance(result[0], dict) else {}
+    refined = normalize_story(dict(fields, **{k: v for k, v in raw.items() if v not in (None, "")}))
+    if refined is None:
+        raise ValueError("The AI provider returned an unusable story")
+    allowed = set(story.get("requirement_ids") or []) | {r["key"] for r in reqs}
+    refined["requirement_ids"] = [k for k in refined["requirement_ids"] if k in allowed] or list(story.get("requirement_ids") or [])
+    return refined
