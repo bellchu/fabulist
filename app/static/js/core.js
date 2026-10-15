@@ -62,7 +62,7 @@ export function icon(name) {
 // ---- API ----------------------------------------------------------------
 
 async function request(method, path, body, isForm) {
-  const opts = { method, headers: {} };
+  const opts = { method, headers: { "X-Requested-With": "fabulist" } };
   if (body !== undefined) {
     if (isForm) opts.body = body;
     else { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
@@ -246,4 +246,28 @@ export function segmented(options, value, onChange) {
 export function download(url) {
   const a = h("a", { href: url, download: "" });
   document.body.append(a); a.click(); a.remove();
+}
+
+// ---- change history -----------------------------------------------------
+
+function short(v) {
+  if (v === null || v === undefined || v === "") return "∅";
+  if (Array.isArray(v)) return v.length + " item" + (v.length === 1 ? "" : "s");
+  const t = String(v);
+  return t.length > 60 ? t.slice(0, 57) + "…" : t;
+}
+
+export function historyList(entries, { showItem = false } = {}) {
+  if (!entries.length) return h("p", { class: "muted small" }, "No changes recorded yet.");
+  return h("div", { class: "stack", style: { gap: "10px" } }, entries.map((e) => {
+    const fields = Object.entries(e.changes || {});
+    return h("div", { class: "row", style: { alignItems: "flex-start" } },
+      h("span", { class: "dot", style: { marginTop: "7px", background: e.action === "deleted" ? "var(--red)" : e.action === "created" ? "var(--green)" : "var(--accent)" } }),
+      h("div", { class: "grow small" },
+        h("div", {}, h("b", {}, e.actor), " " + e.action + " ", showItem ? h("span", { class: "mono" }, e.item_key) : null,
+          h("span", { class: "muted" }, " · " + timeAgo(e.created))),
+        showItem && e.summary ? h("div", { class: "muted" }, e.summary) : null,
+        fields.length ? h("div", { class: "muted" }, fields.map(([k, c], i) => [i ? "; " : "",
+          k.replace(/_/g, " ") + ": " + short(c.from) + " → " + short(c.to)])) : null));
+  }));
 }

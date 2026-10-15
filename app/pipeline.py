@@ -216,7 +216,11 @@ def _ask(profile: Dict[str, Any], opts: Dict[str, Any], system: str, prompt: str
                                                  "array for this input.\n\n" + prompt, opts)
         usage["in"] += u["in"]
         usage["out"] += u["out"]
-        return parse_json_array(text)
+        try:
+            return parse_json_array(text)
+        except (ValueError, json.JSONDecodeError):
+            raise ValueError("The AI provider did not return valid JSON after a retry. Try a stronger model, "
+                             "a smaller section size, or a lower temperature.")
 
 
 def _platform_context(platform: str) -> str:

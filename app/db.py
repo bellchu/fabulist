@@ -1,5 +1,7 @@
 """Postgres persistence (psycopg 3) with pgvector for retrieval."""
 import json
+import os
+import threading
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -7,6 +9,7 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 from . import config
 
@@ -44,6 +47,16 @@ SCHEMA = [
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS tokens_out INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS duration_ms INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS item_count INTEGER NOT NULL DEFAULT 0",
+    """CREATE TABLE IF NOT EXISTS history (
+         id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+         item_type TEXT NOT NULL, item_id TEXT NOT NULL, item_key TEXT NOT NULL DEFAULT '',
+         action TEXT NOT NULL, actor TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
+         changes JSONB NOT NULL DEFAULT '{}', created TEXT NOT NULL)""",
+    "ALTER TABLE runs ADD COLUMN IF NOT EXISTS actor TEXT NOT NULL DEFAULT ''",
+    # Monotonic order for entries written within the same second.
+    "ALTER TABLE history ADD COLUMN IF NOT EXISTS n BIGSERIAL",
+    "CREATE INDEX IF NOT EXISTS idx_history_project ON history(project_id, created)",
+    "CREATE INDEX IF NOT EXISTS idx_history_item ON history(item_id, created)",
     "CREATE INDEX IF NOT EXISTS idx_reqs_project ON requirements(project_id, seq)",
     "CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created)",
     "CREATE INDEX IF NOT EXISTS idx_docs_project ON documents(project_id)",
@@ -62,12 +75,34 @@ def new_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
-@contextmanager
-def conn() -> Iterator[psycopg.Connection]:
+_pools: Dict[str, ConnectionPool] = {}
+_pools_lock = threading.Lock()
+
+
+def _pool() -> ConnectionPool:
     if not config.DATABASE_URL:
         raise RuntimeError("DATABASE_URL is not set")
-    with psycopg.connect(config.DATABASE_URL, row_factory=dict_row, connect_timeout=10) as c:
+    with _pools_lock:
+        pool = _pools.get(config.DATABASE_URL)
+        if pool is None:
+            pool = ConnectionPool(config.DATABASE_URL, min_size=1, max_size=int(os.environ.get("DB_POOL_MAX", "10")),
+                                  kwargs={"row_factory": dict_row, "connect_timeout": 10}, timeout=30, open=True)
+            _pools[config.DATABASE_URL] = pool
+    return pool
+
+
+@contextmanager
+def conn() -> Iterator[psycopg.Connection]:
+    """Pooled connection; commits on success, rolls back on error."""
+    with _pool().connection() as c:
         yield c
+
+
+def close() -> None:
+    with _pools_lock:
+        for pool in _pools.values():
+            pool.close()
+        _pools.clear()
 
 
 def init() -> None:

@@ -12,13 +12,14 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import admin, config, db, embeddings, exporters, parsing, pipeline, quality, settings, taxonomy
+from . import admin, config, db, embeddings, exporters, history, parsing, pipeline, quality, settings, taxonomy
 from .profiles import PLATFORMS
 
 log = logging.getLogger("fabulist")
 STATUSES = {"draft", "approved", "excluded"}
 STORY_STATUSES = {"draft", "approved", "rejected"}
 STAGES = {"requirements", "stories"}
+CSRF_HEADER = "fabulist"
 
 
 @asynccontextmanager
@@ -28,6 +29,7 @@ async def lifespan(_app: FastAPI):
     # A restart kills in-process runs; don't leave them "running" forever.
     db.execute("UPDATE runs SET status='failed', error='Interrupted by server restart' WHERE status='running'")
     yield
+    db.close()
 
 
 app = FastAPI(title="Fabulist", lifespan=lifespan)
@@ -47,6 +49,11 @@ async def basic_auth(request: Request, call_next):
                 ok = False
         if not ok:
             return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="Fabulist"'})
+    if (request.method in ("POST", "PUT", "PATCH", "DELETE") and request.url.path.startswith("/api/")
+            and request.headers.get("x-requested-with") != CSRF_HEADER):
+        # Browsers resend Basic-auth credentials cross-site; a custom header can't be sent
+        # cross-origin without a CORS preflight (which we never allow), so require it.
+        return JSONResponse({"detail": "Missing X-Requested-With header"}, status_code=403)
     response = await call_next(request)
     if request.url.path.startswith("/static/"):
         # Revalidate via ETag so a deploy is picked up without a hard refresh.
@@ -297,7 +304,7 @@ def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str
 
 
 @app.post("/api/projects/{pid}/runs", status_code=202)
-def start_run(pid: str, body: RunIn, tasks: BackgroundTasks):
+def start_run(pid: str, body: RunIn, tasks: BackgroundTasks, request: Request):
     _project(pid)
     if body.stage not in STAGES:
         raise HTTPException(400, "Unknown stage")
@@ -309,8 +316,9 @@ def start_run(pid: str, body: RunIn, tasks: BackgroundTasks):
     if db.one("SELECT 1 AS x FROM runs WHERE project_id=%s AND status='running'", (pid,)):
         raise HTTPException(409, "A run is already in progress for this project")
     rid = db.new_id()
-    db.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, created) "
-               "VALUES (%s,%s,'running',%s,%s,%s,%s)", (rid, pid, body.stage, profile["name"], profile["model"], db.now()))
+    db.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, actor, created) "
+               "VALUES (%s,%s,'running',%s,%s,%s,%s,%s)",
+               (rid, pid, body.stage, profile["name"], profile["model"], history.actor(request), db.now()))
     tasks.add_task(_execute_run, rid, pid, body.stage, profile["id"], body.scope)
     return {"id": rid, "status": "running"}
 
@@ -355,21 +363,27 @@ def _stories(pid: str, reqs: Optional[List[Dict[str, Any]]] = None) -> List[Dict
     return out
 
 
-def _next_seq(table: str, pid: str) -> int:
-    return db.one("SELECT coalesce(max(seq), -1) + 1 AS n FROM %s WHERE project_id=%%s" % table, (pid,))["n"]
+def _kind(table: str) -> str:
+    return "requirement" if table == "requirements" else "story"
 
 
-def _save_item(table: str, pid: str, iid: Optional[str], body: Dict[str, Any]) -> str:
+def _label(item: Dict[str, Any]) -> str:
+    return str(item.get("statement") or item.get("title") or "")[:160]
+
+
+def _save_item(table: str, pid: str, iid: Optional[str], body: Dict[str, Any], who: str) -> str:
     statuses = STATUSES if table == "requirements" else STORY_STATUSES
     fields = REQ_FIELDS if table == "requirements" else STORY_FIELDS
     current: Dict[str, Any] = {}
-    status = "draft"
+    old_status = status = "draft"
+    seq = None
     if iid:
         row = db.one("SELECT * FROM %s WHERE id=%%s AND project_id=%%s" % table, (iid, pid))
         if not row:
             raise HTTPException(404, "Item not found")
         current = dict(row["data"])
-        status = row["status"]
+        old_status = status = row["status"]
+        seq = row["seq"]
     status = body.get("status", status)
     if status not in statuses:
         raise HTTPException(400, "Invalid status")
@@ -384,26 +398,50 @@ def _save_item(table: str, pid: str, iid: Optional[str], body: Dict[str, Any]) -
         item = pipeline.normalize_story(merged)
         if item is None:
             raise HTTPException(400, "Title is required")
-    if iid:
-        db.execute("UPDATE %s SET data=%%s, status=%%s WHERE id=%%s" % table, (json.dumps(item), status, iid))
-        return iid
-    new = db.new_id()
-    if table == "requirements":
-        db.execute("INSERT INTO requirements (id, project_id, seq, status, data) VALUES (%s,%s,%s,%s,%s)",
-                   (new, pid, _next_seq(table, pid), status, json.dumps(item)))
-    else:
-        db.execute("INSERT INTO stories (id, project_id, run_id, seq, status, data) VALUES (%s,%s,'manual',%s,%s,%s)",
-                   (new, pid, _next_seq(table, pid), status, json.dumps(item)))
+    kind = _kind(table)
+    with db.conn() as c:
+        if iid:
+            changes = history.diff(dict(current, status=old_status), dict(item, status=status))
+            c.execute("UPDATE %s SET data=%%s, status=%%s WHERE id=%%s" % table, (json.dumps(item), status, iid))
+            if changes:
+                action = "status changed" if set(changes) == {"status"} else "edited"
+                history.record(c, pid, kind, iid, history.item_key(kind, seq), action, who, _label(item), changes)
+            return iid
+        new = db.new_id()
+        seq = c.execute("SELECT coalesce(max(seq), -1) + 1 AS n FROM %s WHERE project_id=%%s" % table, (pid,)).fetchone()["n"]
+        if table == "requirements":
+            c.execute("INSERT INTO requirements (id, project_id, seq, status, data) VALUES (%s,%s,%s,%s,%s)",
+                      (new, pid, seq, status, json.dumps(item)))
+        else:
+            c.execute("INSERT INTO stories (id, project_id, run_id, seq, status, data) VALUES (%s,%s,'manual',%s,%s,%s)",
+                      (new, pid, seq, status, json.dumps(item)))
+        history.record(c, pid, kind, new, history.item_key(kind, seq), "created", who, _label(item))
     return new
 
 
-def _bulk(table: str, pid: str, body: BulkIn) -> Dict[str, int]:
+def _bulk(table: str, pid: str, body: BulkIn, who: str) -> Dict[str, int]:
     statuses = STATUSES if table == "requirements" else STORY_STATUSES
     if body.status not in statuses:
         raise HTTPException(400, "Invalid status")
+    kind = _kind(table)
     with db.conn() as c:
-        cur = c.execute("UPDATE %s SET status=%%s WHERE project_id=%%s AND id = ANY(%%s)" % table, (body.status, pid, body.ids))
-        return {"updated": cur.rowcount}
+        rows = c.execute("SELECT id, seq, status, data FROM %s WHERE project_id=%%s AND id = ANY(%%s) FOR UPDATE" % table,
+                         (pid, body.ids)).fetchall()
+        changed = [r for r in rows if r["status"] != body.status]
+        c.execute("UPDATE %s SET status=%%s WHERE project_id=%%s AND id = ANY(%%s)" % table,
+                  (body.status, pid, [r["id"] for r in changed]))
+        for r in changed:
+            history.record(c, pid, kind, r["id"], history.item_key(kind, r["seq"]), "status changed", who,
+                           _label(r["data"]), {"status": {"from": r["status"], "to": body.status}})
+    return {"updated": len(changed)}
+
+
+def _delete_item(table: str, pid: str, iid: str, who: str) -> None:
+    kind = _kind(table)
+    with db.conn() as c:
+        row = c.execute("DELETE FROM %s WHERE id=%%s AND project_id=%%s RETURNING seq, data" % table, (iid, pid)).fetchone()
+        if row:
+            history.record(c, pid, kind, iid, history.item_key(kind, row["seq"]), "deleted", who, _label(row["data"]))
 
 
 @app.get("/api/projects/{pid}/requirements")
@@ -413,26 +451,26 @@ def list_requirements(pid: str):
 
 
 @app.post("/api/projects/{pid}/requirements", status_code=201)
-def create_requirement(pid: str, body: Dict[str, Any] = Body(...)):
+def create_requirement(pid: str, request: Request, body: Dict[str, Any] = Body(...)):
     _project(pid)
-    rid = _save_item("requirements", pid, None, body)
+    rid = _save_item("requirements", pid, None, body, history.actor(request))
     return next(r for r in _requirements(pid) if r["id"] == rid)
 
 
 @app.patch("/api/projects/{pid}/requirements/{rid}")
-def update_requirement(pid: str, rid: str, body: Dict[str, Any] = Body(...)):
-    _save_item("requirements", pid, rid, body)
+def update_requirement(pid: str, rid: str, request: Request, body: Dict[str, Any] = Body(...)):
+    _save_item("requirements", pid, rid, body, history.actor(request))
     return next(r for r in _requirements(pid) if r["id"] == rid)
 
 
 @app.delete("/api/projects/{pid}/requirements/{rid}", status_code=204)
-def delete_requirement(pid: str, rid: str):
-    db.execute("DELETE FROM requirements WHERE id=%s AND project_id=%s", (rid, pid))
+def delete_requirement(pid: str, rid: str, request: Request):
+    _delete_item("requirements", pid, rid, history.actor(request))
 
 
 @app.post("/api/projects/{pid}/requirements/bulk")
-def bulk_requirements(pid: str, body: BulkIn):
-    return _bulk("requirements", pid, body)
+def bulk_requirements(pid: str, body: BulkIn, request: Request):
+    return _bulk("requirements", pid, body, history.actor(request))
 
 
 # ---- stories -------------------------------------------------------------
@@ -444,26 +482,32 @@ def list_stories(pid: str):
 
 
 @app.post("/api/projects/{pid}/stories", status_code=201)
-def create_story(pid: str, body: Dict[str, Any] = Body(...)):
+def create_story(pid: str, request: Request, body: Dict[str, Any] = Body(...)):
     _project(pid)
-    sid = _save_item("stories", pid, None, body)
+    sid = _save_item("stories", pid, None, body, history.actor(request))
     return next(s for s in _stories(pid) if s["id"] == sid)
 
 
 @app.patch("/api/projects/{pid}/stories/{sid}")
-def update_story(pid: str, sid: str, body: Dict[str, Any] = Body(...)):
-    _save_item("stories", pid, sid, body)
+def update_story(pid: str, sid: str, request: Request, body: Dict[str, Any] = Body(...)):
+    _save_item("stories", pid, sid, body, history.actor(request))
     return next(s for s in _stories(pid) if s["id"] == sid)
 
 
 @app.delete("/api/projects/{pid}/stories/{sid}", status_code=204)
-def delete_story(pid: str, sid: str):
-    db.execute("DELETE FROM stories WHERE id=%s AND project_id=%s", (sid, pid))
+def delete_story(pid: str, sid: str, request: Request):
+    _delete_item("stories", pid, sid, history.actor(request))
 
 
 @app.post("/api/projects/{pid}/stories/bulk")
-def bulk_stories(pid: str, body: BulkIn):
-    return _bulk("stories", pid, body)
+def bulk_stories(pid: str, body: BulkIn, request: Request):
+    return _bulk("stories", pid, body, history.actor(request))
+
+
+@app.get("/api/projects/{pid}/history")
+def project_history(pid: str, item_id: str = "", limit: int = 100):
+    _project(pid)
+    return history.entries(pid, item_id, max(1, min(limit, 500)))
 
 
 # ---- traceability & export -----------------------------------------------

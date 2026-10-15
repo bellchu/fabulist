@@ -110,3 +110,28 @@ def test_basic_auth(monkeypatch, client):
     assert client.get("/healthz").status_code == 200
     assert client.get("/api/meta", auth=("u", "p")).status_code == 200
     assert client.get("/api/meta", auth=("u", "wrong")).status_code == 401
+
+
+def test_mutations_require_csrf_header(client):
+    assert client.post("/api/projects", json={"name": "x"}, headers={"X-Requested-With": ""}).status_code == 403
+    assert client.get("/api/projects", headers={"X-Requested-With": ""}).status_code == 200
+    assert client.post("/api/projects", json={"name": "ok", "platform": "generic"}).status_code == 201
+
+
+def test_change_history_is_recorded(client):
+    pid = client.post("/api/projects", json={"name": "Audit", "platform": "generic"}).json()["id"]
+    auth = {"Authorization": "Basic " + __import__("base64").b64encode(b"analyst1:pw").decode()}
+    r = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall export invoices to CSV."}, headers=auth).json()
+    client.patch("/api/projects/%s/requirements/%s" % (pid, r["id"]), json={"statement": "The system shall export invoices to CSV and PDF."}, headers=auth)
+    client.patch("/api/projects/%s/requirements/%s" % (pid, r["id"]), json={"statement": "The system shall export invoices to CSV and PDF."}, headers=auth)  # no-op
+    client.post("/api/projects/%s/requirements/bulk" % pid, json={"ids": [r["id"]], "status": "approved"}, headers=auth)
+    client.post("/api/projects/%s/requirements/bulk" % pid, json={"ids": [r["id"]], "status": "approved"}, headers=auth)  # no-op
+    h = client.get("/api/projects/%s/history" % pid, params={"item_id": r["id"]}).json()
+    assert [e["action"] for e in h] == ["status changed", "edited", "created"]
+    assert all(e["actor"] == "analyst1" and e["item_key"] == "REQ-001" for e in h)
+    assert h[0]["changes"] == {"status": {"from": "draft", "to": "approved"}}
+    assert h[1]["changes"]["statement"]["to"].endswith("CSV and PDF.")
+    assert client.delete("/api/projects/%s/requirements/%s" % (pid, r["id"]), headers=auth).status_code == 204
+    latest = client.get("/api/projects/%s/history" % pid).json()[0]
+    assert latest["action"] == "deleted" and latest["summary"].startswith("The system shall export")
+    assert client.post("/api/projects/%s/requirements/bulk" % pid, json={"ids": [r["id"]], "status": "approved"}).json() == {"updated": 0}

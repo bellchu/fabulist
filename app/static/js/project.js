@@ -1,7 +1,7 @@
 // Project workspace: Overview, Sources, Requirements, Stories, Traceability, Export.
 import {
   h, mount, icon, api, guard, toast, modal, confirmBox, drawer, badge, statusTone, typeTone, scorePill, meter, issueIcon,
-  issueList, empty, timeAgo, fmt, duration, field, select, linesInput, readLines, tagsInput, segmented, download,
+  issueList, empty, timeAgo, fmt, duration, field, select, linesInput, readLines, tagsInput, segmented, download, historyList,
 } from "./core.js";
 import { state, setCrumbs } from "./main.js";
 
@@ -151,7 +151,7 @@ function schedulePoll() {
 
 async function viewOverview(body) {
   const p = ctx.project;
-  const runs = await api.get(base() + "/runs?limit=8");
+  const [runs, changes] = await Promise.all([api.get(base() + "/runs?limit=8"), api.get(base() + "/history?limit=8")]);
   const stat = (label, value, foot, pct) => h("div", { class: "stat" }, h("div", { class: "label" }, label), h("div", { class: "value" }, value),
     foot ? h("div", { class: "foot" }, foot) : null, pct !== undefined ? meter(pct) : null);
   const next = !p.documents ? ["Upload BRDs", "Start by adding the business requirements documents for this application.", "sources"]
@@ -185,10 +185,13 @@ async function viewOverview(body) {
         runs.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
           h("thead", {}, h("tr", {}, ["Stage", "Provider", "Status", "Items", "When"].map((x) => h("th", {}, x)))),
           h("tbody", {}, runs.map((r) => h("tr", {},
-            h("td", {}, r.stage), h("td", { class: "small" }, r.provider + (r.model ? " · " + r.model : "")),
+            h("td", {}, r.stage, r.actor ? h("div", { class: "muted small" }, "by " + r.actor) : null), h("td", { class: "small" }, r.provider + (r.model ? " · " + r.model : "")),
             h("td", {}, badge(r.status, statusTone[r.status])), h("td", {}, r.status === "done" ? r.item_count : "–"),
             h("td", { class: "muted small nowrap" }, timeAgo(r.created)))))))
-          : h("div", { class: "card-body muted" }, "No runs yet."))));
+          : h("div", { class: "card-body muted" }, "No runs yet."))),
+    h("div", { class: "card", style: { marginTop: "16px" } }, h("div", { class: "card-head" }, h("h3", {}, "Recent changes"),
+      h("span", { class: "muted small" }, "Audit trail of manual edits and reviews")),
+      h("div", { class: "card-body" }, historyList(changes, { showItem: true }))));
 }
 
 // ---- sources ------------------------------------------------------------
@@ -257,6 +260,16 @@ async function viewSources(body) {
         : empty({ iconName: "file", title: "No BRDs yet", text: "Upload or paste at least one business requirements document." })),
     h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Search BRDs"), h("span", { class: "muted small" }, "Semantic search over indexed passages")),
       h("div", { class: "card-body" }, h("div", { class: "row" }, q, h("button", { class: "btn", onclick: search }, icon("search"), "Search")), results)));
+}
+
+function historySection(itemId) {
+  const box = h("div", { class: "muted small" }, "Loading…");
+  const details = h("details", { class: "card card-body" }, h("summary", { style: { cursor: "pointer", fontWeight: 600 } }, "Change history"), box);
+  details.addEventListener("toggle", guard(async () => {
+    if (!details.open) return;
+    box.replaceChildren(historyList(await api.get(base() + "/history?item_id=" + encodeURIComponent(itemId))));
+  }), { once: true });
+  return details;
 }
 
 // ---- requirements -------------------------------------------------------
@@ -356,7 +369,8 @@ function reqDrawer(r) {
       field("Actors", actors.el),
       field("Product classes", scope.el, "Leave empty if it applies to all products."),
       field("Compliance", compliance.el),
-      field("Rationale", rationale), field("Notes", notes)),
+      field("Rationale", rationale), field("Notes", notes),
+      isNew ? null : historySection(r.id)),
     footer: [h("button", { class: "btn btn-primary", onclick: save }, "Save"), h("span", { class: "grow" }),
       isNew ? null : h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete")],
   });
@@ -485,7 +499,8 @@ function storyDrawer(s) {
       linked.length ? h("div", { class: "callout small" }, h("div", { class: "stack", style: { gap: "4px" } },
         linked.map((r) => h("div", {}, h("b", { class: "mono" }, r.key + " "), r.statement)))) : null,
       field("Labels", labels.el), field("Product classes", scope.el), field("Compliance", compliance.el),
-      field("Open questions", questions, "Stories with open questions don't meet the Definition of Ready."), field("Notes", notes)),
+      field("Open questions", questions, "Stories with open questions don't meet the Definition of Ready."), field("Notes", notes),
+      isNew ? null : historySection(s.id)),
     footer: [h("button", { class: "btn btn-primary", onclick: save }, "Save"), h("span", { class: "grow" }),
       isNew ? null : h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete")],
   });

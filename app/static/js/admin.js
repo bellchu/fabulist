@@ -183,11 +183,12 @@ async function viewActivity(content) {
   const runs = await api.get("/api/admin/runs?limit=100");
   mount(content, head("Activity", "Every extraction and generation run across projects."),
     runs.length ? h("div", { class: "card table-wrap" }, h("table", { class: "table" },
-      h("thead", {}, h("tr", {}, ["When", "Project", "Stage", "Provider", "Status", "Items", "Tokens", "Duration"].map((x) => h("th", {}, x)))),
+      h("thead", {}, h("tr", {}, ["When", "Project", "Stage", "By", "Provider", "Status", "Items", "Tokens", "Duration"].map((x) => h("th", {}, x)))),
       h("tbody", {}, runs.map((r) => h("tr", {},
         h("td", { class: "small nowrap muted" }, timeAgo(r.created)),
         h("td", {}, r.project_name ? h("a", { href: "#/p/" + r.project_id }, r.project_name) : h("span", { class: "muted" }, "deleted")),
         h("td", {}, r.stage),
+        h("td", { class: "small" }, r.actor || "–"),
         h("td", { class: "small" }, r.provider, r.model ? h("div", { class: "muted mono" }, r.model) : null),
         h("td", {}, badge(r.status, statusTone[r.status]), r.error ? h("div", { class: "small", style: { color: "var(--red)", maxWidth: "320px" } }, r.error) : null),
         h("td", {}, r.status === "done" ? r.item_count : "–"),
