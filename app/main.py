@@ -3,28 +3,35 @@ import json
 import logging
 import re
 import secrets
+import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
 from fastapi import BackgroundTasks, Body, FastAPI, File, HTTPException, Request, Response, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import config, db, embeddings, exporters, parsing, pipeline, taxonomy
+from . import admin, config, db, embeddings, exporters, parsing, pipeline, quality, settings, taxonomy
 from .profiles import PLATFORMS
 
 log = logging.getLogger("fabulist")
+STATUSES = {"draft", "approved", "excluded"}
 STORY_STATUSES = {"draft", "approved", "rejected"}
+STAGES = {"requirements", "stories"}
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     db.init()
+    settings.seed()
+    # A restart kills in-process runs; don't leave them "running" forever.
+    db.execute("UPDATE runs SET status='failed', error='Interrupted by server restart' WHERE status='running'")
     yield
 
 
 app = FastAPI(title="Fabulist", lifespan=lifespan)
+app.include_router(admin.router)
 
 
 @app.middleware("http")
@@ -40,7 +47,16 @@ async def basic_auth(request: Request, call_next):
                 ok = False
         if not ok:
             return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="Fabulist"'})
-    return await call_next(request)
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        # Revalidate via ETag so a deploy is picked up without a hard refresh.
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@app.exception_handler(settings.SettingsError)
+async def settings_error(_request: Request, exc: settings.SettingsError):
+    return JSONResponse({"detail": str(exc)}, status_code=400)
 
 
 @app.get("/healthz")
@@ -49,20 +65,33 @@ def healthz() -> Dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/api/config")
-def get_config() -> Dict[str, Any]:
+@app.get("/api/meta")
+def meta() -> Dict[str, Any]:
     return {
-        "providers": config.ALLOWED_PROVIDERS,
-        "default_provider": config.LLM_PROVIDER,
         "platforms": {k: v["label"] for k, v in PLATFORMS.items()},
-        "formats": list(exporters.EXPORTERS),
-        "product_classes": taxonomy.PRODUCT_CLASSES,
+        "formats": [{"id": k, "ext": v[1], "label": v[2], "description": v[3]} for k, v in exporters.EXPORTERS.items()],
+        "requirement_types": pipeline.REQ_TYPES,
+        "priorities": pipeline.PRIORITIES,
+        "points": pipeline.POINTS,
+        "product_classes": [c["name"] for c in taxonomy.PRODUCT_CLASSES],
+        "compliance_tags": list(taxonomy.COMPLIANCE_KEYWORDS),
+        "providers": [{"id": p["id"], "name": p["name"], "kind": p["kind"], "model": p["model"], "is_default": p["is_default"]}
+                      for p in settings.list_providers()],
     }
 
+
+# ---- models --------------------------------------------------------------
 
 class ProjectIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     platform: str = "generic"
+    description: str = Field(default="", max_length=2000)
+
+
+class ProjectPatch(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    platform: Optional[str] = None
+    description: Optional[str] = Field(default=None, max_length=2000)
 
 
 class TextDocIn(BaseModel):
@@ -71,14 +100,22 @@ class TextDocIn(BaseModel):
 
 
 class RunIn(BaseModel):
-    provider: Optional[str] = None
-    model: Optional[str] = None
+    stage: str
+    provider_id: Optional[str] = None
+    scope: str = "all"  # stories stage: "approved" or "all" (non-excluded)
 
 
 class SearchIn(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
-    k: int = Field(default=5, ge=1, le=20)
+    k: int = Field(default=6, ge=1, le=20)
 
+
+class BulkIn(BaseModel):
+    ids: List[str] = Field(min_length=1, max_length=2000)
+    status: str
+
+
+# ---- projects ------------------------------------------------------------
 
 def _project(pid: str) -> Dict[str, Any]:
     p = db.one("SELECT * FROM projects WHERE id = %s", (pid,))
@@ -87,19 +124,62 @@ def _project(pid: str) -> Dict[str, Any]:
     return p
 
 
+PROJECT_COUNTS = """
+SELECT p.*,
+  (SELECT count(*) FROM documents d WHERE d.project_id = p.id) AS documents,
+  (SELECT count(*) FROM requirements r WHERE r.project_id = p.id AND r.status <> 'excluded') AS requirements,
+  (SELECT count(*) FROM requirements r WHERE r.project_id = p.id AND r.status = 'approved') AS requirements_approved,
+  (SELECT count(*) FROM stories s WHERE s.project_id = p.id AND s.status <> 'rejected') AS stories,
+  (SELECT count(*) FROM stories s WHERE s.project_id = p.id AND s.status = 'approved') AS stories_approved
+FROM projects p
+"""
+
+
 @app.post("/api/projects", status_code=201)
 def create_project(body: ProjectIn):
     if body.platform not in PLATFORMS:
         raise HTTPException(400, "Unknown platform")
     pid = db.new_id()
-    db.execute("INSERT INTO projects (id, name, platform, created) VALUES (%s,%s,%s,%s)",
-               (pid, body.name.strip(), body.platform, db.now()))
+    db.execute("INSERT INTO projects (id, name, platform, description, created) VALUES (%s,%s,%s,%s,%s)",
+               (pid, body.name.strip(), body.platform, body.description.strip(), db.now()))
     return _project(pid)
 
 
 @app.get("/api/projects")
 def list_projects():
-    return db.rows("SELECT * FROM projects ORDER BY created DESC")
+    return db.rows(PROJECT_COUNTS + " ORDER BY p.created DESC")
+
+
+@app.get("/api/projects/{pid}")
+def get_project(pid: str):
+    p = db.one(PROJECT_COUNTS + " WHERE p.id = %s", (pid,))
+    if not p:
+        raise HTTPException(404, "Project not found")
+    reqs = _requirements(pid)
+    stories = _stories(pid, reqs)
+    active = [r for r in reqs if r["status"] != "excluded"]
+    live = [s for s in stories if s["status"] != "rejected"]
+    covered = {k for s in live for k in s["requirement_ids"]}
+    p["coverage"] = round(100 * sum(1 for r in active if r["key"] in covered) / len(active)) if active else 0
+    p["requirement_quality"] = round(sum(r["quality_score"] for r in active) / len(active)) if active else 0
+    p["story_quality"] = round(sum(s["quality_score"] for s in live) / len(live)) if live else 0
+    p["stories_ready"] = sum(1 for s in live if s["ready"])
+    p["requirements_flagged"] = sum(1 for r in active if any(i["severity"] != "info" for i in r["issues"]))
+    p["requirement_types"] = {t: sum(1 for r in active if r["type"] == t) for t in pipeline.REQ_TYPES}
+    p["runs"] = {st: db.one("SELECT * FROM runs WHERE project_id=%s AND stage=%s ORDER BY created DESC LIMIT 1", (pid, st))
+                 for st in STAGES}
+    return p
+
+
+@app.patch("/api/projects/{pid}")
+def update_project(pid: str, body: ProjectPatch):
+    p = _project(pid)
+    if body.platform is not None and body.platform not in PLATFORMS:
+        raise HTTPException(400, "Unknown platform")
+    db.execute("UPDATE projects SET name=%s, platform=%s, description=%s WHERE id=%s",
+               ((body.name or p["name"]).strip(), body.platform or p["platform"],
+                (p["description"] if body.description is None else body.description).strip(), pid))
+    return _project(pid)
 
 
 @app.delete("/api/projects/{pid}", status_code=204)
@@ -108,6 +188,8 @@ def delete_project(pid: str):
     db.execute("DELETE FROM projects WHERE id = %s", (pid,))
 
 
+# ---- documents -----------------------------------------------------------
+
 def _add_document(pid: str, filename: str, text: str) -> Dict[str, Any]:
     did = db.new_id()
     db.execute("INSERT INTO documents (id, project_id, filename, text, created) VALUES (%s,%s,%s,%s,%s)",
@@ -115,7 +197,7 @@ def _add_document(pid: str, filename: str, text: str) -> Dict[str, Any]:
     indexed = 0
     try:
         indexed = embeddings.index_document(pid, did, text)
-    except Exception:  # RAG degrades; generation still works without retrieval context
+    except Exception:  # retrieval degrades; generation still works without it
         log.exception("indexing failed for document %s", did)
     return {"id": did, "filename": filename, "chars": len(text), "indexed_chunks": indexed}
 
@@ -143,8 +225,17 @@ def add_text_document(pid: str, body: TextDocIn):
 @app.get("/api/projects/{pid}/documents")
 def list_documents(pid: str):
     _project(pid)
-    return db.rows("SELECT id, filename, length(text) AS chars, created FROM documents "
-                   "WHERE project_id = %s ORDER BY created", (pid,))
+    return db.rows("SELECT d.id, d.filename, length(d.text) AS chars, d.created, "
+                   "(SELECT count(*) FROM chunks c WHERE c.document_id = d.id) AS chunks "
+                   "FROM documents d WHERE d.project_id = %s ORDER BY d.created", (pid,))
+
+
+@app.get("/api/projects/{pid}/documents/{did}")
+def get_document(pid: str, did: str):
+    d = db.one("SELECT id, filename, text, created FROM documents WHERE id = %s AND project_id = %s", (did, pid))
+    if not d:
+        raise HTTPException(404, "Document not found")
+    return d
 
 
 @app.delete("/api/projects/{pid}/documents/{did}", status_code=204)
@@ -159,55 +250,192 @@ def search_documents(pid: str, body: SearchIn):
     return embeddings.search(pid, body.query, body.k)
 
 
-def _run_generation(run_id: str, pid: str, platform: str, provider: str, model: str) -> None:
+# ---- runs ----------------------------------------------------------------
+
+def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str) -> None:
+    started = time.monotonic()
+    usage = {"in": 0, "out": 0}
+
     def progress(msg: str) -> None:
-        db.execute("UPDATE runs SET progress = %s WHERE id = %s", (msg, run_id))
+        db.execute("UPDATE runs SET progress=%s, tokens_in=%s, tokens_out=%s WHERE id=%s",
+                   (msg[:200], usage["in"], usage["out"], run_id))
 
     try:
-        docs = db.rows("SELECT id, filename, text FROM documents WHERE project_id = %s ORDER BY created", (pid,))
-        stories = pipeline.generate(docs, pid, platform, provider, model, progress)
+        project = _project(pid)
+        profile = settings.get_provider(provider_id)
+        opts = settings.get_settings()
+        if stage == "requirements":
+            docs = db.rows("SELECT id, filename, text FROM documents WHERE project_id=%s ORDER BY created", (pid,))
+            items = pipeline.extract_requirements(docs, project["platform"], profile, opts, progress, usage)
+        else:
+            reqs = [r for r in _requirements(pid)
+                    if r["status"] == "approved" or (scope == "all" and r["status"] == "draft")]
+            if not reqs:
+                raise ValueError("No requirements in scope. Extract and review requirements first.")
+            items = pipeline.generate_stories(reqs, pid, project["platform"], profile, opts, progress, usage)
+        if stage == "requirements":
+            sql = "INSERT INTO requirements (id, project_id, seq, data) VALUES (%s,%s,%s,%s)"
+            params = [(db.new_id(), pid, i, json.dumps(x)) for i, x in enumerate(items)]
+        else:
+            sql = "INSERT INTO stories (id, project_id, run_id, seq, data) VALUES (%s,%s,%s,%s,%s)"
+            params = [(db.new_id(), pid, run_id, i, json.dumps(x)) for i, x in enumerate(items)]
         with db.conn() as c:
+            # Stories link to requirement keys, so re-extracting requirements resets the backlog too.
             c.execute("DELETE FROM stories WHERE project_id = %s", (pid,))
+            if stage == "requirements":
+                c.execute("DELETE FROM requirements WHERE project_id = %s", (pid,))
             with c.cursor() as cur:
-                cur.executemany(
-                    "INSERT INTO stories (id, project_id, run_id, seq, data) VALUES (%s,%s,%s,%s,%s)",
-                    [(db.new_id(), pid, run_id, i, json.dumps(s)) for i, s in enumerate(stories)])
-            c.execute("UPDATE runs SET status='done', story_count=%s, progress='' WHERE id=%s",
-                      (len(stories), run_id))
+                cur.executemany(sql, params)
+            c.execute("UPDATE runs SET status='done', item_count=%s, story_count=%s, progress='', tokens_in=%s, "
+                      "tokens_out=%s, duration_ms=%s WHERE id=%s",
+                      (len(items), len(items), usage["in"], usage["out"], int((time.monotonic() - started) * 1000), run_id))
     except Exception as exc:
         log.exception("run %s failed", run_id)
-        msg = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__
-        db.execute("UPDATE runs SET status='failed', error=%s, progress='' WHERE id=%s", (msg[:500], run_id))
+        msg = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else "Internal error (%s)" % type(exc).__name__
+        db.execute("UPDATE runs SET status='failed', error=%s, progress='', tokens_in=%s, tokens_out=%s, duration_ms=%s "
+                   "WHERE id=%s", (msg[:500], usage["in"], usage["out"], int((time.monotonic() - started) * 1000), run_id))
 
 
 @app.post("/api/projects/{pid}/runs", status_code=202)
-def start_run(pid: str, tasks: BackgroundTasks, body: RunIn = Body(default_factory=RunIn)):
-    project = _project(pid)
-    provider = (body.provider or config.LLM_PROVIDER).lower()
-    if provider not in config.ALLOWED_PROVIDERS:
-        raise HTTPException(400, "Provider not allowed")
-    if not db.one("SELECT 1 AS x FROM documents WHERE project_id = %s LIMIT 1", (pid,)):
+def start_run(pid: str, body: RunIn, tasks: BackgroundTasks):
+    _project(pid)
+    if body.stage not in STAGES:
+        raise HTTPException(400, "Unknown stage")
+    if body.scope not in ("approved", "all"):
+        raise HTTPException(400, "Unknown scope")
+    profile = settings.get_provider(body.provider_id) if body.provider_id else settings.default_provider()
+    if body.stage == "requirements" and not db.one("SELECT 1 AS x FROM documents WHERE project_id=%s LIMIT 1", (pid,)):
         raise HTTPException(400, "Add at least one BRD document first")
-    if db.one("SELECT 1 AS x FROM runs WHERE project_id = %s AND status = 'running'", (pid,)):
-        raise HTTPException(409, "A run is already in progress")
-    model = (body.model or config.LLM_MODEL or "").strip()[:100]
+    if db.one("SELECT 1 AS x FROM runs WHERE project_id=%s AND status='running'", (pid,)):
+        raise HTTPException(409, "A run is already in progress for this project")
     rid = db.new_id()
-    db.execute("INSERT INTO runs (id, project_id, status, provider, model, created) VALUES (%s,%s,'running',%s,%s,%s)",
-               (rid, pid, provider, model, db.now()))
-    tasks.add_task(_run_generation, rid, pid, project["platform"], provider, model)
+    db.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, created) "
+               "VALUES (%s,%s,'running',%s,%s,%s,%s)", (rid, pid, body.stage, profile["name"], profile["model"], db.now()))
+    tasks.add_task(_execute_run, rid, pid, body.stage, profile["id"], body.scope)
     return {"id": rid, "status": "running"}
 
 
-@app.get("/api/projects/{pid}/runs/latest")
-def latest_run(pid: str):
+@app.get("/api/projects/{pid}/runs")
+def list_runs(pid: str, limit: int = 20):
     _project(pid)
-    return db.one("SELECT * FROM runs WHERE project_id = %s ORDER BY created DESC, id LIMIT 1", (pid,)) or {}
+    return db.rows("SELECT * FROM runs WHERE project_id=%s ORDER BY created DESC, id LIMIT %s", (pid, min(limit, 100)))
 
 
-def _stories(pid: str, include_rejected: bool = True) -> List[Dict[str, Any]]:
-    sql = "SELECT * FROM stories WHERE project_id = %s" + ("" if include_rejected else " AND status <> 'rejected'")
-    return [db.story_row(r) for r in db.rows(sql + " ORDER BY seq", (pid,))]
+# ---- requirements --------------------------------------------------------
 
+REQ_FIELDS = {"statement", "type", "actors", "source_id", "rationale", "epic", "section", "source_ref",
+              "product_scope", "compliance_tags", "notes"}
+STORY_FIELDS = {"epic", "feature", "title", "persona", "narrative", "acceptance_criteria", "priority", "story_points",
+                "labels", "requirement_ids", "product_scope", "variant_criteria", "compliance_tags", "open_questions", "notes"}
+
+
+def _requirements(pid: str) -> List[Dict[str, Any]]:
+    out = []
+    for r in db.rows("SELECT * FROM requirements WHERE project_id=%s ORDER BY seq", (pid,)):
+        item = db.item_row(r, "REQ")
+        item["issues"] = quality.requirement_issues(item)
+        item["quality_score"] = quality.score(item["issues"])
+        out.append(item)
+    return out
+
+
+def _stories(pid: str, reqs: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    reqs = _requirements(pid) if reqs is None else reqs
+    valid = {r["key"] for r in reqs if r["status"] != "excluded"}
+    out = []
+    for r in db.rows("SELECT * FROM stories WHERE project_id=%s ORDER BY seq", (pid,)):
+        item = db.item_row(r, "US")
+        item.setdefault("feature", "General")
+        item.setdefault("requirement_ids", [])
+        item.setdefault("story_points", None)
+        item["issues"] = quality.story_issues(item, valid)
+        item["quality_score"] = quality.score(item["issues"])
+        item["ready"] = quality.is_ready(item["issues"])
+        out.append(item)
+    return out
+
+
+def _next_seq(table: str, pid: str) -> int:
+    return db.one("SELECT coalesce(max(seq), -1) + 1 AS n FROM %s WHERE project_id=%%s" % table, (pid,))["n"]
+
+
+def _save_item(table: str, pid: str, iid: Optional[str], body: Dict[str, Any]) -> str:
+    statuses = STATUSES if table == "requirements" else STORY_STATUSES
+    fields = REQ_FIELDS if table == "requirements" else STORY_FIELDS
+    current: Dict[str, Any] = {}
+    status = "draft"
+    if iid:
+        row = db.one("SELECT * FROM %s WHERE id=%%s AND project_id=%%s" % table, (iid, pid))
+        if not row:
+            raise HTTPException(404, "Item not found")
+        current = dict(row["data"])
+        status = row["status"]
+    status = body.get("status", status)
+    if status not in statuses:
+        raise HTTPException(400, "Invalid status")
+    merged = dict(current)
+    merged.update({k: v for k, v in body.items() if k in fields})
+    if table == "requirements":
+        item = pipeline.normalize_requirement(merged, {"epic": merged.get("epic", ""), "heading": merged.get("section", "")},
+                                              merged.get("source_ref", "Manual"))
+        if item is None:
+            raise HTTPException(400, "Statement is required (min 8 characters)")
+    else:
+        item = pipeline.normalize_story(merged)
+        if item is None:
+            raise HTTPException(400, "Title is required")
+    if iid:
+        db.execute("UPDATE %s SET data=%%s, status=%%s WHERE id=%%s" % table, (json.dumps(item), status, iid))
+        return iid
+    new = db.new_id()
+    if table == "requirements":
+        db.execute("INSERT INTO requirements (id, project_id, seq, status, data) VALUES (%s,%s,%s,%s,%s)",
+                   (new, pid, _next_seq(table, pid), status, json.dumps(item)))
+    else:
+        db.execute("INSERT INTO stories (id, project_id, run_id, seq, status, data) VALUES (%s,%s,'manual',%s,%s,%s)",
+                   (new, pid, _next_seq(table, pid), status, json.dumps(item)))
+    return new
+
+
+def _bulk(table: str, pid: str, body: BulkIn) -> Dict[str, int]:
+    statuses = STATUSES if table == "requirements" else STORY_STATUSES
+    if body.status not in statuses:
+        raise HTTPException(400, "Invalid status")
+    with db.conn() as c:
+        cur = c.execute("UPDATE %s SET status=%%s WHERE project_id=%%s AND id = ANY(%%s)" % table, (body.status, pid, body.ids))
+        return {"updated": cur.rowcount}
+
+
+@app.get("/api/projects/{pid}/requirements")
+def list_requirements(pid: str):
+    _project(pid)
+    return _requirements(pid)
+
+
+@app.post("/api/projects/{pid}/requirements", status_code=201)
+def create_requirement(pid: str, body: Dict[str, Any] = Body(...)):
+    _project(pid)
+    rid = _save_item("requirements", pid, None, body)
+    return next(r for r in _requirements(pid) if r["id"] == rid)
+
+
+@app.patch("/api/projects/{pid}/requirements/{rid}")
+def update_requirement(pid: str, rid: str, body: Dict[str, Any] = Body(...)):
+    _save_item("requirements", pid, rid, body)
+    return next(r for r in _requirements(pid) if r["id"] == rid)
+
+
+@app.delete("/api/projects/{pid}/requirements/{rid}", status_code=204)
+def delete_requirement(pid: str, rid: str):
+    db.execute("DELETE FROM requirements WHERE id=%s AND project_id=%s", (rid, pid))
+
+
+@app.post("/api/projects/{pid}/requirements/bulk")
+def bulk_requirements(pid: str, body: BulkIn):
+    return _bulk("requirements", pid, body)
+
+
+# ---- stories -------------------------------------------------------------
 
 @app.get("/api/projects/{pid}/stories")
 def list_stories(pid: str):
@@ -215,39 +443,72 @@ def list_stories(pid: str):
     return _stories(pid)
 
 
+@app.post("/api/projects/{pid}/stories", status_code=201)
+def create_story(pid: str, body: Dict[str, Any] = Body(...)):
+    _project(pid)
+    sid = _save_item("stories", pid, None, body)
+    return next(s for s in _stories(pid) if s["id"] == sid)
+
+
 @app.patch("/api/projects/{pid}/stories/{sid}")
 def update_story(pid: str, sid: str, body: Dict[str, Any] = Body(...)):
-    row = db.one("SELECT * FROM stories WHERE id = %s AND project_id = %s", (sid, pid))
-    if not row:
-        raise HTTPException(404, "Story not found")
-    current = db.story_row(row)
-    status = body.get("status", current["status"])
-    if status not in STORY_STATUSES:
-        raise HTTPException(400, "Invalid status")
-    merged = {k: v for k, v in current.items() if k not in ("id", "project_id", "status", "seq")}
-    merged.update({k: v for k, v in body.items() if k in merged})
-    story = pipeline.normalize_story(merged)
-    if not story:
-        raise HTTPException(400, "Title is required")
-    db.execute("UPDATE stories SET data = %s, status = %s WHERE id = %s", (json.dumps(story), status, sid))
-    story.update({"id": sid, "project_id": pid, "status": status, "seq": current["seq"]})
-    return story
+    _save_item("stories", pid, sid, body)
+    return next(s for s in _stories(pid) if s["id"] == sid)
+
+
+@app.delete("/api/projects/{pid}/stories/{sid}", status_code=204)
+def delete_story(pid: str, sid: str):
+    db.execute("DELETE FROM stories WHERE id=%s AND project_id=%s", (sid, pid))
+
+
+@app.post("/api/projects/{pid}/stories/bulk")
+def bulk_stories(pid: str, body: BulkIn):
+    return _bulk("stories", pid, body)
+
+
+# ---- traceability & export -----------------------------------------------
+
+@app.get("/api/projects/{pid}/traceability")
+def traceability(pid: str):
+    _project(pid)
+    reqs = [r for r in _requirements(pid) if r["status"] != "excluded"]
+    stories = [s for s in _stories(pid, reqs) if s["status"] != "rejected"]
+    by_req: Dict[str, List[Dict[str, Any]]] = {}
+    for s in stories:
+        for k in s["requirement_ids"]:
+            by_req.setdefault(k, []).append({"key": s["key"], "id": s["id"], "title": s["title"], "status": s["status"]})
+    rows = [{"key": r["key"], "id": r["id"], "type": r["type"], "statement": r["statement"], "section": r["section"],
+             "status": r["status"], "stories": by_req.get(r["key"], [])} for r in reqs]
+    orphans = [{"key": s["key"], "id": s["id"], "title": s["title"]} for s in stories if not s["requirement_ids"]]
+    covered = sum(1 for r in rows if r["stories"])
+    return {"rows": rows, "orphans": orphans, "covered": covered, "total": len(rows),
+            "coverage": round(100 * covered / len(rows)) if rows else 0}
 
 
 @app.get("/api/projects/{pid}/export")
-def export(pid: str, format: str = "csv", include_rejected: bool = False):
+def export(pid: str, format: str = "xlsx", scope: str = "approved-or-all"):
     project = _project(pid)
     entry = exporters.EXPORTERS.get(format)
     if not entry:
         raise HTTPException(400, "Unknown format")
-    fn, ext = entry
-    stories = _stories(pid, include_rejected)
-    if not stories:
-        raise HTTPException(404, "No stories to export")
-    payload, mime = fn(stories)
-    slug = re.sub(r"[^a-z0-9]+", "-", project["name"].lower()).strip("-") or "stories"
+    reqs = [r for r in _requirements(pid) if r["status"] != "excluded"]
+    stories = [s for s in _stories(pid, reqs) if s["status"] != "rejected"]
+    if scope == "approved":
+        stories = [s for s in stories if s["status"] == "approved"]
+        reqs = [r for r in reqs if r["status"] == "approved"]
+    if not stories and not reqs:
+        raise HTTPException(404, "Nothing to export yet")
+    for item in stories + reqs:
+        item.pop("issues", None)
+    payload, mime = entry[0](stories, reqs)
+    slug = re.sub(r"[^a-z0-9]+", "-", project["name"].lower()).strip("-") or "backlog"
     return Response(payload, media_type=mime,
-                    headers={"Content-Disposition": 'attachment; filename="%s-%s.%s"' % (slug, format, ext)})
+                    headers={"Content-Disposition": 'attachment; filename="%s-%s.%s"' % (slug, format, entry[1])})
 
 
-app.mount("/", StaticFiles(directory="app/static", html=True), name="static")
+@app.get("/", include_in_schema=False)
+def index():
+    return FileResponse("app/static/index.html", headers={"Cache-Control": "no-cache"})
+
+
+app.mount("/static", StaticFiles(directory="app/static"), name="static")

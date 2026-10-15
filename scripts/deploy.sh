@@ -27,8 +27,13 @@ fi
 if ! kubectl -n "$NS" get secret fabulist-app >/dev/null 2>&1; then
   kubectl -n "$NS" create secret generic fabulist-app \
     --from-literal=APP_BASIC_USER=admin \
-    --from-literal=APP_BASIC_PASSWORD="$(openssl rand -hex 16)" \
-    --from-literal=LLM_PROVIDER=mock >/dev/null
+    --from-literal=APP_BASIC_PASSWORD="$(openssl rand -hex 16)" >/dev/null
+fi
+# Encrypts AI provider API keys saved from the admin dashboard. Never rotate casually:
+# keys stored with the old value can no longer be decrypted.
+if [ -z "$(kubectl -n "$NS" get secret fabulist-app -o jsonpath='{.data.SETTINGS_ENCRYPTION_KEY}')" ]; then
+  kubectl -n "$NS" patch secret fabulist-app --type merge \
+    -p "{\"stringData\":{\"SETTINGS_ENCRYPTION_KEY\":\"$(openssl rand -hex 32)\"}}" >/dev/null
 fi
 kubectl apply -f deploy/k8s/postgres.yaml
 kubectl -n "$NS" rollout status statefulset/postgres --timeout=240s

@@ -1,35 +1,62 @@
-"""BRD text -> user stories: chunk, retrieve related context (RAG), generate, validate."""
+"""Two-stage generation: BRD text -> atomic requirements -> user stories.
+
+Stage 1 extracts requirements with stable IDs for analyst review. Stage 2 turns
+reviewed requirements into epics/features/stories linked back to those IDs.
+"""
 import json
 import re
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import config, embeddings, llm, taxonomy
+from . import embeddings, llm, taxonomy
 from .profiles import PLATFORMS
 
-PRIORITIES = {"high", "medium", "low"}
-_REQ = re.compile(r"\b(shall|must|should|needs? to|required? to|will be able|support|allow|enable|provide)\b", re.I)
+REQ_TYPES = ["business", "functional", "non-functional", "constraint", "rule"]
+PRIORITIES = ["High", "Medium", "Low"]
+POINTS = [1, 2, 3, 5, 8, 13]
+_REQ = re.compile(r"\b(shall|must|should|needs? to|requires?|required to|will be able|support|allow|enable|provide)\b", re.I)
 _ACTOR = [
     ("sales representative", ["sales rep", "sales representative", "account manager"]),
-    ("customer", ["customer", "pharmacy", "hospital", "provider", "buyer"]),
-    ("warehouse operator", ["warehouse", "picker", "receiving", "shipping"]),
-    ("finance analyst", ["finance", "accounting", "billing", "invoice", "chargeback"]),
+    ("customer", ["customer", "pharmacy", "hospital", "clinic", "buyer"]),
+    ("warehouse operator", ["warehouse", "picker", "receiving", "shipping", "distribution center"]),
+    ("finance analyst", ["finance", "accounting", "billing", "invoice", "chargeback", "rebate"]),
     ("compliance officer", ["compliance", "regulatory", "audit", "quality"]),
     ("administrator", ["admin", "administrator", "configure"]),
-    ("customer service agent", ["service agent", "support", "case"]),
+    ("customer service agent", ["service agent", "support agent", "case", "call center"]),
+    ("buyer", ["procurement", "purchasing", "supplier", "vendor"]),
 ]
-SYSTEM_PROMPT = (
-    "You are a senior business analyst converting business requirements documents (BRDs) into "
-    "agile user stories for enterprise application delivery in medical product distribution. "
-    "Reply with ONLY a JSON array. Each element: {\"epic\": str, \"title\": str, \"persona\": str, "
-    "\"narrative\": \"As a <persona>, I want <goal>, so that <benefit>\", "
-    "\"acceptance_criteria\": [Given/When/Then strings], \"priority\": \"High|Medium|Low\", "
-    "\"labels\": [str], \"product_scope\": [product class names that apply, or empty for all], "
-    "\"variant_criteria\": [{\"scope\": product class or attribute, \"criteria\": str}], "
-    "\"compliance_tags\": [str], \"source_ref\": str, \"open_questions\": [str]}. "
-    "Rules: one story per distinct requirement; do not invent requirements; put product-specific "
-    "differences in variant_criteria instead of duplicating stories; list ambiguities in open_questions."
+_NFR = re.compile(r"\b(performance|response time|within \d+\s*(ms|milliseconds?|seconds?)|uptime|availability|scalab|concurrent|"
+                  r"secur|encrypt|backup|recover|latency|throughput|accessib|wcag|retention|audit trail|log)\w*", re.I)
+_CONSTRAINT = re.compile(r"\b(comply|compliance with|regulat|must use|integrate with|limited to|constraint|legacy)\w*", re.I)
+_BUSINESS = re.compile(r"\b(business|revenue|margin|cost|goal|objective|kpi|reduce|increase|improve)\b", re.I)
+
+Progress = Callable[[str], None]
+Usage = Dict[str, int]
+
+REQ_SYSTEM = (
+    "You are a senior business analyst. Extract atomic requirements from a business requirements document "
+    "(BRD) section for enterprise application delivery in medical product distribution. Reply with ONLY a JSON "
+    "array. Each element: {\"statement\": str, \"type\": \"business|functional|non-functional|constraint|rule\", "
+    "\"actors\": [str], \"source_id\": str (requirement ID used in the BRD, or empty), \"rationale\": str}. "
+    "Rules: one verifiable requirement per element (split compound statements); keep the BRD's meaning and "
+    "terminology; never invent requirements; skip background, narrative and table-of-contents text; prefer "
+    "'The system shall ...' phrasing for functional requirements."
+)
+STORY_SYSTEM = (
+    "You are a senior business analyst writing an agile backlog from approved requirements. Reply with ONLY a "
+    "JSON array of user stories. Each element: {\"epic\": str, \"feature\": str, \"title\": str (short, verb-first), "
+    "\"persona\": str (specific role), \"narrative\": \"As a <persona>, I want <goal>, so that <benefit>\", "
+    "\"acceptance_criteria\": [Gherkin strings starting with Given/When/Then], \"priority\": \"High|Medium|Low\", "
+    "\"story_points\": 1|2|3|5|8|13|null, \"labels\": [str], \"requirement_ids\": [requirement IDs covered], "
+    "\"product_scope\": [product classes affected, empty = all], \"variant_criteria\": [{\"scope\": product class "
+    "or attribute, \"criteria\": str}], \"compliance_tags\": [str], \"open_questions\": [str]}. Rules: follow INVEST "
+    "(independent, valuable, small, testable); every requirement ID must be covered by at least one story; fold "
+    "non-functional requirements and business rules into the acceptance criteria of the stories they constrain, "
+    "or create an enabler story when they stand alone; express product-specific differences as variant_criteria "
+    "instead of duplicate stories; record ambiguities as open_questions instead of guessing."
 )
 
+
+# ---- helpers -------------------------------------------------------------
 
 def _clean_list(v: Any) -> List[str]:
     if isinstance(v, str):
@@ -37,37 +64,12 @@ def _clean_list(v: Any) -> List[str]:
     return [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else []
 
 
-def normalize_story(raw: Any, fallback_ref: str = "") -> Optional[Dict[str, Any]]:
-    if not isinstance(raw, dict):
-        return None
-    title = str(raw.get("title") or "").strip()
-    if not title:
-        return None
-    persona = str(raw.get("persona") or "user").strip()
-    prio = str(raw.get("priority") or "Medium").strip().capitalize()
-    variants = []
-    for v in raw.get("variant_criteria") or []:
-        if isinstance(v, dict) and v.get("criteria"):
-            variants.append({"scope": str(v.get("scope") or "").strip(), "criteria": str(v["criteria"]).strip()})
-    return {
-        "epic": str(raw.get("epic") or "General").strip()[:200],
-        "title": title[:300],
-        "persona": persona[:100],
-        "narrative": str(raw.get("narrative") or "").strip(),
-        "acceptance_criteria": _clean_list(raw.get("acceptance_criteria")),
-        "priority": prio if prio.lower() in PRIORITIES else "Medium",
-        "labels": _clean_list(raw.get("labels")),
-        "product_scope": _clean_list(raw.get("product_scope")),
-        "variant_criteria": variants,
-        "compliance_tags": _clean_list(raw.get("compliance_tags")),
-        "source_ref": str(raw.get("source_ref") or fallback_ref).strip()[:300],
-        "open_questions": _clean_list(raw.get("open_questions")),
-    }
+def _norm_key(text: str) -> str:
+    return re.sub(r"\W+", " ", text.lower()).strip()
 
 
 def parse_json_array(text: str) -> List[Any]:
-    text = text.strip()
-    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
     start, end = text.find("["), text.rfind("]")
     if start == -1 or end <= start:
         raise ValueError("no JSON array in model output")
@@ -78,21 +80,34 @@ def parse_json_array(text: str) -> List[Any]:
 
 
 def chunk_sections(text: str, limit: int) -> List[Dict[str, str]]:
-    """Split on headings, then pack sections into chunks of at most `limit` chars."""
+    """Split on headings (tracking the top-level heading as epic), then pack to `limit` chars."""
     sections: List[Dict[str, str]] = []
-    heading, buf = "General", []
+    stack: List[Tuple[int, str]] = []
+    buf: List[str] = []
+
+    def current() -> Tuple[str, str]:
+        if not stack:
+            return "General", "General"
+        return stack[0][1], stack[-1][1]
 
     def flush() -> None:
         body = "\n".join(buf).strip()
         if body:
-            sections.append({"heading": heading, "text": body})
+            epic, heading = current()
+            sections.append({"epic": epic, "heading": heading, "text": body})
 
     for line in text.splitlines():
         s = line.strip()
-        is_head = bool(re.match(r"^#{1,6}\s+\S", s)) or bool(re.match(r"^\d+(\.\d+)*[.)]?\s+[A-Z][^.!?]{2,80}$", s))
-        if is_head:
+        md = re.match(r"^(#{1,6})\s+(\S.*)$", s)
+        num = re.match(r"^(\d+(?:\.\d+)*)[.)]?\s+([A-Z][^.!?]{2,80})$", s)
+        if md or num:
             flush()
-            heading, buf = s.lstrip("# ").strip(), []
+            buf = []
+            level = len(md.group(1)) if md else num.group(1).count(".") + 1
+            title = (md.group(2) if md else num.group(2)).strip()
+            while stack and stack[-1][0] >= level:
+                stack.pop()
+            stack.append((level, title))
         else:
             buf.append(line)
     flush()
@@ -102,89 +117,265 @@ def chunk_sections(text: str, limit: int) -> List[Dict[str, str]]:
         while len(body) > limit:
             cut = body.rfind("\n", 0, limit)
             cut = cut if cut > limit // 2 else limit
-            chunks.append({"heading": sec["heading"], "text": body[:cut]})
+            chunks.append(dict(sec, text=body[:cut]))
             body = body[cut:].strip()
         if body:
-            chunks.append({"heading": sec["heading"], "text": body})
+            chunks.append(dict(sec, text=body))
     return chunks
 
 
-def mock_stories(chunk: Dict[str, str], source: str) -> List[Dict[str, Any]]:
-    """Offline heuristic: one story per requirement-like sentence."""
+def classify(statement: str) -> str:
+    if _NFR.search(statement):
+        return "non-functional"
+    if _CONSTRAINT.search(statement):
+        return "constraint"
+    if _BUSINESS.search(statement) and not re.search(r"\b(system|platform|application|solution)\b", statement, re.I):
+        return "business"
+    if re.search(r"\b(if|unless|only if|cannot|may not|not allowed|before|within \d+\s*(hours?|days?|weeks?))\b", statement, re.I):
+        return "rule"
+    return "functional"
+
+
+def detect_persona(text: str) -> str:
+    low = text.lower()
+    return next((p for p, kws in _ACTOR if any(k in low for k in kws)), "user")
+
+
+def _enrich(item: Dict[str, Any], text: str) -> None:
+    item["product_scope"] = sorted(set(item.get("product_scope") or []) | set(taxonomy.match_classes(text)))
+    item["compliance_tags"] = sorted(set(item.get("compliance_tags") or []) | set(taxonomy.match_compliance(text)))
+
+
+def normalize_requirement(raw: Any, section: Dict[str, str], source: str) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+    statement = re.sub(r"\s+", " ", str(raw.get("statement") or "")).strip()
+    if len(statement) < 8:
+        return None
+    rtype = str(raw.get("type") or "").strip().lower()
+    req = {
+        "statement": statement[:1500],
+        "type": rtype if rtype in REQ_TYPES else classify(statement),
+        "actors": _clean_list(raw.get("actors"))[:6],
+        "source_id": str(raw.get("source_id") or "").strip()[:40],
+        "rationale": str(raw.get("rationale") or "").strip()[:500],
+        "epic": str(raw.get("epic") or section.get("epic") or "General").strip()[:200],
+        "section": str(raw.get("section") or section.get("heading") or "General").strip()[:200],
+        "source_ref": str(raw.get("source_ref") or "%s > %s" % (source, section.get("heading", ""))).strip()[:300],
+        "product_scope": _clean_list(raw.get("product_scope")),
+        "compliance_tags": _clean_list(raw.get("compliance_tags")),
+        "notes": str(raw.get("notes") or "").strip()[:1000],
+    }
+    _enrich(req, statement)
+    return req
+
+
+def normalize_story(raw: Any, fallback: Optional[Dict[str, str]] = None) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+    title = str(raw.get("title") or "").strip()
+    if not title:
+        return None
+    fallback = fallback or {}
+    prio = str(raw.get("priority") or "Medium").strip().capitalize()
+    try:
+        points: Optional[int] = int(raw.get("story_points")) if raw.get("story_points") not in (None, "") else None
+    except (TypeError, ValueError):
+        points = None
+    variants = [{"scope": str(v.get("scope") or "").strip(), "criteria": str(v["criteria"]).strip()}
+                for v in raw.get("variant_criteria") or [] if isinstance(v, dict) and v.get("criteria")]
+    return {
+        "epic": str(raw.get("epic") or fallback.get("epic") or "General").strip()[:200],
+        "feature": str(raw.get("feature") or fallback.get("feature") or "General").strip()[:200],
+        "title": title[:300],
+        "persona": str(raw.get("persona") or "user").strip()[:100],
+        "narrative": str(raw.get("narrative") or "").strip()[:2000],
+        "acceptance_criteria": _clean_list(raw.get("acceptance_criteria"))[:30],
+        "priority": prio if prio in PRIORITIES else "Medium",
+        "story_points": points if points in POINTS else None,
+        "labels": _clean_list(raw.get("labels"))[:20],
+        "requirement_ids": _clean_list(raw.get("requirement_ids"))[:50],
+        "product_scope": _clean_list(raw.get("product_scope")),
+        "variant_criteria": variants[:20],
+        "compliance_tags": _clean_list(raw.get("compliance_tags")),
+        "open_questions": _clean_list(raw.get("open_questions"))[:20],
+        "notes": str(raw.get("notes") or "").strip()[:2000],
+    }
+
+
+def _ask(profile: Dict[str, Any], opts: Dict[str, Any], system: str, prompt: str, usage: Usage) -> List[Any]:
+    if opts.get("redact_pii", True):
+        prompt = llm.redact(prompt)
+    text, u = llm.complete(profile, system, prompt, opts)
+    usage["in"] += u["in"]
+    usage["out"] += u["out"]
+    try:
+        return parse_json_array(text)
+    except (ValueError, json.JSONDecodeError):
+        text, u = llm.complete(profile, system, "Your previous reply was not valid JSON. Return ONLY the JSON "
+                                                 "array for this input.\n\n" + prompt, opts)
+        usage["in"] += u["in"]
+        usage["out"] += u["out"]
+        return parse_json_array(text)
+
+
+def _platform_context(platform: str) -> str:
+    profile = PLATFORMS.get(platform, PLATFORMS["generic"])
+    classes = "; ".join("%s (%s)" % (c["name"], ", ".join(c["attributes"])) for c in taxonomy.PRODUCT_CLASSES)
+    return "\n".join([
+        "Target platform: %s. %s" % (profile["label"], profile["guidance"]),
+        "Product classes and behaviour attributes: " + classes,
+        "Compliance tags: " + ", ".join(taxonomy.COMPLIANCE_KEYWORDS),
+    ])
+
+
+# ---- stage 1: requirements -----------------------------------------------
+
+def mock_requirements(section: Dict[str, str]) -> List[Dict[str, Any]]:
+    """Offline heuristic: one requirement per requirement-like sentence."""
     out = []
-    body = re.sub(r"\s+", " ", chunk["text"])
-    for sent in re.split(r"(?<=[.!?;])\s+|\s[•\-]\s", body):
-        sent = sent.strip(" -•\t")
+    body = re.sub(r"\s+", " ", section["text"])
+    for sent in re.split(r"(?<=[.!?;])\s+|\s[•\-\*]\s", body):
+        sent = sent.strip(" -•*\t")
         if len(sent) < 25 or not _REQ.search(sent):
             continue
-        low = sent.lower()
-        persona = next((p for p, kws in _ACTOR if any(k in low for k in kws)), "user")
-        goal = re.sub(r"^(the )?(system|solution|application|platform)\s+(shall|must|should|will)\s+", "", sent, flags=re.I)
-        goal = goal.rstrip(".").strip()
-        goal = goal[0].lower() + goal[1:] if goal else goal
-        tags = taxonomy.match_compliance(sent)
-        ac = ["Given the requirement context, when the capability is used, then it behaves as described: " + goal[:160]]
-        ac += [taxonomy.COMPLIANCE_AC[t] for t in tags]
-        out.append({
-            "epic": chunk["heading"], "title": goal[:90].capitalize(), "persona": persona,
-            "narrative": "As a %s, I want %s, so that the business requirement is satisfied." % (persona, goal),
-            "acceptance_criteria": ac, "priority": "High" if re.search(r"\bmust|shall\b", low) else "Medium",
-            "labels": [], "product_scope": taxonomy.match_classes(sent), "variant_criteria": [],
-            "compliance_tags": tags, "source_ref": "%s > %s" % (source, chunk["heading"]), "open_questions": [],
-        })
+        sid = re.match(r"^\(?([A-Z]{1,5}[-_ ]?\d{1,4}(?:\.\d+)*)\)?[:.\s-]+", sent)
+        if sid:
+            sent = sent[sid.end():].strip()
+        out.append({"statement": sent, "actors": [detect_persona(sent)], "source_id": sid.group(1) if sid else ""})
     return out
 
 
-def _user_prompt(chunk: Dict[str, str], source: str, platform: str, related: List[dict]) -> str:
-    profile = PLATFORMS.get(platform, PLATFORMS["generic"])
-    classes = "; ".join("%s (%s)" % (c["name"], ", ".join(c["attributes"])) for c in taxonomy.PRODUCT_CLASSES)
-    parts = [
-        "Platform: %s. %s" % (profile["label"], profile["guidance"]),
-        "Product classes and behaviour attributes: " + classes,
-        "Compliance tags to consider: " + ", ".join(taxonomy.COMPLIANCE_KEYWORDS),
-    ]
-    if related:
-        parts.append("Related context from other project documents (for consistency only; do not "
-                     "create stories from it):\n" + "\n---\n".join(r["text"][:600] for r in related))
-    parts.append("Document: %s\nSection: %s\n\nBRD text:\n%s" % (source, chunk["heading"], chunk["text"]))
-    return "\n\n".join(parts)
-
-
-def generate(
-    documents: List[Dict[str, Any]], project_id: str, platform: str, provider: str, model: str,
-    progress: Callable[[str], None] = lambda _m: None,
-) -> List[Dict[str, Any]]:
-    work = []
-    for doc in documents:
-        for ch in chunk_sections(doc["text"], config.CHUNK_CHARS):
-            work.append((doc, ch))
-    if len(work) > config.MAX_CHUNKS_PER_RUN:
-        raise ValueError("Documents too large: %d sections exceeds limit of %d" % (len(work), config.MAX_CHUNKS_PER_RUN))
-    stories: List[Dict[str, Any]] = []
+def extract_requirements(documents: List[Dict[str, Any]], platform: str, profile: Dict[str, Any],
+                         opts: Dict[str, Any], progress: Progress, usage: Usage) -> List[Dict[str, Any]]:
+    work = [(d, ch) for d in documents for ch in chunk_sections(d["text"], int(opts["chunk_chars"]))]
+    if len(work) > int(opts["max_chunks_per_run"]):
+        raise ValueError("Documents produce %d sections, above the limit of %d (see admin settings)."
+                         % (len(work), opts["max_chunks_per_run"]))
+    out: List[Dict[str, Any]] = []
     seen = set()
-    for i, (doc, ch) in enumerate(work, 1):
-        progress("Section %d of %d" % (i, len(work)))
-        source = doc["filename"]
-        if provider == "mock":
-            raw = mock_stories(ch, source)
+    for i, (doc, sec) in enumerate(work, 1):
+        progress("Reading section %d of %d: %s" % (i, len(work), sec["heading"][:60]))
+        if profile["kind"] == "mock":
+            raw = mock_requirements(sec)
         else:
-            related: List[dict] = []
-            if config.RAG_TOP_K > 0:
-                related = embeddings.search(project_id, ch["text"][:1000], config.RAG_TOP_K, doc["id"])
-            reply = llm.complete(SYSTEM_PROMPT, llm.redact(_user_prompt(ch, source, platform, related)), provider, model)
-            try:
-                raw = parse_json_array(reply)
-            except (ValueError, json.JSONDecodeError):
-                reply = llm.complete(SYSTEM_PROMPT, "Return ONLY a valid JSON array for this input.\n\n"
-                                     + llm.redact(_user_prompt(ch, source, platform, related)), provider, model)
-                raw = parse_json_array(reply)
+            prompt = "%s\n\nDocument: %s\nSection: %s > %s\n\nBRD text:\n%s" % (
+                _platform_context(platform), doc["filename"], sec["epic"], sec["heading"], sec["text"])
+            raw = _ask(profile, opts, REQ_SYSTEM, prompt, usage)
         for r in raw:
-            s = normalize_story(r, "%s > %s" % (source, ch["heading"]))
-            if not s:
-                continue
-            key = re.sub(r"\W+", " ", s["title"].lower()).strip()
-            if key in seen:
-                continue
-            seen.add(key)
-            stories.append(s)
+            req = normalize_requirement(r, sec, doc["filename"])
+            if req and _norm_key(req["statement"]) not in seen:
+                seen.add(_norm_key(req["statement"]))
+                out.append(req)
+    return out
+
+
+# ---- stage 2: stories ----------------------------------------------------
+
+def _benefit(req: Dict[str, Any]) -> str:
+    tags = req.get("compliance_tags") or []
+    if tags:
+        return "the business stays compliant with %s obligations" % "/".join(tags)
+    return "%s objectives in '%s' are met" % (req.get("epic", "business"), req.get("section", "this area"))
+
+
+def _short_title(text: str, limit: int = 80) -> str:
+    """Sentence-case title cut at a word boundary (keeps acronyms like GPO intact)."""
+    text = text.strip().rstrip(".")
+    if len(text) > limit:
+        text = text[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+    return text[:1].upper() + text[1:]
+
+
+def mock_stories(reqs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Offline heuristic: a story per functional/business requirement; NFRs, rules and
+    constraints become acceptance criteria on stories in the same section."""
+    stories: List[Dict[str, Any]] = []
+    by_section: Dict[str, List[Dict[str, Any]]] = {}
+    for r in reqs:
+        if r["type"] in ("functional", "business"):
+            persona = (r.get("actors") or [detect_persona(r["statement"])])[0]
+            goal = re.sub(r"^(the )?(system|solution|application|platform)\s+(shall|must|should|will)\s+(be able to\s+)?",
+                          "", r["statement"], flags=re.I).rstrip(".")
+            # "allow a sales representative to create X" -> "create X" (the persona is already the subject)
+            goal = re.sub(r"^(allow|enable|permit)s?\s+(an?\s+|the\s+)?[\w\s-]{2,40}?\s+to\s+", "", goal, flags=re.I)
+            goal = goal[0].lower() + goal[1:] if goal else goal
+            ac = ["Given I am signed in as a %s, when I %s, then the result is saved and confirmed to me." % (persona, goal[:140]),
+                  "Given invalid or incomplete input, when I submit, then I see which fields need correction and nothing is saved."]
+            ac += ["Then " + taxonomy.COMPLIANCE_AC[t] for t in r.get("compliance_tags", []) if t in taxonomy.COMPLIANCE_AC]
+            story = {
+                "epic": r.get("epic"), "feature": r.get("section"), "title": _short_title(goal),
+                "persona": persona, "narrative": "As a %s, I want to %s, so that %s." % (persona, goal, _benefit(r)),
+                "acceptance_criteria": ac, "priority": "High" if re.search(r"\b(must|shall)\b", r["statement"], re.I) else "Medium",
+                "requirement_ids": [r["key"]], "product_scope": r.get("product_scope", []),
+                "variant_criteria": taxonomy.variant_criteria(r.get("product_scope", [])),
+                "compliance_tags": r.get("compliance_tags", []), "labels": [r["type"]],
+                "open_questions": ["Clarify wording: %s" % i["message"] for i in r.get("issues", []) if i["code"] in ("ambiguous", "incomplete")],
+            }
+            stories.append(story)
+            by_section.setdefault(r.get("section", ""), []).append(story)
+    for r in reqs:
+        if r["type"] in ("functional", "business"):
+            continue
+        targets = by_section.get(r.get("section", ""))
+        if targets:
+            for s in targets:
+                s["acceptance_criteria"].append("Then %s" % r["statement"].rstrip(".")[:300] + ".")
+                s["requirement_ids"].append(r["key"])
+        else:
+            stories.append({
+                "epic": r.get("epic"), "feature": r.get("section"), "title": _short_title("Enabler: " + r["statement"]),
+                "persona": "platform team", "narrative": "As a platform team, I want to satisfy the %s requirement '%s', so that %s."
+                % (r["type"], r["statement"].rstrip(".")[:200], _benefit(r)),
+                "acceptance_criteria": ["Given the solution is deployed, when it is verified, then %s" % r["statement"][:300]],
+                "priority": "Medium", "requirement_ids": [r["key"]], "labels": ["enabler", r["type"]],
+                "compliance_tags": r.get("compliance_tags", []), "product_scope": r.get("product_scope", []),
+            })
     return stories
+
+
+def generate_stories(reqs: List[Dict[str, Any]], project_id: str, platform: str, profile: Dict[str, Any],
+                     opts: Dict[str, Any], progress: Progress, usage: Usage) -> List[Dict[str, Any]]:
+    if profile["kind"] == "mock":
+        progress("Drafting stories for %d requirements" % len(reqs))
+        raw = mock_stories(reqs)
+        return _finalize(raw, reqs)
+    groups: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    for r in reqs:
+        groups.setdefault((r.get("epic", ""), r.get("section", "")), []).append(r)
+    batches = []
+    for (epic, section), items in groups.items():
+        for i in range(0, len(items), 25):
+            batches.append((epic, section, items[i:i + 25]))
+    if len(batches) > int(opts["max_chunks_per_run"]):
+        raise ValueError("Too many requirement groups (%d) for one run." % len(batches))
+    raw: List[Dict[str, Any]] = []
+    for i, (epic, section, items) in enumerate(batches, 1):
+        progress("Writing stories %d of %d: %s" % (i, len(batches), section[:60]))
+        lines = "\n".join("%s [%s] %s" % (r["key"], r["type"], r["statement"]) for r in items)
+        related = []
+        if int(opts.get("rag_top_k", 0)) > 0:
+            related = embeddings.search(project_id, " ".join(r["statement"] for r in items)[:1500], int(opts["rag_top_k"]))
+        context = ("\n\nRelated BRD context (for consistency only):\n" + "\n---\n".join(h["text"][:600] for h in related)) if related else ""
+        prompt = "%s%s\n\nEpic: %s\nFeature area: %s\n\nRequirements:\n%s" % (
+            _platform_context(platform), context, epic, section, lines)
+        for s in _ask(profile, opts, STORY_SYSTEM, prompt, usage):
+            if isinstance(s, dict):
+                s.setdefault("epic", epic)
+                s.setdefault("feature", section)
+                raw.append(s)
+    return _finalize(raw, reqs)
+
+
+def _finalize(raw: List[Dict[str, Any]], reqs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    valid = {r["key"] for r in reqs}
+    out, seen = [], set()
+    for r in raw:
+        s = normalize_story(r)
+        if not s or _norm_key(s["title"]) in seen:
+            continue
+        seen.add(_norm_key(s["title"]))
+        s["requirement_ids"] = [k for k in dict.fromkeys(s["requirement_ids"]) if k in valid]
+        _enrich(s, s["title"] + " " + s["narrative"])
+        out.append(s)
+    return out

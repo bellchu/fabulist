@@ -1,0 +1,86 @@
+"""Deterministic quality checks.
+
+Requirements follow ISO/IEC/IEEE 29148 characteristics (unambiguous, singular,
+verifiable, complete); stories follow INVEST plus a Definition of Ready.
+"""
+import re
+from typing import Any, Dict, List
+
+Issue = Dict[str, str]
+
+VAGUE = ["user-friendly", "user friendly", "easy", "easily", "simple", "fast", "quickly", "efficient",
+         "flexible", "robust", "seamless", "seamlessly", "intuitive", "appropriate", "adequate", "as needed",
+         "as required", "if possible", "where possible", "etc", "and so on", "and/or", "normally", "generally",
+         "approximately", "various", "several", "sufficient", "minimal", "state-of-the-art", "best practice"]
+WEAK = ["should", "may", "might", "could", "possibly", "ideally"]
+TBD = ["tbd", "tbc", "to be determined", "to be confirmed", "???"]
+_VAGUE_RE = re.compile(r"(?<![\w-])(" + "|".join(re.escape(v) for v in VAGUE) + r")(?![\w-])", re.I)
+_WEAK_RE = re.compile(r"\b(" + "|".join(WEAK) + r")\b", re.I)
+_TBD_RE = re.compile(r"(?<!\w)(" + "|".join(re.escape(t) for t in TBD) + r")(?!\w)", re.I)
+_NARRATIVE = re.compile(r"^\s*as an?\s+.+?,?\s+i (want|need|can)\b.+?,?\s+so that\b.+", re.I | re.S)
+_GWT = re.compile(r"^\s*(given|when|then|and|but)\b", re.I)
+
+
+def _issue(code: str, severity: str, message: str) -> Issue:
+    return {"code": code, "severity": severity, "message": message}
+
+
+def vague_terms(text: str) -> List[str]:
+    return sorted({m.group(1).lower() for m in _VAGUE_RE.finditer(text)})
+
+
+def requirement_issues(req: Dict[str, Any]) -> List[Issue]:
+    text = req.get("statement", "")
+    out: List[Issue] = []
+    if _TBD_RE.search(text):
+        out.append(_issue("incomplete", "error", "Contains TBD/TBC: requirement is incomplete."))
+    terms = vague_terms(text)
+    if terms:
+        out.append(_issue("ambiguous", "warning", "Vague terms: %s. Replace with measurable criteria." % ", ".join(terms)))
+    if _WEAK_RE.search(text):
+        out.append(_issue("weak-modal", "info", "Weak modal verb; confirm whether this is mandatory (shall/must)."))
+    if len(re.findall(r"\b(and|or)\b", text, re.I)) >= 3 or len(re.findall(r"\b(shall|must|should|will)\b", text, re.I)) > 1:
+        out.append(_issue("not-singular", "warning", "May combine several requirements; split into atomic statements."))
+    if req.get("type") == "non-functional" and not re.search(r"\d", text):
+        out.append(_issue("not-verifiable", "warning", "Non-functional requirement has no measurable threshold."))
+    if len(text) > 450:
+        out.append(_issue("too-long", "info", "Long statement; consider splitting."))
+    return out
+
+
+def story_issues(story: Dict[str, Any], valid_req_keys: Any = None) -> List[Issue]:
+    out: List[Issue] = []
+    ac = story.get("acceptance_criteria") or []
+    if not _NARRATIVE.match(story.get("narrative") or ""):
+        out.append(_issue("narrative", "error", "Narrative should read 'As a <role>, I want <goal>, so that <benefit>'."))
+    if not ac:
+        out.append(_issue("testable", "error", "No acceptance criteria: story is not testable."))
+    else:
+        non_gwt = sum(1 for a in ac if not _GWT.match(a))
+        if non_gwt:
+            out.append(_issue("gherkin", "info", "%d acceptance criteria not in Given/When/Then form." % non_gwt))
+    if len(ac) > 8 or len(re.findall(r"\band\b", story.get("title") or "", re.I)) >= 2:
+        out.append(_issue("small", "warning", "Story may be too large; consider splitting."))
+    if (story.get("persona") or "").strip().lower() in ("", "user", "system"):
+        out.append(_issue("valuable", "info", "Generic persona; name the specific role that gets value."))
+    links = story.get("requirement_ids") or []
+    if not links:
+        out.append(_issue("trace", "warning", "Not linked to any requirement (traceability gap)."))
+    elif valid_req_keys is not None and any(k not in valid_req_keys for k in links):
+        out.append(_issue("trace", "warning", "Links to requirements that no longer exist."))
+    terms = vague_terms(" ".join([story.get("narrative") or ""] + list(ac)))
+    if terms:
+        out.append(_issue("ambiguous", "warning", "Vague terms: %s." % ", ".join(terms)))
+    if story.get("open_questions"):
+        out.append(_issue("open-questions", "warning", "Open questions must be resolved before the story is ready."))
+    return out
+
+
+def score(issues: List[Issue]) -> int:
+    weights = {"error": 30, "warning": 10, "info": 3}
+    return max(0, 100 - sum(weights.get(i["severity"], 0) for i in issues))
+
+
+def is_ready(issues: List[Issue]) -> bool:
+    """Definition of Ready: no errors and no unresolved questions or trace gaps."""
+    return not any(i["severity"] == "error" or i["code"] in ("open-questions", "trace") for i in issues)

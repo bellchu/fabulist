@@ -57,3 +57,27 @@ def match_classes(text: str) -> List[str]:
 def match_compliance(text: str) -> List[str]:
     t = text.lower()
     return [tag for tag, kws in COMPLIANCE_KEYWORDS.items() if any(k in t for k in kws)]
+
+# Acceptance-criteria variants driven by product behaviour attributes.
+ATTRIBUTE_AC: Dict[str, str] = {
+    "cold_chain": "Temperature excursions are captured and block allocation or shipment until dispositioned.",
+    "controlled_substance": "Only licensed, authorized parties can order; quantities are checked against limits.",
+    "serialized": "Product identifiers (GTIN, serial, lot, expiry) are captured at each custody change.",
+    "lot_expiry_tracked": "Lot and expiry are recorded; expired or short-dated stock is blocked per policy.",
+    "sterile": "Sterility and packaging integrity checks are recorded before release.",
+    "udi_tracked": "UDI is captured and retrievable for each unit or lot.",
+    "bom_components": "Kit components are validated, and component recalls propagate to the kit.",
+    "recall_sensitive": "Affected lots can be identified and quarantined within the recall SLA.",
+}
+
+
+def variant_criteria(class_names: List[str]) -> List[Dict[str, str]]:
+    out, seen = [], set()
+    for c in PRODUCT_CLASSES:
+        if c["name"] not in class_names:
+            continue
+        for attr in c["attributes"]:
+            if attr in ATTRIBUTE_AC and attr not in seen:
+                seen.add(attr)
+                out.append({"scope": c["name"], "criteria": ATTRIBUTE_AC[attr]})
+    return out

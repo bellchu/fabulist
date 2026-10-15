@@ -30,6 +30,22 @@ SCHEMA = [
          id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
          document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
          seq INTEGER NOT NULL, text TEXT NOT NULL, embedding vector(%d) NOT NULL)""" % config.EMBED_DIM,
+    """CREATE TABLE IF NOT EXISTS requirements (
+         id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+         seq INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'draft', data JSONB NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value JSONB NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS providers (
+         id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, base_url TEXT NOT NULL DEFAULT '',
+         model TEXT NOT NULL DEFAULT '', api_key_enc TEXT, key_hint TEXT NOT NULL DEFAULT '',
+         is_default BOOLEAN NOT NULL DEFAULT FALSE, created TEXT NOT NULL)""",
+    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE runs ADD COLUMN IF NOT EXISTS stage TEXT NOT NULL DEFAULT 'stories'",
+    "ALTER TABLE runs ADD COLUMN IF NOT EXISTS tokens_in INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE runs ADD COLUMN IF NOT EXISTS tokens_out INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE runs ADD COLUMN IF NOT EXISTS duration_ms INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE runs ADD COLUMN IF NOT EXISTS item_count INTEGER NOT NULL DEFAULT 0",
+    "CREATE INDEX IF NOT EXISTS idx_reqs_project ON requirements(project_id, seq)",
+    "CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created)",
     "CREATE INDEX IF NOT EXISTS idx_docs_project ON documents(project_id)",
     "CREATE INDEX IF NOT EXISTS idx_stories_project ON stories(project_id, seq)",
     "CREATE INDEX IF NOT EXISTS idx_chunks_project ON chunks(project_id)",
@@ -81,8 +97,9 @@ def vec(v: Sequence[float]) -> str:
     return "[" + ",".join("%.6f" % x for x in v) + "]"
 
 
-def story_row(r: Dict[str, Any]) -> Dict[str, Any]:
-    data = r["data"] if isinstance(r["data"], dict) else json.loads(r["data"])
-    data = dict(data)
-    data.update({"id": r["id"], "project_id": r["project_id"], "status": r["status"], "seq": r["seq"]})
+def item_row(r: Dict[str, Any], prefix: str) -> Dict[str, Any]:
+    """Flatten a requirements/stories row: JSONB payload plus identity columns."""
+    data = dict(r["data"] if isinstance(r["data"], dict) else json.loads(r["data"]))
+    data.update({"id": r["id"], "project_id": r["project_id"], "status": r["status"], "seq": r["seq"],
+                 "key": "%s-%03d" % (prefix, r["seq"] + 1)})
     return data

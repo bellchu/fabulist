@@ -6,7 +6,7 @@ from typing import List
 
 import httpx
 
-from . import config, db
+from . import config, db, settings
 
 _TOKEN = re.compile(r"[a-z0-9]{2,}")
 
@@ -21,15 +21,15 @@ def _hash_embed(text: str) -> List[float]:
     return [x / norm for x in v]
 
 
-def _remote_embed(texts: List[str]) -> List[List[float]]:
-    if not (config.EMBED_BASE_URL and config.EMBED_MODEL):
-        raise RuntimeError("EMBED_BASE_URL and EMBED_MODEL are required for EMBED_PROVIDER=openai")
-    url = config.EMBED_BASE_URL.rstrip("/") + "/embeddings"
-    headers = {"Authorization": "Bearer " + config.EMBED_API_KEY} if config.EMBED_API_KEY else {}
+def _remote_embed(texts: List[str], provider_id: str, model: str) -> List[List[float]]:
+    profile = settings.get_provider(provider_id)
+    if not model:
+        raise RuntimeError("Embedding model is not configured")
+    url = profile["base_url"].rstrip("/") + "/embeddings"
+    headers = {"Authorization": "Bearer " + profile["api_key"]} if profile["api_key"] else {}
     out: List[List[float]] = []
     for i in range(0, len(texts), 64):
-        resp = httpx.post(url, headers=headers, timeout=config.LLM_TIMEOUT,
-                          json={"model": config.EMBED_MODEL, "input": texts[i:i + 64]})
+        resp = httpx.post(url, headers=headers, timeout=60, json={"model": model, "input": texts[i:i + 64]})
         resp.raise_for_status()
         data = sorted(resp.json()["data"], key=lambda d: d["index"])
         out.extend(d["embedding"] for d in data)
@@ -40,8 +40,9 @@ def _remote_embed(texts: List[str]) -> List[List[float]]:
 
 
 def embed(texts: List[str]) -> List[List[float]]:
-    if config.EMBED_PROVIDER == "openai":
-        return _remote_embed(texts)
+    s = settings.get_settings()
+    if s["embed_provider_id"]:
+        return _remote_embed(texts, s["embed_provider_id"], s["embed_model"])
     return [_hash_embed(t) for t in texts]
 
 
@@ -89,3 +90,10 @@ def search(project_id: str, query: str, k: int = 5, exclude_document: str = "") 
         "ORDER BY c.embedding <=> %s::vector LIMIT %s",
         (qv, project_id, exclude_document, qv, k),
     )
+
+
+def reindex_all() -> int:
+    """Rebuild every chunk embedding, e.g. after changing the embeddings provider."""
+    docs = db.rows("SELECT id, project_id, text FROM documents")
+    db.execute("DELETE FROM chunks")
+    return sum(index_document(d["project_id"], d["id"], d["text"]) for d in docs)

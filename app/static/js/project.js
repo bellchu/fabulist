@@ -1,0 +1,558 @@
+// Project workspace: Overview, Sources, Requirements, Stories, Traceability, Export.
+import {
+  h, mount, icon, api, guard, toast, modal, confirmBox, drawer, badge, statusTone, typeTone, scorePill, meter, issueIcon,
+  issueList, empty, timeAgo, fmt, duration, field, select, linesInput, readLines, tagsInput, segmented, download,
+} from "./core.js";
+import { state, setCrumbs } from "./main.js";
+
+const TABS = [["overview", "Overview"], ["sources", "Sources"], ["requirements", "Requirements"],
+  ["stories", "Stories"], ["trace", "Traceability"], ["export", "Export"]];
+const TYPE_COLORS = { business: "var(--violet)", functional: "var(--blue)", "non-functional": "var(--amber)", constraint: "var(--red)", rule: "var(--accent)" };
+
+// Filters survive re-renders within the session.
+const filters = { reqQ: "", reqType: "", reqStatus: "", reqFlagged: false, storyQ: "", storyStatus: "", storyView: "map", storyReady: "", traceGaps: false, exportScope: "all" };
+let ctx = null;
+let pollTimer = null;
+
+const rerender = () => window.dispatchEvent(new HashChangeEvent("hashchange"));
+const base = () => "/api/projects/" + ctx.pid;
+
+export async function renderProject(content, pid, tab) {
+  clearTimeout(pollTimer);
+  const project = await api.get("/api/projects/" + pid);
+  ctx = { pid, project, tab };
+  setCrumbs({ href: "#/", label: "Projects" }, project.name);
+  const body = h("div");
+  mount(content, header(project), stepper(project), tabBar(project, tab), body);
+  const view = { overview: viewOverview, sources: viewSources, requirements: viewRequirements, stories: viewStories, trace: viewTrace, export: viewExport }[tab] || viewOverview;
+  await view(body);
+  schedulePoll();
+}
+
+// ---- chrome -------------------------------------------------------------
+
+function header(p) {
+  return h("div", { class: "page-head" },
+    h("div", { class: "grow" },
+      h("div", { class: "row" }, h("h1", {}, p.name), badge(state.meta.platforms[p.platform] || p.platform, "accent")),
+      h("p", { class: "sub" }, p.description || "No description")),
+    h("button", { class: "btn", onclick: editProjectDialog }, icon("edit"), "Project settings"));
+}
+
+function stepper(p) {
+  const steps = [
+    ["sources", "Sources", p.documents + " BRD" + (p.documents === 1 ? "" : "s"), p.documents > 0],
+    ["requirements", "Review requirements", p.requirements ? p.requirements_approved + " of " + p.requirements + " approved" : "Not extracted", p.requirements > 0 && p.requirements_approved > 0],
+    ["stories", "Refine stories", p.stories ? p.stories_ready + " of " + p.stories + " ready" : "Not generated", p.stories > 0 && p.stories_ready === p.stories],
+    ["trace", "Traceability", p.requirements ? p.coverage + "% coverage" : "–", p.requirements > 0 && p.coverage === 100],
+    ["export", "Export", p.stories_approved + " approved stories", p.stories_approved > 0],
+  ];
+  const current = steps.findIndex((s) => !s[3]);
+  return h("div", { class: "stepper" }, steps.map(([tab, t, s, done], i) =>
+    h("a", { class: "step" + (done ? " done" : "") + (i === current ? " current" : ""), href: "#/p/" + p.id + "/" + tab },
+      h("span", { class: "num" }, done ? icon("check") : String(i + 1)),
+      h("div", {}, h("div", { class: "t" }, t), h("div", { class: "s" }, s)))));
+}
+
+function tabBar(p, active) {
+  const counts = { sources: p.documents, requirements: p.requirements, stories: p.stories };
+  return h("div", { class: "tabs", role: "tablist" }, TABS.map(([id, label]) =>
+    h("a", { class: "tab" + (id === active ? " active" : ""), href: "#/p/" + p.id + "/" + id, role: "tab", "aria-selected": String(id === active) },
+      label, counts[id] !== undefined ? h("span", { class: "count" }, counts[id]) : null)));
+}
+
+function editProjectDialog() {
+  const p = ctx.project;
+  const name = h("input", { type: "text", value: p.name, maxlength: "120" });
+  const platform = select(Object.entries(state.meta.platforms), p.platform);
+  const desc = h("textarea", { rows: 3, value: p.description });
+  modal({
+    title: "Project settings",
+    body: h("div", { class: "stack" }, field("Name", name), field("Target platform", platform), field("Description", desc),
+      h("div", { class: "callout warn small" }, h("div", { class: "grow" }, "Deleting a project removes its BRDs, requirements and stories."),
+        h("button", { class: "btn btn-sm btn-danger", onclick: guard(async () => {
+          if (!(await confirmBox("Delete '" + p.name + "' and everything in it?", { danger: true, okLabel: "Delete project" }))) return;
+          await api.del(base()); location.hash = "#/"; toast("Project deleted");
+        }) }, "Delete project"))),
+    actions: [{ label: "Save", kind: "btn-primary", onClick: async () => {
+      await api.patch(base(), { name: name.value, platform: platform.value, description: desc.value });
+      toast("Project updated", "ok"); rerender();
+    } }],
+  });
+}
+
+// ---- runs ---------------------------------------------------------------
+
+function providerSelect() {
+  const def = state.meta.providers.find((p) => p.is_default) || state.meta.providers[0];
+  return select(state.meta.providers.map((p) => [p.id, p.name + (p.model ? " · " + p.model : "") + (p.is_default ? " (default)" : "")]), def && def.id, { "aria-label": "AI provider" });
+}
+
+function runPanel(stage) {
+  const run = ctx.project.runs[stage];
+  const running = run && run.status === "running";
+  const provider = providerSelect();
+  const scope = select([["all", "Approved + draft requirements"], ["approved", "Approved requirements only"]], "all", { "aria-label": "Requirement scope" });
+  const isReq = stage === "requirements";
+  const start = guard(async () => {
+    const hasData = isReq ? ctx.project.requirements > 0 || ctx.project.stories > 0 : ctx.project.stories > 0;
+    if (hasData && !(await confirmBox(isReq
+      ? "Re-extracting replaces all requirements and the current backlog, including your edits."
+      : "Regenerating replaces the current stories, including your edits.", { okLabel: isReq ? "Re-extract" : "Regenerate", danger: true }))) return;
+    await api.post(base() + "/runs", { stage, provider_id: provider.value, scope: scope.value });
+    toast(isReq ? "Extraction started" : "Story generation started");
+    rerender();
+  });
+  let statusLine = null;
+  if (running) {
+    statusLine = h("div", { class: "row small", style: { flexBasis: "100%" } }, badge("Running", "blue"),
+      h("span", { class: "muted", id: "run-progress" }, run.progress || "Starting…"));
+  } else if (run && run.status === "failed") {
+    statusLine = h("div", { class: "callout error small", style: { flexBasis: "100%" } }, icon("alert"), "Last run failed: " + run.error);
+  } else if (run) {
+    statusLine = h("div", { class: "muted small", style: { flexBasis: "100%" } },
+      "Last run " + timeAgo(run.created) + " with " + run.provider + (run.model ? " (" + run.model + ")" : "") + " · " +
+      run.item_count + (isReq ? " requirements" : " stories") + " · " + duration(run.duration_ms) +
+      (run.tokens_in + run.tokens_out ? " · " + fmt(run.tokens_in + run.tokens_out) + " tokens" : ""));
+  }
+  return h("div", { class: "card", style: { marginBottom: "16px" } },
+    h("div", { class: "runbox" },
+      h("div", { class: "grow" }, h("div", { class: "title" }, isReq ? "Extract requirements from BRDs" : "Generate user stories"),
+        h("div", { class: "muted small" }, isReq
+          ? "AI reads each BRD section and proposes atomic requirements with types and sources for your review."
+          : "Builds epics, features and INVEST stories with Gherkin criteria, linked to requirement IDs.")),
+      provider, isReq ? null : scope,
+      h("button", { class: "btn btn-primary", disabled: running, onclick: start }, icon("sparkles"), running ? "Running…" : isReq ? (ctx.project.requirements ? "Re-extract" : "Extract") : (ctx.project.stories ? "Regenerate" : "Generate")),
+      running ? h("div", { class: "progress-line" }) : null, statusLine));
+}
+
+function schedulePoll() {
+  const running = Object.values(ctx.project.runs || {}).some((r) => r && r.status === "running");
+  if (!running) return;
+  const pid = ctx.pid;
+  pollTimer = setTimeout(guard(async () => {
+    if (!ctx || ctx.pid !== pid) return;
+    const runs = await api.get(base() + "/runs?limit=2");
+    const active = runs.find((r) => r.status === "running");
+    if (active) {
+      const el = document.getElementById("run-progress");
+      if (el) el.textContent = active.progress || "Working…";
+      schedulePoll();
+    } else {
+      const last = runs[0];
+      if (last && last.status === "failed") toast("Run failed: " + last.error, "error");
+      else toast("Run finished: " + (last ? last.item_count : 0) + " items", "ok");
+      rerender();
+    }
+  }), 1500);
+}
+
+// ---- overview -----------------------------------------------------------
+
+async function viewOverview(body) {
+  const p = ctx.project;
+  const runs = await api.get(base() + "/runs?limit=8");
+  const stat = (label, value, foot, pct) => h("div", { class: "stat" }, h("div", { class: "label" }, label), h("div", { class: "value" }, value),
+    foot ? h("div", { class: "foot" }, foot) : null, pct !== undefined ? meter(pct) : null);
+  const next = !p.documents ? ["Upload BRDs", "Start by adding the business requirements documents for this application.", "sources"]
+    : !p.requirements ? ["Extract requirements", "Let the AI engine propose atomic requirements from your BRDs.", "requirements"]
+    : !p.requirements_approved ? ["Review requirements", "Approve, edit or exclude extracted requirements before generating stories.", "requirements"]
+    : !p.stories ? ["Generate stories", "Turn reviewed requirements into epics, features and user stories.", "stories"]
+    : p.coverage < 100 ? ["Close traceability gaps", "Some requirements are not covered by any story.", "trace"]
+    : p.stories_ready < p.stories ? ["Refine stories", "Resolve quality issues and open questions until stories meet the Definition of Ready.", "stories"]
+    : ["Export the backlog", "Everything is covered. Export to Jira, Azure DevOps or Excel.", "export"];
+  const total = Object.values(p.requirement_types).reduce((a, b) => a + b, 0);
+  mount(body, 
+    h("div", { class: "callout info", style: { marginBottom: "16px", alignItems: "center" } }, icon("sparkles"),
+      h("div", { class: "grow" }, h("b", {}, "Next step: " + next[0]), h("div", { class: "small" }, next[1])),
+      h("a", { class: "btn btn-sm btn-primary", href: "#/p/" + p.id + "/" + next[2] }, "Go")),
+    h("div", { class: "stats", style: { marginBottom: "16px" } },
+      stat("BRD documents", p.documents),
+      stat("Requirements", p.requirements, p.requirements_approved + " approved · " + p.requirements_flagged + " flagged",
+        p.requirements ? Math.round((100 * p.requirements_approved) / p.requirements) : 0),
+      stat("Stories", p.stories, p.stories_ready + " meet Definition of Ready", p.stories ? Math.round((100 * p.stories_ready) / p.stories) : 0),
+      stat("Coverage", p.coverage + "%", "Requirements linked to stories", p.coverage),
+      stat("Requirement quality", p.requirement_quality || "–", "ISO 29148 checks", p.requirement_quality),
+      stat("Story quality", p.story_quality || "–", "INVEST + Gherkin checks", p.story_quality)),
+    h("div", { class: "grid grid-2" },
+      h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Requirement mix")),
+        h("div", { class: "card-body" }, total ? [
+          h("div", { class: "typebar" }, Object.entries(p.requirement_types).filter(([, n]) => n).map(([t, n]) =>
+            h("span", { title: t + ": " + n, style: { width: (100 * n) / total + "%", background: TYPE_COLORS[t] } }))),
+          h("div", { class: "legend" }, Object.entries(p.requirement_types).map(([t, n]) => h("span", {}, h("i", { style: { background: TYPE_COLORS[t] } }), t + " " + n)))]
+          : h("p", { class: "muted" }, "No requirements yet."))),
+      h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Recent runs")),
+        runs.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
+          h("thead", {}, h("tr", {}, ["Stage", "Provider", "Status", "Items", "When"].map((x) => h("th", {}, x)))),
+          h("tbody", {}, runs.map((r) => h("tr", {},
+            h("td", {}, r.stage), h("td", { class: "small" }, r.provider + (r.model ? " · " + r.model : "")),
+            h("td", {}, badge(r.status, statusTone[r.status])), h("td", {}, r.status === "done" ? r.item_count : "–"),
+            h("td", { class: "muted small nowrap" }, timeAgo(r.created)))))))
+          : h("div", { class: "card-body muted" }, "No runs yet."))));
+}
+
+// ---- sources ------------------------------------------------------------
+
+async function viewSources(body) {
+  const docs = await api.get(base() + "/documents");
+  const fileInput = h("input", { type: "file", multiple: true, accept: ".pdf,.docx,.md,.markdown,.txt", class: "hidden" });
+  const uploadFiles = guard(async (files) => {
+    for (const f of files) {
+      const fd = new FormData(); fd.append("file", f);
+      const r = await api.upload(base() + "/documents", fd);
+      toast("Added " + r.filename + " (" + r.indexed_chunks + " passages indexed)", "ok");
+    }
+    rerender();
+  });
+  fileInput.addEventListener("change", () => uploadFiles([...fileInput.files]));
+  const drop = h("div", { class: "dropzone", tabindex: "0", role: "button", onclick: () => fileInput.click(),
+    onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") fileInput.click(); } },
+    icon("upload"), h("div", { style: { fontWeight: 600, marginTop: "6px" } }, "Drop BRD files here or click to browse"),
+    h("div", { class: "small" }, "PDF, Word (.docx), Markdown or text · up to 10 MB each"));
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); uploadFiles([...e.dataTransfer.files]); });
+
+  const pasteName = h("input", { type: "text", value: "pasted-brd.md" });
+  const pasteText = h("textarea", { rows: 6, placeholder: "Paste BRD text. Markdown headings (#, ##) become epics and features." });
+  const q = h("input", { type: "search", placeholder: "e.g. cold chain returns" });
+  const results = h("div", { class: "stack", style: { marginTop: "12px" } });
+  const search = guard(async () => {
+    if (!q.value.trim()) return;
+    const hits = await api.post(base() + "/search", { query: q.value });
+    results.replaceChildren(...(hits.length ? hits.map((x) => h("div", { class: "callout" },
+      h("div", { class: "grow" }, h("div", { class: "row small" }, h("b", {}, x.filename), h("span", { class: "muted right" }, "match " + Math.round(x.score * 100) + "%")),
+        h("div", { class: "small", style: { marginTop: "4px" } }, x.text.slice(0, 320) + (x.text.length > 320 ? "…" : "")))))
+      : [h("p", { class: "muted" }, "No matching passages.")]));
+  });
+  q.addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+
+  mount(body, 
+    h("div", { class: "grid grid-2", style: { marginBottom: "16px" } },
+      h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Upload BRDs")), h("div", { class: "card-body" }, drop, fileInput)),
+      h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Paste text")),
+        h("div", { class: "card-body stack" }, field("Document name", pasteName), pasteText,
+          h("div", {}, h("button", { class: "btn", onclick: guard(async () => {
+            if (!pasteText.value.trim()) throw new Error("Paste some text first");
+            await api.post(base() + "/documents/text", { name: pasteName.value, text: pasteText.value });
+            toast("Document added", "ok"); rerender();
+          }) }, icon("plus"), "Add document"))))),
+    h("div", { class: "card", style: { marginBottom: "16px" } },
+      h("div", { class: "card-head" }, h("h3", { class: "grow" }, "Documents"), h("span", { class: "muted small" }, docs.length + " total")),
+      docs.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
+        h("thead", {}, h("tr", {}, ["Name", "Size", "Indexed passages", "Added", ""].map((x) => h("th", {}, x)))),
+        h("tbody", {}, docs.map((d) => h("tr", {},
+          h("td", {}, h("div", { class: "row" }, icon("file"), h("b", {}, d.filename))),
+          h("td", { class: "muted" }, fmt(Math.round(d.chars / 6)) + " words"),
+          h("td", {}, d.chunks), h("td", { class: "muted small" }, timeAgo(d.created)),
+          h("td", { class: "nowrap", style: { textAlign: "right" } },
+            h("button", { class: "btn btn-sm btn-ghost", onclick: guard(async () => {
+              const full = await api.get(base() + "/documents/" + d.id);
+              modal({ title: full.filename, wide: true, body: h("div", { class: "pre" }, full.text), actions: [] });
+            }) }, "View"),
+            h("button", { class: "btn btn-sm btn-ghost btn-danger", onclick: guard(async () => {
+              if (!(await confirmBox("Remove " + d.filename + "? Existing requirements are kept.", { danger: true, okLabel: "Remove" }))) return;
+              await api.del(base() + "/documents/" + d.id); rerender();
+            }) }, "Remove")))))))
+        : empty({ iconName: "file", title: "No BRDs yet", text: "Upload or paste at least one business requirements document." })),
+    h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Search BRDs"), h("span", { class: "muted small" }, "Semantic search over indexed passages")),
+      h("div", { class: "card-body" }, h("div", { class: "row" }, q, h("button", { class: "btn", onclick: search }, icon("search"), "Search")), results)));
+}
+
+// ---- requirements -------------------------------------------------------
+
+async function viewRequirements(body) {
+  const reqs = await api.get(base() + "/requirements");
+  mount(body, runPanel("requirements"));
+  if (!reqs.length) {
+    mount(body, h("div", { class: "card" }, empty({ iconName: "list", title: "No requirements yet",
+      text: ctx.project.documents ? "Extract requirements from your BRDs, or add them manually." : "Add BRDs on the Sources tab first.",
+      action: h("button", { class: "btn", onclick: () => reqDrawer(null) }, icon("plus"), "Add manually") })));
+    return;
+  }
+  const selected = new Set();
+  const tableBox = h("div");
+  const bulk = h("div");
+  const q = h("input", { type: "search", class: "search", placeholder: "Search requirements", value: filters.reqQ });
+  const type = select([["", "All types"], ...state.meta.requirement_types.map((t) => [t, t])], filters.reqType, { "aria-label": "Type" });
+  const status = select([["", "All statuses"], ["draft", "Draft"], ["approved", "Approved"], ["excluded", "Excluded"]], filters.reqStatus, { "aria-label": "Status" });
+  const flagged = h("input", { type: "checkbox", checked: filters.reqFlagged });
+
+  const visible = () => reqs.filter((r) =>
+    (!filters.reqQ || (r.key + " " + r.statement + " " + r.section).toLowerCase().includes(filters.reqQ.toLowerCase())) &&
+    (!filters.reqType || r.type === filters.reqType) && (!filters.reqStatus || r.status === filters.reqStatus) &&
+    (!filters.reqFlagged || r.issues.some((i) => i.severity !== "info")));
+
+  const renderBulk = () => bulk.replaceChildren(...(selected.size ? [h("div", { class: "bulkbar" }, selected.size + " selected",
+    h("span", { class: "grow" }),
+    ...[["approved", "Approve"], ["draft", "Mark draft"], ["excluded", "Exclude"]].map(([s, l]) =>
+      h("button", { class: "btn btn-sm", onclick: guard(async () => {
+        await api.post(base() + "/requirements/bulk", { ids: [...selected], status: s }); toast(l + ": " + selected.size, "ok"); rerender();
+      }) }, l)),
+    h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); renderTable(); renderBulk(); } }, "Clear"))] : []));
+
+  const renderTable = () => {
+    const rows = visible();
+    const all = h("input", { type: "checkbox", "aria-label": "Select all", checked: rows.length > 0 && rows.every((r) => selected.has(r.id)),
+      onchange: (e) => { rows.forEach((r) => (e.target.checked ? selected.add(r.id) : selected.delete(r.id))); renderTable(); renderBulk(); } });
+    tableBox.replaceChildren(h("div", { class: "card table-wrap" }, h("table", { class: "table" },
+      h("thead", {}, h("tr", {}, h("th", { class: "w-check" }, all), ...["ID", "Type", "Requirement", "Section", "Quality", "Status"].map((x) => h("th", {}, x)))),
+      h("tbody", {}, rows.length ? rows.map((r) => h("tr", { class: "clickable" + (selected.has(r.id) ? " selected" : ""), onclick: () => reqDrawer(r) },
+        h("td", { onclick: (e) => e.stopPropagation() }, h("input", { type: "checkbox", "aria-label": "Select " + r.key, checked: selected.has(r.id),
+          onchange: (e) => { e.target.checked ? selected.add(r.id) : selected.delete(r.id); renderTable(); renderBulk(); } })),
+        h("td", { class: "mono nowrap" }, r.key),
+        h("td", {}, badge(r.type, typeTone[r.type])),
+        h("td", { class: "statement" }, r.statement,
+          r.issues.length ? h("div", { class: "issues" }, r.issues.map((i) => h("span", { class: "chip", title: i.message }, issueIcon(i.severity), i.code))) : null),
+        h("td", { class: "small muted" }, r.section),
+        h("td", {}, scorePill(r.quality_score)),
+        h("td", {}, badge(r.status, statusTone[r.status]))))
+        : h("tr", {}, h("td", { colspan: "7", class: "muted", style: { textAlign: "center", padding: "28px" } }, "No requirements match the filters."))))));
+  };
+  q.addEventListener("input", () => { filters.reqQ = q.value; renderTable(); });
+  type.addEventListener("change", () => { filters.reqType = type.value; renderTable(); });
+  status.addEventListener("change", () => { filters.reqStatus = status.value; renderTable(); });
+  flagged.addEventListener("change", () => { filters.reqFlagged = flagged.checked; renderTable(); });
+
+  const approved = reqs.filter((r) => r.status === "approved").length;
+  mount(body, h("div", { class: "toolbar" }, q, type, status, h("label", { class: "switch small" }, flagged, "Flagged only"),
+    h("span", { class: "muted small right" }, approved + " of " + reqs.length + " approved"),
+    h("button", { class: "btn", onclick: () => reqDrawer(null) }, icon("plus"), "Add requirement")), bulk, tableBox);
+  renderTable();
+}
+
+function reqDrawer(r) {
+  const isNew = !r;
+  r = r || { statement: "", type: "functional", status: "draft", epic: "", section: "", actors: [], product_scope: [], compliance_tags: [], issues: [], quality_score: 100 };
+  let status = r.status;
+  const statement = h("textarea", { rows: 4, value: r.statement, placeholder: "The system shall …" });
+  const type = select(state.meta.requirement_types.map((t) => [t, t]), r.type);
+  const epic = h("input", { type: "text", value: r.epic || "" });
+  const section = h("input", { type: "text", value: r.section || "" });
+  const sourceId = h("input", { type: "text", value: r.source_id || "", placeholder: "e.g. BR-12" });
+  const actors = tagsInput(r.actors, []);
+  const scope = tagsInput(r.product_scope, state.meta.product_classes);
+  const compliance = tagsInput(r.compliance_tags, state.meta.compliance_tags);
+  const rationale = h("textarea", { rows: 2, value: r.rationale || "" });
+  const notes = h("textarea", { rows: 2, value: r.notes || "", placeholder: "Reviewer notes, decisions, clarifications" });
+  const save = guard(async () => {
+    const payload = { statement: statement.value, type: type.value, status, epic: epic.value, section: section.value, source_id: sourceId.value,
+      actors: actors.get(), product_scope: scope.get(), compliance_tags: compliance.get(), rationale: rationale.value, notes: notes.value };
+    if (isNew) await api.post(base() + "/requirements", Object.assign(payload, { source_ref: "Manual" }));
+    else await api.patch(base() + "/requirements/" + r.id, payload);
+    close(); toast(isNew ? "Requirement added" : "Saved " + r.key, "ok"); rerender();
+  });
+  const remove = guard(async () => {
+    if (!(await confirmBox("Delete " + r.key + "? Stories keep a dangling link until regenerated.", { danger: true, okLabel: "Delete" }))) return;
+    await api.del(base() + "/requirements/" + r.id); close(); rerender();
+  });
+  const close = drawer({
+    subtitle: isNew ? "New requirement" : r.key + " · " + (r.source_ref || ""), title: isNew ? "Add requirement" : "Review requirement",
+    body: h("div", { class: "stack" },
+      isNew ? null : h("div", { class: "card card-body" }, h("div", { class: "row", style: { marginBottom: "10px" } }, h("b", { class: "grow" }, "Quality (ISO/IEC/IEEE 29148)"), scorePill(r.quality_score)), issueList(r.issues)),
+      field("Review status", segmented([["draft", "Draft"], ["approved", "Approved"], ["excluded", "Excluded"]], status, (v) => (status = v))),
+      field("Statement", statement, "One verifiable requirement. Avoid vague terms such as 'fast' or 'user-friendly'."),
+      h("div", { class: "form-grid" }, field("Type", type), field("BRD reference ID", sourceId), field("Epic", epic), field("Section / feature", section)),
+      field("Actors", actors.el),
+      field("Product classes", scope.el, "Leave empty if it applies to all products."),
+      field("Compliance", compliance.el),
+      field("Rationale", rationale), field("Notes", notes)),
+    footer: [h("button", { class: "btn btn-primary", onclick: save }, "Save"), h("span", { class: "grow" }),
+      isNew ? null : h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete")],
+  });
+}
+
+// ---- stories ------------------------------------------------------------
+
+async function viewStories(body) {
+  const [stories, reqs] = await Promise.all([api.get(base() + "/stories"), api.get(base() + "/requirements")]);
+  ctx.reqs = reqs;
+  mount(body, runPanel("stories"));
+  if (!stories.length) {
+    mount(body, h("div", { class: "card" }, empty({ iconName: "map", title: "No stories yet",
+      text: reqs.length ? "Generate stories from your reviewed requirements." : "Extract and review requirements first.",
+      action: h("button", { class: "btn", onclick: () => storyDrawer(null) }, icon("plus"), "Add manually") })));
+    return;
+  }
+  const box = h("div");
+  const q = h("input", { type: "search", class: "search", placeholder: "Search stories", value: filters.storyQ });
+  const status = select([["", "All statuses"], ["draft", "Draft"], ["approved", "Approved"], ["rejected", "Rejected"]], filters.storyStatus, { "aria-label": "Status" });
+  const ready = select([["", "Any readiness"], ["ready", "Ready"], ["not-ready", "Needs work"]], filters.storyReady, { "aria-label": "Readiness" });
+  const visible = () => stories.filter((s) =>
+    (!filters.storyQ || (s.key + " " + s.title + " " + s.narrative + " " + s.epic + " " + s.feature).toLowerCase().includes(filters.storyQ.toLowerCase())) &&
+    (!filters.storyStatus || s.status === filters.storyStatus) &&
+    (!filters.storyReady || (filters.storyReady === "ready") === s.ready));
+  const render = () => { const rows = visible(); box.replaceChildren(filters.storyView === "map" ? storyMap(rows) : storyTable(rows)); };
+  q.addEventListener("input", () => { filters.storyQ = q.value; render(); });
+  status.addEventListener("change", () => { filters.storyStatus = status.value; render(); });
+  ready.addEventListener("change", () => { filters.storyReady = ready.value; render(); });
+  const points = stories.filter((s) => s.status !== "rejected").reduce((a, s) => a + (s.story_points || 0), 0);
+  mount(body, h("div", { class: "toolbar" },
+    segmented([["map", "Story map"], ["list", "List"]], filters.storyView, (v) => { filters.storyView = v; render(); }),
+    q, status, ready,
+    h("span", { class: "muted small right" }, stories.filter((s) => s.ready).length + " ready · " + points + " points"),
+    h("button", { class: "btn", onclick: () => storyDrawer(null) }, icon("plus"), "Add story")), box);
+  render();
+}
+
+function storyMap(rows) {
+  if (!rows.length) return h("p", { class: "muted" }, "No stories match the filters.");
+  // Backbone: one column per feature (user activity), labelled with its epic; stories stack by priority.
+  const order = { High: 0, Medium: 1, Low: 2 };
+  const cols = new Map();
+  for (const s of rows) {
+    const k = s.epic + "\u0000" + s.feature;
+    if (!cols.has(k)) cols.set(k, { epic: s.epic, feature: s.feature, items: [] });
+    cols.get(k).items.push(s);
+  }
+  return h("div", { class: "map" }, [...cols.values()].map((c) =>
+    h("div", { class: "map-col" },
+      h("div", { class: "map-col-head" }, h("div", { class: "grow" }, h("div", { class: "map-feature", style: { padding: 0 } }, c.epic), h("h3", {}, c.feature)), badge(String(c.items.length))),
+      c.items.sort((a, b) => order[a.priority] - order[b.priority]).map((s) => h("div", { class: "story-card " + s.status, tabindex: "0", role: "button", onclick: () => storyDrawer(s),
+        onkeydown: (e) => { if (e.key === "Enter") storyDrawer(s); } },
+        h("div", { class: "row" }, h("span", { class: "dot " + s.priority, title: s.priority + " priority" }), h("span", { class: "k" }, s.key),
+          h("span", { class: "right" }, s.status !== "draft" ? badge(s.status, statusTone[s.status]) : null)),
+        h("div", { class: "t" }, s.title),
+        h("div", { class: "row small muted" }, h("span", { class: "grow" }, s.persona),
+          s.story_points ? badge(s.story_points + " pt") : null,
+          s.ready ? h("span", { title: "Meets Definition of Ready", style: { color: "var(--green)", display: "inline-flex" } }, icon("check")) : null,
+          scorePill(s.quality_score)))))));
+}
+
+function storyTable(rows) {
+  return h("div", { class: "card table-wrap" }, h("table", { class: "table" },
+    h("thead", {}, h("tr", {}, ["ID", "Story", "Epic / feature", "Priority", "Pts", "Requirements", "Quality", "Status"].map((x) => h("th", {}, x)))),
+    h("tbody", {}, rows.map((s) => h("tr", { class: "clickable", onclick: () => storyDrawer(s) },
+      h("td", { class: "mono nowrap" }, s.key),
+      h("td", {}, h("b", {}, s.title), h("div", { class: "small muted" }, s.persona)),
+      h("td", { class: "small" }, s.epic, h("div", { class: "muted" }, s.feature)),
+      h("td", { class: "nowrap" }, h("span", { class: "row" }, h("span", { class: "dot " + s.priority }), s.priority)),
+      h("td", {}, s.story_points || "–"),
+      h("td", { class: "small mono" }, s.requirement_ids.join(", ") || "–"),
+      h("td", { class: "nowrap" }, h("span", { class: "row" }, scorePill(s.quality_score), s.ready ? badge("Ready", "green") : null)),
+      h("td", {}, badge(s.status, statusTone[s.status])))))));
+}
+
+function storyDrawer(s) {
+  const isNew = !s;
+  s = s || { title: "", persona: "", narrative: "As a , I want , so that .", acceptance_criteria: [], priority: "Medium", story_points: null, status: "draft",
+    epic: "", feature: "", requirement_ids: [], labels: [], product_scope: [], compliance_tags: [], variant_criteria: [], open_questions: [], issues: [], quality_score: 0 };
+  let status = s.status;
+  const reqs = ctx.reqs || [];
+  const title = h("input", { type: "text", value: s.title });
+  const persona = h("input", { type: "text", value: s.persona });
+  const narrative = h("textarea", { rows: 3, value: s.narrative });
+  const ac = linesInput(s.acceptance_criteria, 6, "Given … when … then …");
+  const priority = select(state.meta.priorities.map((p) => [p, p]), s.priority);
+  const points = select([["", "Not estimated"], ...state.meta.points.map((p) => [p, p + " points"])], s.story_points || "");
+  const epic = h("input", { type: "text", value: s.epic });
+  const feature = h("input", { type: "text", value: s.feature });
+  const links = tagsInput(s.requirement_ids, reqs.map((r) => r.key));
+  const labels = tagsInput(s.labels, []);
+  const scope = tagsInput(s.product_scope, state.meta.product_classes);
+  const compliance = tagsInput(s.compliance_tags, state.meta.compliance_tags);
+  const variants = linesInput((s.variant_criteria || []).map((v) => v.scope + ": " + v.criteria), 3, "Product class: criteria");
+  const questions = linesInput(s.open_questions, 2, "One question per line");
+  const notes = h("textarea", { rows: 2, value: s.notes || "" });
+  const linked = reqs.filter((r) => s.requirement_ids.includes(r.key));
+  const save = guard(async () => {
+    const payload = { title: title.value, persona: persona.value, narrative: narrative.value, acceptance_criteria: readLines(ac),
+      priority: priority.value, story_points: points.value ? Number(points.value) : null, status, epic: epic.value, feature: feature.value,
+      requirement_ids: links.get(), labels: labels.get(), product_scope: scope.get(), compliance_tags: compliance.get(),
+      variant_criteria: readLines(variants).map((line) => { const i = line.indexOf(":"); return i > 0 ? { scope: line.slice(0, i).trim(), criteria: line.slice(i + 1).trim() } : { scope: "", criteria: line }; }),
+      open_questions: readLines(questions), notes: notes.value };
+    if (isNew) await api.post(base() + "/stories", payload);
+    else await api.patch(base() + "/stories/" + s.id, payload);
+    close(); toast(isNew ? "Story added" : "Saved " + s.key, "ok"); rerender();
+  });
+  const remove = guard(async () => {
+    if (!(await confirmBox("Delete " + s.key + "?", { danger: true, okLabel: "Delete" }))) return;
+    await api.del(base() + "/stories/" + s.id); close(); rerender();
+  });
+  const close = drawer({
+    subtitle: isNew ? "New story" : s.key + " · " + s.epic + " › " + s.feature, title: isNew ? "Add story" : s.title,
+    body: h("div", { class: "stack" },
+      isNew ? null : h("div", { class: "card card-body" },
+        h("div", { class: "row", style: { marginBottom: "10px" } }, h("b", { class: "grow" }, "Quality (INVEST, Definition of Ready)"),
+          s.ready ? badge("Ready", "green") : badge("Needs work", "amber"), scorePill(s.quality_score)), issueList(s.issues)),
+      field("Review status", segmented([["draft", "Draft"], ["approved", "Approved"], ["rejected", "Rejected"]], status, (v) => (status = v))),
+      field("Title", title),
+      h("div", { class: "form-grid" }, field("Persona", persona), field("Priority", priority), field("Epic", epic), field("Feature", feature)),
+      field("Narrative", narrative, "As a <role>, I want <goal>, so that <benefit>."),
+      field("Acceptance criteria", ac, "One per line, in Given / When / Then form."),
+      field("Product variants", variants, "One per line: 'Product class: criteria'. Variants avoid duplicate stories per product type."),
+      h("div", { class: "form-grid" }, field("Estimate", points), field("Requirement links", links.el, null, "")),
+      linked.length ? h("div", { class: "callout small" }, h("div", { class: "stack", style: { gap: "4px" } },
+        linked.map((r) => h("div", {}, h("b", { class: "mono" }, r.key + " "), r.statement)))) : null,
+      field("Labels", labels.el), field("Product classes", scope.el), field("Compliance", compliance.el),
+      field("Open questions", questions, "Stories with open questions don't meet the Definition of Ready."), field("Notes", notes)),
+    footer: [h("button", { class: "btn btn-primary", onclick: save }, "Save"), h("span", { class: "grow" }),
+      isNew ? null : h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete")],
+  });
+}
+
+// ---- traceability -------------------------------------------------------
+
+async function viewTrace(body) {
+  const [t, stories, reqs] = await Promise.all([api.get(base() + "/traceability"), api.get(base() + "/stories"), api.get(base() + "/requirements")]);
+  ctx.reqs = reqs;
+  if (!t.total) {
+    mount(body, h("div", { class: "card" }, empty({ iconName: "link", title: "Nothing to trace yet", text: "Extract requirements and generate stories to build the traceability matrix." })));
+    return;
+  }
+  const byId = Object.fromEntries(stories.map((s) => [s.id, s]));
+  const box = h("div");
+  const gapsOnly = h("input", { type: "checkbox", checked: filters.traceGaps });
+  const render = () => {
+    const rows = t.rows.filter((r) => !filters.traceGaps || !r.stories.length);
+    box.replaceChildren(h("div", { class: "card table-wrap" }, h("table", { class: "table" },
+      h("thead", {}, h("tr", {}, ["Requirement", "Type", "Statement", "Covered by", "Coverage"].map((x) => h("th", {}, x)))),
+      h("tbody", {}, rows.map((r) => h("tr", {},
+        h("td", { class: "mono nowrap" }, r.key), h("td", {}, badge(r.type, typeTone[r.type])),
+        h("td", { class: "statement" }, r.statement, h("div", { class: "small muted" }, r.section)),
+        h("td", {}, h("div", { class: "row wrap" }, r.stories.map((s) => h("button", { class: "chip", style: { cursor: "pointer" }, title: s.title, onclick: () => storyDrawer(byId[s.id]) }, s.key)))),
+        h("td", {}, r.stories.length ? badge("Covered", "green") : badge("Gap", "red"))))))));
+  };
+  gapsOnly.addEventListener("change", () => { filters.traceGaps = gapsOnly.checked; render(); });
+  mount(body, 
+    h("div", { class: "stats", style: { marginBottom: "16px" } },
+      h("div", { class: "stat" }, h("div", { class: "label" }, "Requirement coverage"), h("div", { class: "value" }, t.coverage + "%"), meter(t.coverage)),
+      h("div", { class: "stat" }, h("div", { class: "label" }, "Covered requirements"), h("div", { class: "value" }, t.covered + " / " + t.total)),
+      h("div", { class: "stat" }, h("div", { class: "label" }, "Gaps"), h("div", { class: "value", style: { color: t.total - t.covered ? "var(--red)" : "" } }, t.total - t.covered), h("div", { class: "foot" }, "Requirements without stories")),
+      h("div", { class: "stat" }, h("div", { class: "label" }, "Orphan stories"), h("div", { class: "value" }, t.orphans.length), h("div", { class: "foot" }, "Stories without requirements"))),
+    t.orphans.length ? h("div", { class: "callout warn", style: { marginBottom: "16px" } }, icon("alert"),
+      h("div", {}, h("b", {}, "Stories not linked to any requirement: "),
+        h("span", { class: "row wrap", style: { display: "inline-flex" } }, t.orphans.map((o) => h("button", { class: "chip", style: { cursor: "pointer" }, onclick: () => storyDrawer(byId[o.id]) }, o.key + " " + o.title))))) : null,
+    h("div", { class: "toolbar" }, h("label", { class: "switch small" }, gapsOnly, "Show gaps only"),
+      h("a", { class: "btn btn-sm right", href: base() + "/export?format=rtm-csv&scope=all" }, icon("download"), "Download matrix")),
+    box);
+  render();
+}
+
+// ---- export -------------------------------------------------------------
+
+async function viewExport(body) {
+  const p = ctx.project;
+  const grid = h("div", { class: "grid grid-3" });
+  const note = h("div", { class: "muted small" });
+  const render = () => {
+    const approvedOnly = filters.exportScope === "approved";
+    const n = approvedOnly ? p.stories_approved : p.stories;
+    note.textContent = approvedOnly
+      ? p.stories_approved + " approved stories and " + p.requirements_approved + " approved requirements will be exported."
+      : p.stories + " stories (excluding rejected) and " + p.requirements + " requirements (excluding excluded) will be exported.";
+    grid.replaceChildren(...state.meta.formats.map((f) => h("div", { class: "card card-body stack", style: { gap: "8px" } },
+      h("div", { class: "row" }, icon(f.ext === "xlsx" ? "chart" : "file"), h("h3", { class: "grow" }, f.label), badge("." + f.ext)),
+      h("p", { class: "muted small grow" }, f.description),
+      h("div", {}, h("button", { class: "btn btn-sm", disabled: !n && !(approvedOnly ? p.requirements_approved : p.requirements),
+        onclick: () => download(base() + "/export?format=" + encodeURIComponent(f.id) + "&scope=" + (approvedOnly ? "approved" : "all")) }, icon("download"), "Download")))));
+  };
+  mount(body, 
+    h("div", { class: "card card-body", style: { marginBottom: "16px" } },
+      h("div", { class: "row wrap" }, h("div", { class: "grow" }, h("h3", {}, "What to export"), note),
+        segmented([["approved", "Approved only"], ["all", "Everything in review"]], filters.exportScope, (v) => { filters.exportScope = v; render(); }))),
+    grid,
+    h("p", { class: "muted small", style: { marginTop: "16px" } },
+      "Direct push to Jira, Azure DevOps and ServiceNow is planned; use the import files meanwhile."));
+  render();
+}

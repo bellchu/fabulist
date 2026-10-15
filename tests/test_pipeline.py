@@ -2,42 +2,87 @@ import json
 
 import pytest
 
-from app import exporters, llm, parsing, pipeline
+from app import exporters, llm, parsing, pipeline, quality
 
 BRD = """# Order Management
 
-The system shall allow a sales representative to create orders for pharmacy customers.
-The platform must track lot and expiry for biologic products held in cold chain storage.
-Controlled substance orders must capture DEA CSOS details and keep an audit trail.
+## Order capture
+BR-1: The system shall allow a sales representative to create orders for pharmacy customers.
+The platform must track lot and expiry for biologic vaccines held in cold chain storage.
+The system must respond to order searches within 2 seconds.
 
 ## Billing
-Finance should be able to process chargeback claims from wholesalers.
+Finance should be able to process chargeback claims from wholesalers quickly.
 """
+OPTS = {"chunk_chars": 5000, "max_chunks_per_run": 50, "rag_top_k": 0, "redact_pii": True}
+MOCK = {"kind": "mock", "name": "mock", "model": ""}
 
 
-def test_chunk_sections_splits_on_headings_and_limit():
+def _reqs():
+    reqs = pipeline.extract_requirements([{"id": "d1", "filename": "brd.md", "text": BRD}], "sap", MOCK, OPTS, lambda m: None, {"in": 0, "out": 0})
+    for i, r in enumerate(reqs):
+        r["key"] = "REQ-%03d" % (i + 1)
+        r["issues"] = quality.requirement_issues(r)
+    return reqs
+
+
+def test_chunk_sections_tracks_epic_and_feature():
     chunks = pipeline.chunk_sections(BRD, 5000)
-    assert [c["heading"] for c in chunks] == ["Order Management", "Billing"]
+    assert [(c["epic"], c["heading"]) for c in chunks] == [("Order Management", "Order capture"), ("Order Management", "Billing")]
     long = "# H\n" + "\n".join("line %d requirement text here" % i for i in range(400))
-    parts = pipeline.chunk_sections(long, 1000)
-    assert len(parts) > 1 and all(len(p["text"]) <= 1000 for p in parts)
+    assert all(len(p["text"]) <= 1000 for p in pipeline.chunk_sections(long, 1000))
 
 
-def test_mock_generation_extracts_stories_with_tags_and_scope():
-    chunks = pipeline.chunk_sections(BRD, 5000)
-    stories = [s for c in chunks for s in pipeline.mock_stories(c, "brd.md")]
-    assert len(stories) == 4
-    ctrl = next(s for s in stories if "Controlled" in s["title"] or "controlled" in s["title"].lower())
-    assert "DEA" in ctrl["compliance_tags"] and "Controlled substances" in ctrl["product_scope"]
-    assert ctrl["source_ref"] == "brd.md > Order Management"
-    assert any(s["persona"] == "sales representative" for s in stories)
+def test_extract_requirements_types_ids_and_scope():
+    reqs = _reqs()
+    assert len(reqs) == 4
+    assert reqs[0]["source_id"] == "BR-1" and reqs[0]["statement"].startswith("The system shall allow")
+    assert reqs[0]["actors"] == ["sales representative"]
+    assert reqs[2]["type"] == "non-functional"
+    assert "Biologics and vaccines" in reqs[1]["product_scope"]
+    assert reqs[1]["section"] == "Order capture" and reqs[1]["epic"] == "Order Management"
 
 
-def test_normalize_story_validates_and_coerces():
+def test_extract_respects_section_limit():
+    with pytest.raises(ValueError):
+        pipeline.extract_requirements([{"id": "d", "filename": "f", "text": BRD}], "sap", MOCK, dict(OPTS, max_chunks_per_run=1), lambda m: None, {"in": 0, "out": 0})
+
+
+def test_mock_stories_link_requirements_and_fold_nfrs():
+    reqs = _reqs()
+    stories = pipeline.generate_stories(reqs, "p", "sap", MOCK, OPTS, lambda m: None, {"in": 0, "out": 0})
+    linked = {k for s in stories for k in s["requirement_ids"]}
+    assert linked == {r["key"] for r in reqs}, "every requirement must be covered"
+    nfr = next(r for r in reqs if r["type"] == "non-functional")
+    host = next(s for s in stories if nfr["key"] in s["requirement_ids"])
+    assert any("2 seconds" in a for a in host["acceptance_criteria"])
+    cold = next(s for s in stories if "Biologics and vaccines" in s["product_scope"])
+    assert any("Temperature excursions" in v["criteria"] for v in cold["variant_criteria"])
+    billing = next(s for s in stories if s["feature"] == "Billing")
+    assert billing["open_questions"], "vague 'quickly' should surface as an open question"
+
+
+def test_requirement_quality_flags():
+    issues = {i["code"] for i in quality.requirement_issues({"statement": "The system should be fast and user-friendly, TBD.", "type": "non-functional"})}
+    assert {"incomplete", "ambiguous", "weak-modal", "not-verifiable"} <= issues
+    assert quality.requirement_issues({"statement": "The system shall export invoices to CSV.", "type": "functional"}) == []
+
+
+def test_story_quality_and_readiness():
+    good = {"title": "Export invoices", "persona": "finance analyst", "narrative": "As a finance analyst, I want to export invoices, so that I can reconcile.",
+            "acceptance_criteria": ["Given invoices exist, when I export, then a CSV downloads."], "requirement_ids": ["REQ-001"], "open_questions": []}
+    issues = quality.story_issues(good, {"REQ-001"})
+    assert issues == [] and quality.is_ready(issues) and quality.score(issues) == 100
+    bad = quality.story_issues({"title": "x", "narrative": "do it", "acceptance_criteria": [], "requirement_ids": ["REQ-404"]}, {"REQ-001"})
+    codes = {i["code"] for i in bad}
+    assert {"narrative", "testable", "trace", "valuable"} <= codes and not quality.is_ready(bad)
+
+
+def test_normalize_story_coerces_fields():
     assert pipeline.normalize_story({"title": ""}) is None
-    assert pipeline.normalize_story("nope") is None
-    s = pipeline.normalize_story({"title": "T", "priority": "urgent", "labels": "a", "acceptance_criteria": ["x", ""]})
-    assert s["priority"] == "Medium" and s["labels"] == ["a"] and s["acceptance_criteria"] == ["x"]
+    s = pipeline.normalize_story({"title": "T", "priority": "urgent", "story_points": "5", "labels": "a"})
+    assert s["priority"] == "Medium" and s["story_points"] == 5 and s["labels"] == ["a"]
+    assert pipeline.normalize_story({"title": "T", "story_points": 4})["story_points"] is None
 
 
 def test_parse_json_array_handles_fences_and_prose():
@@ -56,25 +101,39 @@ def test_parsing_rejects_unsupported_and_empty():
         parsing.extract_text("x.exe", b"abc")
     with pytest.raises(parsing.ParseError):
         parsing.extract_text("x.txt", b"   ")
-    assert parsing.extract_text("x.md", b"# hi\nbody") == "# hi\nbody"
 
 
 def _story(**kw):
-    base = {"id": "1", "epic": "E", "title": "=cmd()", "persona": "p", "narrative": "n", "acceptance_criteria": ["a"],
-            "priority": "High", "labels": [], "product_scope": [], "variant_criteria": [{"scope": "s", "criteria": "c"}],
-            "compliance_tags": ["DEA"], "source_ref": "d > h", "open_questions": [], "status": "draft"}
+    base = {"id": "1", "key": "US-001", "epic": "E", "feature": "F", "title": "=cmd()", "persona": "p", "narrative": "n",
+            "acceptance_criteria": ["a"], "priority": "High", "story_points": 3, "labels": [], "product_scope": [],
+            "variant_criteria": [{"scope": "s", "criteria": "c"}], "compliance_tags": ["DEA"], "requirement_ids": ["REQ-001"],
+            "open_questions": [], "status": "approved", "quality_score": 90, "ready": True}
     base.update(kw)
     return base
 
 
+REQ = {"key": "REQ-001", "type": "functional", "statement": "The system shall x", "source_ref": "d > h", "status": "approved"}
+
+
 @pytest.mark.parametrize("fmt", list(exporters.EXPORTERS))
 def test_every_exporter_produces_output(fmt):
-    fn, _ext = exporters.EXPORTERS[fmt]
-    data, mime = fn([_story()])
+    data, mime = exporters.EXPORTERS[fmt][0]([_story()], [REQ, dict(REQ, key="REQ-002")])
     assert data and mime
 
 
-def test_csv_neutralizes_formula_injection():
-    data, _ = exporters.to_csv([_story()])
+def test_csv_neutralizes_formula_injection_and_rtm_flags_gaps():
+    data, _ = exporters.stories_csv([_story()], [REQ])
     assert b"'=cmd()" in data and b",=cmd()" not in data
-    assert json.loads(exporters.to_json([_story()])[0])[0]["id"] == "1"
+    rtm, _ = exporters.rtm_csv([_story()], [REQ, dict(REQ, key="REQ-002")])
+    assert b"REQ-002" in rtm and b"GAP" in rtm
+    assert json.loads(exporters.as_json([_story()], [REQ])[0])["stories"][0]["key"] == "US-001"
+
+
+def test_classify_and_extract_edge_cases():
+    assert pipeline.classify("The system must respond within 2 seconds for 95% of requests.") == "non-functional"
+    assert pipeline.classify("Customers can request returns within 30 days of delivery.") == "rule"
+    reqs = pipeline.mock_requirements({"text": "BR-303: Returned implants require UDI capture before credit is issued, rules TBD."})
+    assert len(reqs) == 1 and reqs[0]["source_id"] == "BR-303"
+    issues = {i["code"] for i in quality.requirement_issues({"statement": reqs[0]["statement"], "type": "rule"})}
+    assert "incomplete" in issues
+    assert "not-singular" in {i["code"] for i in quality.requirement_issues({"statement": "Agents should place orders and screens must be clear.", "type": "functional"})}

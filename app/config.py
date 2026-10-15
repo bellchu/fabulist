@@ -1,4 +1,9 @@
-"""Runtime configuration, read from the environment only."""
+"""Bootstrap configuration from the environment.
+
+Runtime-tunable values (AI providers, generation parameters) live in the database
+and are managed from the admin dashboard; the env values below are only defaults
+and infrastructure settings.
+"""
 import os
 
 
@@ -12,31 +17,26 @@ def _int(name: str, default: int) -> int:
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 MAX_UPLOAD_BYTES = _int("MAX_UPLOAD_MB", 10) * 1024 * 1024
 MAX_DOC_CHARS = _int("MAX_DOC_CHARS", 2_000_000)
+
+# Defaults for admin-tunable generation settings.
 CHUNK_CHARS = _int("CHUNK_CHARS", 6000)
 MAX_CHUNKS_PER_RUN = _int("MAX_CHUNKS_PER_RUN", 200)
+RAG_TOP_K = _int("RAG_TOP_K", 3)
 
-# "mock" works offline; "openai" covers any OpenAI-compatible API (OpenAI,
-# DeepSeek, vLLM, ...); "anthropic" uses the Messages API.
+# Optional provider seeded on first start (e.g. LLM_PROVIDER=openai). Afterwards
+# providers are managed in the admin dashboard.
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "mock").lower()
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
 LLM_TIMEOUT = _int("LLM_TIMEOUT_SECONDS", 120)
-ALLOWED_PROVIDERS = [
-    p.strip().lower()
-    for p in os.environ.get("ALLOWED_PROVIDERS", "mock,openai,anthropic").split(",")
-    if p.strip()
-]
+
+# pgvector column size; must match the embedding model configured in admin.
+EMBED_DIM = _int("EMBED_DIM", 256)
+
+# Encrypts provider API keys at rest. Required to store keys from the admin UI.
+SETTINGS_KEY = os.environ.get("SETTINGS_ENCRYPTION_KEY", "")
 
 # Optional HTTP Basic protection for the whole app.
 BASIC_USER = os.environ.get("APP_BASIC_USER", "")
 BASIC_PASSWORD = os.environ.get("APP_BASIC_PASSWORD", "")
-
-# Embeddings for RAG. "hash" is a deterministic offline fallback; "openai" calls an
-# OpenAI-compatible /embeddings endpoint. EMBED_DIM must match the model's output.
-EMBED_PROVIDER = os.environ.get("EMBED_PROVIDER", "hash").lower()
-EMBED_BASE_URL = os.environ.get("EMBED_BASE_URL", LLM_BASE_URL)
-EMBED_API_KEY = os.environ.get("EMBED_API_KEY", LLM_API_KEY)
-EMBED_MODEL = os.environ.get("EMBED_MODEL", "")
-EMBED_DIM = _int("EMBED_DIM", 256)
-RAG_TOP_K = _int("RAG_TOP_K", 3)

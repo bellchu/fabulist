@@ -1,54 +1,61 @@
 # Fabulist
 
-Turn business requirements documents (BRDs) into SDLC user stories with an AI engine,
-review them, and export to the format your team uses. Built for enterprise application
-delivery (Salesforce, ERP, CRM) in medical product distribution, where requirements vary
-by product class (cold chain, controlled, serialized, kits, devices...).
+Turn business requirements documents (BRDs) into a reviewed, traceable agile backlog.
+Built for enterprise application delivery (Salesforce, ERP, CRM) in medical product
+distribution, where requirements vary by product class (cold chain, controlled,
+serialized, kits, devices...).
 
-## Features
+## Workflow
 
-- Upload PDF / DOCX / MD / TXT BRDs, or paste text
-- Platform profiles: Salesforce, SAP, Oracle, Dynamics, ServiceNow, CRM, generic
-- Product taxonomy and compliance tagging (HIPAA, DSCSA, DEA, 21 CFR Part 11, SOX, GxP, UDI)
-- Product variants captured as acceptance criteria instead of duplicated stories
-- RAG: document chunks embedded into Postgres/pgvector; related context is retrieved while
-  generating, and project documents are searchable
-- Pluggable AI engine: any OpenAI-compatible API (OpenAI, DeepSeek, vLLM...), Anthropic, or an
-  offline `mock` heuristic for demos and tests
-- Review workflow (approve / reject / edit) and export: CSV, JSON, Markdown, XLSX (with
-  traceability sheet), Jira import CSV, traceability CSV
-- Obvious personal identifiers are masked before text is sent to an external LLM
+The app follows common business-analysis practice: BRD → atomic requirements with stable
+IDs → human review → epics, features and stories → requirements traceability matrix (RTM).
 
-## Architecture
+1. **Sources**: upload PDF / DOCX / MD / TXT BRDs or paste text. Passages are embedded into
+   Postgres/pgvector for semantic search and retrieval-augmented generation.
+2. **Requirements**: the AI engine extracts atomic requirements (business, functional,
+   non-functional, constraint, rule), keeping BRD IDs and source references. Each one is
+   checked against ISO/IEC/IEEE 29148 quality characteristics: ambiguous terms, TBDs, weak
+   modals, non-singular or unverifiable statements. Analysts approve, edit or exclude them.
+3. **Stories**: approved requirements become epics → features → user stories with Gherkin
+   acceptance criteria, product-class variants and compliance tags. Each story is scored
+   against INVEST and a Definition of Ready, and is shown on a story map or a list.
+4. **Traceability**: a requirement-to-story matrix with coverage, gaps and orphan stories.
+5. **Export**: Excel (stories, requirements, RTM sheets), Jira CSV, Azure DevOps CSV,
+   Markdown, CSV and JSON.
 
-```
-Browser -> FastAPI (serves UI + REST) -> Postgres + pgvector
-                      |-> LLM provider (OpenAI-compatible / Anthropic / mock)
-                      '-> Embeddings (OpenAI-compatible or offline hash fallback)
-```
+## Admin dashboard
+
+- **AI providers**: any OpenAI-compatible API (OpenAI, DeepSeek, Azure, vLLM, Ollama),
+  Anthropic, or the offline heuristic. You can set the endpoint, model and API key, test the
+  connection and pick a default. API keys are encrypted at rest and never returned to the
+  browser.
+- **Generation settings**: temperature, output tokens, timeout, section size, run limits,
+  retrieval depth, the embeddings provider and model, and personal-data masking.
+- **Overview / Activity**: usage, token counts, failure rate and a log of every run.
 
 ## Configuration (environment)
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `DATABASE_URL` | Postgres connection string (required) | - |
-| `LLM_PROVIDER` | `mock`, `openai`, `anthropic` | `mock` |
-| `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | provider settings | - |
-| `ALLOWED_PROVIDERS` | providers users may choose | `mock,openai,anthropic` |
-| `EMBED_PROVIDER` | `hash` (offline) or `openai` | `hash` |
-| `EMBED_BASE_URL`, `EMBED_API_KEY`, `EMBED_MODEL`, `EMBED_DIM` | embeddings (dim must match model) | dim `256` |
+| `DATABASE_URL` | Postgres with the pgvector extension (required) | - |
+| `SETTINGS_ENCRYPTION_KEY` | encrypts provider API keys at rest (required to save keys) | - |
 | `APP_BASIC_USER`, `APP_BASIC_PASSWORD` | optional HTTP Basic protection | off |
+| `EMBED_DIM` | pgvector column size; must match the embeddings model | `256` |
+| `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | optional provider seeded on first start | - |
+| `MAX_UPLOAD_MB`, `CHUNK_CHARS`, `MAX_CHUNKS_PER_RUN`, `RAG_TOP_K` | limits and defaults | 10, 6000, 200, 3 |
 
-Changing `EMBED_DIM` on an existing database requires re-creating the `chunks` table.
+Everything else is managed in the admin dashboard.
 
-## Run locally
+## Development
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-export DATABASE_URL=postgresql://user:pass@localhost:5432/fabulist   # needs the pgvector extension
-.venv/bin/uvicorn app.main:app --reload
-.venv/bin/pytest
+scripts/dev-db.sh &              # port-forward the cluster Postgres to localhost:5433
+scripts/dev-server.sh            # app on :8765 against a separate fabulist_test database
+TEST_DATABASE_URL=postgresql://... .venv/bin/pytest
 ```
+
+`samples/order-to-cash-brd.md` is a small BRD for trying the workflow.
 
 ## Deploy to Kubernetes
 
@@ -58,15 +65,8 @@ export DATABASE_URL=postgresql://user:pass@localhost:5432/fabulist   # needs the
 FABULIST_HOST=fabulist.example.com DEPLOY_SSH=user@node scripts/deploy.sh
 ```
 
-Secrets are generated by the script in-cluster and are never stored in the repository.
-To enable a real AI engine, edit the `fabulist-app` secret (`LLM_PROVIDER`, `LLM_BASE_URL`,
-`LLM_API_KEY`, `LLM_MODEL`) and restart the deployment.
-
-## Security notes
-
-BRDs can be confidential. Restrict `ALLOWED_PROVIDERS` to engines your organization approves,
-keep Basic auth (or SSO in front) enabled, and review redaction rules in `app/llm.py` before
-sending regulated data to an external API.
+The script generates the database password, the Basic-auth password and the encryption key
+in-cluster on first deploy. They are never stored in the repository.
 
 ## License
 
