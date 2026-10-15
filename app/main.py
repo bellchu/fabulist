@@ -1,8 +1,6 @@
-import base64
 import json
 import logging
 import re
-import secrets
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
@@ -10,9 +8,10 @@ from typing import Any, Dict, List, Optional
 from fastapi import BackgroundTasks, Body, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
-from . import admin, config, db, embeddings, exporters, history, integrations, parsing, pipeline, quality, repos, settings, taxonomy
+from . import admin, config, db, embeddings, exporters, history, integrations, parsing, pipeline, quality, repos, settings, taxonomy, users
 from .profiles import PLATFORMS
 
 log = logging.getLogger("fabulist")
@@ -36,31 +35,36 @@ app = FastAPI(title="Fabulist", lifespan=lifespan)
 app.include_router(admin.router)
 app.include_router(repos.router)
 app.include_router(integrations.router)
+app.include_router(users.router)
 
 
 @app.middleware("http")
-async def basic_auth(request: Request, call_next):
-    if config.BASIC_USER and config.BASIC_PASSWORD and request.url.path != "/healthz":
-        ok = False
-        header = request.headers.get("authorization", "")
-        if header.lower().startswith("basic "):
-            try:
-                user, _, pw = base64.b64decode(header[6:]).decode("utf-8").partition(":")
-                ok = secrets.compare_digest(user, config.BASIC_USER) and secrets.compare_digest(pw, config.BASIC_PASSWORD)
-            except Exception:
-                ok = False
-        if not ok:
+async def auth_and_guards(request: Request, call_next):
+    request.state.user, request.state.role = "anonymous", "admin"
+    path = request.url.path
+    if users.auth_enabled() and path != "/healthz":
+        creds = users.parse_basic(request.headers.get("authorization", ""))
+        role = await run_in_threadpool(users.authenticate, *creds) if creds else None
+        if not role:
             return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="Fabulist"'})
-    if (request.method in ("POST", "PUT", "PATCH", "DELETE") and request.url.path.startswith("/api/")
+        request.state.user, request.state.role = creds[0], role
+        if path.startswith("/api/") and not users.allowed(role, request.method, path):
+            return JSONResponse({"detail": "Your role (%s) does not allow this action" % role}, status_code=403)
+    if (request.method in ("POST", "PUT", "PATCH", "DELETE") and path.startswith("/api/")
             and request.headers.get("x-requested-with") != CSRF_HEADER):
         # Browsers resend Basic-auth credentials cross-site; a custom header can't be sent
         # cross-origin without a CORS preflight (which we never allow), so require it.
         return JSONResponse({"detail": "Missing X-Requested-With header"}, status_code=403)
     response = await call_next(request)
-    if request.url.path.startswith("/static/"):
+    if path.startswith("/static/"):
         # Revalidate via ETag so a deploy is picked up without a hard refresh.
         response.headers["Cache-Control"] = "no-cache"
     return response
+
+
+@app.get("/api/me")
+def me(request: Request) -> Dict[str, str]:
+    return users.current(request)
 
 
 @app.exception_handler(settings.SettingsError)

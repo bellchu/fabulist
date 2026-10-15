@@ -16,7 +16,7 @@ def client(monkeypatch):
     monkeypatch.setattr(config, "BASIC_USER", "")
     db.init()
     with db.conn() as c:
-        c.execute("TRUNCATE projects, providers, settings, runs, integrations CASCADE")
+        c.execute("TRUNCATE projects, providers, settings, runs, integrations, users CASCADE")
     from fastapi.testclient import TestClient
     from app.main import app
     with TestClient(app, headers={"X-Requested-With": "fabulist"}) as c:

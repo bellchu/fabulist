@@ -118,23 +118,27 @@ def test_mutations_require_csrf_header(client):
     assert client.post("/api/projects", json={"name": "ok", "platform": "generic"}).status_code == 201
 
 
-def test_change_history_is_recorded(client):
-    pid = client.post("/api/projects", json={"name": "Audit", "platform": "generic"}).json()["id"]
-    auth = {"Authorization": "Basic " + __import__("base64").b64encode(b"analyst1:pw").decode()}
+def test_change_history_is_recorded(client, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "BASIC_USER", "root")
+    monkeypatch.setattr(config, "BASIC_PASSWORD", "root-password-123")
+    client.post("/api/admin/users", json={"username": "analyst1", "role": "analyst", "password": "analyst-password-1"}, auth=("root", "root-password-123"))
+    auth = {"Authorization": "Basic " + __import__("base64").b64encode(b"analyst1:analyst-password-1").decode()}
+    pid = client.post("/api/projects", json={"name": "Audit", "platform": "generic"}, headers=auth).json()["id"]
     r = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall export invoices to CSV."}, headers=auth).json()
     client.patch("/api/projects/%s/requirements/%s" % (pid, r["id"]), json={"statement": "The system shall export invoices to CSV and PDF."}, headers=auth)
     client.patch("/api/projects/%s/requirements/%s" % (pid, r["id"]), json={"statement": "The system shall export invoices to CSV and PDF."}, headers=auth)  # no-op
     client.post("/api/projects/%s/requirements/bulk" % pid, json={"ids": [r["id"]], "status": "approved"}, headers=auth)
     client.post("/api/projects/%s/requirements/bulk" % pid, json={"ids": [r["id"]], "status": "approved"}, headers=auth)  # no-op
-    h = client.get("/api/projects/%s/history" % pid, params={"item_id": r["id"]}).json()
+    h = client.get("/api/projects/%s/history" % pid, params={"item_id": r["id"]}, headers=auth).json()
     assert [e["action"] for e in h] == ["status changed", "edited", "created"]
     assert all(e["actor"] == "analyst1" and e["item_key"] == "REQ-001" for e in h)
     assert h[0]["changes"] == {"status": {"from": "draft", "to": "approved"}}
     assert h[1]["changes"]["statement"]["to"].endswith("CSV and PDF.")
     assert client.delete("/api/projects/%s/requirements/%s" % (pid, r["id"]), headers=auth).status_code == 204
-    latest = client.get("/api/projects/%s/history" % pid).json()[0]
+    latest = client.get("/api/projects/%s/history" % pid, headers=auth).json()[0]
     assert latest["action"] == "deleted" and latest["summary"].startswith("The system shall export")
-    assert client.post("/api/projects/%s/requirements/bulk" % pid, json={"ids": [r["id"]], "status": "approved"}).json() == {"updated": 0}
+    assert client.post("/api/projects/%s/requirements/bulk" % pid, json={"ids": [r["id"]], "status": "approved"}, headers=auth).json() == {"updated": 0}
 
 
 def test_repository_sync_lifecycle(client, tmp_path, monkeypatch):

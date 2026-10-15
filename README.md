@@ -39,6 +39,8 @@ IDs → human review → epics, features and stories → requirements traceabili
   retrieval depth, the embeddings provider and model, and personal-data masking.
 - **Integrations**: Jira (Cloud with email and API token, or Data Center with a PAT) and Azure
   DevOps (organization URL and PAT), with a connection test and a default target project.
+- **Users & roles**: named accounts (scrypt-hashed passwords) with admin, analyst or viewer
+  roles enforced on the server. The deployment's bootstrap account is a break-glass admin.
 - **Overview / Activity**: usage, token counts, failure rate and a log of every run.
 
 ## Configuration (environment)
@@ -47,7 +49,7 @@ IDs → human review → epics, features and stories → requirements traceabili
 |---|---|---|
 | `DATABASE_URL` | Postgres with the pgvector extension (required) | - |
 | `SETTINGS_ENCRYPTION_KEY` | encrypts provider API keys at rest (required to save keys) | - |
-| `APP_BASIC_USER`, `APP_BASIC_PASSWORD` | optional HTTP Basic protection | off |
+| `APP_BASIC_USER`, `APP_BASIC_PASSWORD` | bootstrap admin; enables sign-in for all users | off |
 | `EMBED_DIM` | pgvector column size; must match the embeddings model | `256` |
 | `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | optional provider seeded on first start | - |
 | `MAX_UPLOAD_MB`, `CHUNK_CHARS`, `MAX_CHUNKS_PER_RUN`, `RAG_TOP_K` | limits and defaults | 10, 6000, 200, 3 |

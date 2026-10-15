@@ -60,6 +60,9 @@ SCHEMA = [
          url TEXT NOT NULL, branch TEXT NOT NULL DEFAULT '', path_glob TEXT NOT NULL DEFAULT '*',
          token_enc TEXT, key_hint TEXT NOT NULL DEFAULT '', last_sync TEXT NOT NULL DEFAULT '',
          last_commit TEXT NOT NULL DEFAULT '', last_error TEXT NOT NULL DEFAULT '', created TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS users (
+         id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+         role TEXT NOT NULL, disabled BOOLEAN NOT NULL DEFAULT FALSE, created TEXT NOT NULL)""",
     """CREATE TABLE IF NOT EXISTS integrations (
          id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, base_url TEXT NOT NULL,
          username TEXT NOT NULL DEFAULT '', target TEXT NOT NULL DEFAULT '', token_enc TEXT,

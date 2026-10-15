@@ -3,7 +3,7 @@ import { h, mount, icon, api, guard, modal, field, select, empty, badge, timeAgo
 import { renderProject } from "./project.js";
 import { renderAdmin } from "./admin.js";
 
-export const state = { meta: null, projects: [] };
+export const state = { meta: null, projects: [], me: null };
 
 function navItem(href, iconName, label, active) {
   return h("a", { class: "nav-item" + (active ? " active" : ""), href }, icon(iconName), label);
@@ -16,16 +16,20 @@ function shell(route) {
     navItem("#/", "folder", "Projects", route[0] === "" || route[0] === "p"),
     ...state.projects.slice(0, 6).map((p) =>
       h("a", { class: "nav-item nav-sub" + (route[0] === "p" && route[1] === p.id ? " active" : ""), href: "#/p/" + p.id }, p.name)),
+    state.me.role !== "admin" ? null : [
     h("div", { class: "nav-label" }, "Administration"),
     navItem("#/admin/overview", "chart", "Overview", route[0] === "admin" && (route[1] || "overview") === "overview"),
     navItem("#/admin/providers", "cpu", "AI providers", route[0] === "admin" && route[1] === "providers"),
     navItem("#/admin/settings", "settings", "Generation settings", route[0] === "admin" && route[1] === "settings"),
     navItem("#/admin/integrations", "link", "Integrations", route[0] === "admin" && route[1] === "integrations"),
-    navItem("#/admin/activity", "activity", "Activity", route[0] === "admin" && route[1] === "activity"),
+    navItem("#/admin/users", "users", "Users & roles", route[0] === "admin" && route[1] === "users"),
+    navItem("#/admin/activity", "activity", "Activity", route[0] === "admin" && route[1] === "activity")],
     h("div", { class: "sidebar-foot" }, "BRD → requirements → stories"));
   const topbar = h("header", { class: "topbar" },
     h("div", { class: "mobile-nav" }, h("a", { class: "btn btn-sm", href: "#/" }, "Projects"), h("a", { class: "btn btn-sm", href: "#/admin/overview" }, "Admin")),
-    h("div", { class: "crumbs", id: "crumbs" }));
+    h("div", { class: "crumbs", id: "crumbs" }),
+    h("div", { class: "right row small" }, state.me.role === "viewer" ? badge("Read-only", "amber") : null,
+      h("span", { class: "muted" }, state.me.username), badge(state.me.role, state.me.role === "admin" ? "accent" : "")));
   const content = h("div", { class: "content", id: "content" });
   document.getElementById("app").replaceChildren(h("div", { class: "shell" }, sidebar, h("main", { class: "main" }, topbar, content)));
   return content;
@@ -50,12 +54,12 @@ async function route() {
   const ticket = ++rendering;
   const parts = location.hash.replace(/^#\/?/, "").split("/");
   try {
-    if (!state.meta) state.meta = await api.get("/api/meta");
+    if (!state.meta) [state.meta, state.me] = await Promise.all([api.get("/api/meta"), api.get("/api/me")]);
     await refreshProjects();
     if (ticket !== rendering) return;
     const content = shell(parts);
     if (parts[0] === "p" && parts[1]) await renderProject(content, parts[1], parts[2] || "overview");
-    else if (parts[0] === "admin") await renderAdmin(content, parts[1] || "overview");
+    else if (parts[0] === "admin" && state.me.role === "admin") await renderAdmin(content, parts[1] || "overview");
     else renderHome(content);
   } catch (e) {
     document.getElementById("app").replaceChildren(h("div", { class: "content" }, h("div", { class: "callout error" }, e.message)));

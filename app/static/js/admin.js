@@ -3,11 +3,11 @@ import { h, mount, icon, api, guard, toast, modal, confirmBox, badge, statusTone
 import { state, setCrumbs } from "./main.js";
 
 const rerender = () => window.dispatchEvent(new HashChangeEvent("hashchange"));
-const TITLES = { overview: "Overview", providers: "AI providers", settings: "Generation settings", integrations: "Integrations", activity: "Activity" };
+const TITLES = { overview: "Overview", providers: "AI providers", settings: "Generation settings", integrations: "Integrations", users: "Users & roles", activity: "Activity" };
 
 export async function renderAdmin(content, tab) {
   setCrumbs({ href: "#/admin/overview", label: "Administration" }, TITLES[tab] || "Overview");
-  const view = { overview: viewOverview, providers: viewProviders, settings: viewSettings, integrations: viewIntegrations, activity: viewActivity }[tab] || viewOverview;
+  const view = { overview: viewOverview, providers: viewProviders, settings: viewSettings, integrations: viewIntegrations, users: viewUsers, activity: viewActivity }[tab] || viewOverview;
   mount(content, h("div", { class: "tabs" }, Object.entries(TITLES).map(([id, label]) =>
     h("a", { class: "tab" + (id === tab ? " active" : ""), href: "#/admin/" + id }, label))));
   await view(content);
@@ -243,6 +243,64 @@ function integrationDialog(data, it) {
       if (isNew) await api.post("/api/admin/integrations", body);
       else await api.put("/api/admin/integrations/" + it.id, body);
       toast("Integration saved", "ok"); rerender();
+    } }],
+  });
+}
+
+// ---- users --------------------------------------------------------------
+
+async function viewUsers(content) {
+  const data = await api.get("/api/admin/users");
+  const card = h("div", { class: "card" });
+  mount(content,
+    head("Users & roles", "Named accounts sign in with HTTP Basic. Every change in the audit trail is attributed to the signed-in user.",
+      h("button", { class: "btn btn-primary", onclick: () => userDialog(data) }, icon("plus"), "Add user")),
+    h("div", { class: "grid grid-3", style: { marginBottom: "16px" } }, Object.entries({
+      admin: "Everything, including AI providers, settings, integrations and users.",
+      analyst: "Create projects, upload BRDs, run AI, review, export and push. No admin pages.",
+      viewer: "Read-only access to projects, requirements, stories and exports." }).map(([r, d]) =>
+      h("div", { class: "card card-body" }, h("div", { class: "row" }, badge(data.roles[r], r === "admin" ? "accent" : "")), h("p", { class: "muted small", style: { marginTop: "8px" } }, d)))),
+    card,
+    data.bootstrap_user ? h("p", { class: "muted small", style: { marginTop: "12px" } },
+      "The bootstrap account '" + data.bootstrap_user + "' from the deployment secret is always an administrator (break-glass access).") : null);
+  if (!data.users.length) {
+    card.append(empty({ iconName: "users", title: "No named users yet", text: "Add accounts for analysts and reviewers so their changes are attributed." }));
+    return;
+  }
+  card.append(h("div", { class: "table-wrap" }, h("table", { class: "table" },
+    h("thead", {}, h("tr", {}, ["User", "Role", "Status", "Created", ""].map((x) => h("th", {}, x)))),
+    h("tbody", {}, data.users.map((u) => {
+      const role = select(Object.entries(data.roles), u.role, { "aria-label": "Role for " + u.username });
+      role.addEventListener("change", guard(async () => { await api.patch("/api/admin/users/" + u.id, { role: role.value }); toast(u.username + " is now " + role.value, "ok"); }));
+      return h("tr", {},
+        h("td", {}, h("b", {}, u.username)), h("td", { style: { width: "220px" } }, role),
+        h("td", {}, u.disabled ? badge("Disabled", "red") : badge("Active", "green")),
+        h("td", { class: "muted small" }, timeAgo(u.created)),
+        h("td", { class: "nowrap", style: { textAlign: "right" } },
+          h("button", { class: "btn btn-sm btn-ghost", onclick: () => userDialog(data, u) }, "Reset password"),
+          h("button", { class: "btn btn-sm btn-ghost", onclick: guard(async () => {
+            await api.patch("/api/admin/users/" + u.id, { disabled: !u.disabled }); rerender();
+          }) }, u.disabled ? "Enable" : "Disable"),
+          h("button", { class: "btn btn-sm btn-ghost btn-danger", "aria-label": "Delete " + u.username, onclick: guard(async () => {
+            if (!(await confirmBox("Delete user '" + u.username + "'? Their past changes stay in the audit trail.", { danger: true, okLabel: "Delete" }))) return;
+            await api.del("/api/admin/users/" + u.id); rerender();
+          }) }, icon("trash"))));
+    })))));
+}
+
+function userDialog(data, u) {
+  const isNew = !u;
+  const username = h("input", { type: "text", autocomplete: "off", placeholder: "e.g. jane.analyst" });
+  const role = select(Object.entries(data.roles), "analyst");
+  const password = h("input", { type: "password", autocomplete: "new-password", placeholder: "At least 12 characters" });
+  modal({
+    title: isNew ? "Add user" : "Reset password for " + u.username,
+    description: "Share the password through a secure channel; it can't be viewed again.",
+    body: h("div", { class: "stack" }, isNew ? h("div", { class: "form-grid" }, field("Username", username), field("Role", role)) : null, field("Password", password)),
+    actions: [{ label: isNew ? "Add user" : "Set password", kind: "btn-primary", onClick: async () => {
+      if (isNew) await api.post("/api/admin/users", { username: username.value, role: role.value, password: password.value });
+      else await api.patch("/api/admin/users/" + u.id, { password: password.value });
+      toast(isNew ? "User added" : "Password updated", "ok"); rerender();
     } }],
   });
 }

@@ -3,25 +3,19 @@
 Supports audit expectations common in regulated delivery (e.g. 21 CFR Part 11, SOX):
 entries are only ever inserted, never updated or deleted through the API.
 """
-import base64
 import json
 from typing import Any, Dict, List, Optional
 
 from fastapi import Request
 
-from . import config, db
+from . import db
 
 PREFIX = {"requirement": "REQ", "story": "US"}
 
 
 def actor(request: Request) -> str:
-    header = request.headers.get("authorization", "")
-    if header.lower().startswith("basic "):
-        try:
-            return base64.b64decode(header[6:]).decode("utf-8").partition(":")[0][:80] or "anonymous"
-        except Exception:
-            return "anonymous"
-    return config.BASIC_USER or "anonymous"
+    """Authenticated username set by the auth middleware."""
+    return getattr(request.state, "user", "") or "anonymous"
 
 
 def item_key(item_type: str, seq: int) -> str:
