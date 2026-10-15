@@ -1,0 +1,58 @@
+# Nightly logical backups of the Fabulist database, kept for 7 days on their own volume.
+# Restore: kubectl -n fabulist exec -i postgres-0 -- pg_restore -U fabulist -d fabulist --clean < file.dump
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fabulist-backups
+  namespace: fabulist
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fabulist-backup
+  namespace: fabulist
+spec:
+  schedule: "30 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: pg-dump
+              image: pgvector/pgvector:pg16
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: fabulist-db
+                      key: POSTGRES_PASSWORD
+              command: ["/bin/sh", "-c"]
+              args:
+                - >
+                  set -e;
+                  f=/backups/fabulist-$(date -u +%Y%m%d-%H%M%S).dump;
+                  pg_dump -h postgres.fabulist.svc.cluster.local -U fabulist -d fabulist -Fc -f "$f.part";
+                  mv "$f.part" "$f";
+                  find /backups -name 'fabulist-*.dump' -mtime +7 -delete;
+                  ls -lh /backups
+              resources:
+                requests: {cpu: 50m, memory: 64Mi}
+                limits: {memory: 512Mi}
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: fabulist-backups

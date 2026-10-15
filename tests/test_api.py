@@ -223,3 +223,14 @@ def test_refine_story_proposes_without_saving(client):
     assert p["quality_score"] > p["before_score"] and p["story"]["requirement_ids"] == [r["key"]]
     assert client.get("/api/projects/%s/stories" % pid).json()[0]["narrative"] == "cancel orders", "refine must not save"
     assert client.post("/api/projects/%s/stories/nope/refine" % pid, json={}).status_code == 404
+
+
+def test_duplicate_flag_ignores_excluded(client):
+    pid = client.post("/api/projects", json={"name": "Dupes", "platform": "generic"}).json()["id"]
+    a = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall allow buyers to cancel open orders before shipment."}).json()
+    b = client.post("/api/projects/%s/requirements" % pid, json={"statement": "Buyers must be able to cancel open orders before shipment."}).json()
+    reqs = client.get("/api/projects/%s/requirements" % pid).json()
+    assert all(any(i["code"] == "duplicate" for i in r["issues"]) for r in reqs)
+    client.patch("/api/projects/%s/requirements/%s" % (pid, b["id"]), json={"status": "excluded"})
+    reqs = client.get("/api/projects/%s/requirements" % pid).json()
+    assert not any(i["code"] == "duplicate" for r in reqs for i in r["issues"])

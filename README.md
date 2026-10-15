@@ -77,6 +77,13 @@ TEST_DATABASE_URL=postgresql://... .venv/bin/pytest
 FABULIST_HOST=fabulist.example.com DEPLOY_SSH=user@node scripts/deploy.sh
 ```
 
+A nightly CronJob (`deploy/k8s/backup.yaml`) writes `pg_dump` backups to a separate volume and
+keeps 7 days. To restore one:
+
+```bash
+kubectl -n fabulist exec -i postgres-0 -- pg_restore -U fabulist -d fabulist --clean < fabulist-YYYYMMDD-HHMMSS.dump
+```
+
 The script generates the database password, the Basic-auth password and the encryption key
 in-cluster on first deploy. They are never stored in the repository.
 

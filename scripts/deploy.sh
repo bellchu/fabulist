@@ -37,6 +37,7 @@ if [ -z "$(kubectl -n "$NS" get secret fabulist-app -o jsonpath='{.data.SETTINGS
 fi
 kubectl apply -f deploy/k8s/postgres.yaml
 kubectl -n "$NS" rollout status statefulset/postgres --timeout=240s
+kubectl apply -f deploy/k8s/backup.yaml
 
 docker buildx build --platform linux/amd64 -t "$IMAGE" --load .
 docker save "$IMAGE" | ssh "$DEPLOY_SSH" "sudo microk8s ctr image import -"

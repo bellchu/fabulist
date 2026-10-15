@@ -84,3 +84,40 @@ def score(issues: List[Issue]) -> int:
 def is_ready(issues: List[Issue]) -> bool:
     """Definition of Ready: no errors and no unresolved questions or trace gaps."""
     return not any(i["severity"] == "error" or i["code"] in ("open-questions", "trace") for i in issues)
+
+
+_STOP = {"the", "a", "an", "to", "of", "and", "or", "for", "in", "on", "by", "with", "be", "is", "are", "shall", "must",
+         "should", "will", "system", "able", "allow", "that", "from", "as", "at", "it", "its", "their", "each", "all"}
+
+
+def _tokens(text: str) -> set:
+    return {t for t in re.findall(r"[a-z0-9]+", text.lower()) if t not in _STOP and len(t) > 1}
+
+
+def duplicate_pairs(reqs: List[Dict[str, Any]], threshold: float = 0.75) -> Dict[str, List[str]]:
+    """Map requirement key -> keys of near-duplicates (token Jaccard >= threshold).
+
+    Uses an inverted index so only requirements that share a token are compared."""
+    toks = {r["key"]: _tokens(r.get("statement", "")) for r in reqs}
+    index: Dict[str, List[str]] = {}
+    for key, ts in toks.items():
+        for t in ts:
+            index.setdefault(t, []).append(key)
+    # Very common tokens don't discriminate; skipping them keeps candidate sets small.
+    max_df = max(5, len(reqs) // 10)
+    out: Dict[str, List[str]] = {}
+    seen = set()
+    for key, ts in toks.items():
+        if len(ts) < 3:
+            continue
+        candidates = {k for t in ts if len(index[t]) <= max_df for k in index[t] if k != key}
+        for other in candidates:
+            pair = (key, other) if key < other else (other, key)
+            if pair in seen:
+                continue
+            seen.add(pair)
+            o = toks[other]
+            if len(o) >= 3 and len(ts & o) / len(ts | o) >= threshold:
+                out.setdefault(key, []).append(other)
+                out.setdefault(other, []).append(key)
+    return {k: sorted(v) for k, v in out.items()}

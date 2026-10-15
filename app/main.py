@@ -366,12 +366,14 @@ STORY_FIELDS = {"epic", "feature", "title", "persona", "narrative", "acceptance_
 
 
 def _requirements(pid: str) -> List[Dict[str, Any]]:
-    out = []
-    for r in db.rows("SELECT * FROM requirements WHERE project_id=%s ORDER BY seq", (pid,)):
-        item = db.item_row(r, "REQ")
+    out = [db.item_row(r, "REQ") for r in db.rows("SELECT * FROM requirements WHERE project_id=%s ORDER BY seq", (pid,))]
+    dupes = quality.duplicate_pairs([r for r in out if r["status"] != "excluded"])
+    for item in out:
         item["issues"] = quality.requirement_issues(item)
+        if item["key"] in dupes:
+            item["issues"].append({"code": "duplicate", "severity": "warning",
+                                   "message": "Possible duplicate of %s; merge or exclude one." % ", ".join(dupes[item["key"]])})
         item["quality_score"] = quality.score(item["issues"])
-        out.append(item)
     return out
 
 

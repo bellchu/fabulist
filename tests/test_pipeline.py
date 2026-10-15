@@ -137,3 +137,12 @@ def test_classify_and_extract_edge_cases():
     issues = {i["code"] for i in quality.requirement_issues({"statement": reqs[0]["statement"], "type": "rule"})}
     assert "incomplete" in issues
     assert "not-singular" in {i["code"] for i in quality.requirement_issues({"statement": "Agents should place orders and screens must be clear.", "type": "functional"})}
+
+
+def test_duplicate_requirements_detected():
+    reqs = [{"key": "REQ-001", "statement": "The system shall allow buyers to cancel open orders before shipment."},
+            {"key": "REQ-002", "statement": "Buyers must be able to cancel open orders before shipment."},
+            {"key": "REQ-003", "statement": "The system shall export invoices to CSV."},
+            {"key": "REQ-004", "statement": "Short."}]
+    d = quality.duplicate_pairs(reqs)
+    assert d == {"REQ-001": ["REQ-002"], "REQ-002": ["REQ-001"]}
