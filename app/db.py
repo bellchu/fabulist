@@ -55,6 +55,15 @@ SCHEMA = [
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS actor TEXT NOT NULL DEFAULT ''",
     # Monotonic order for entries written within the same second.
     "ALTER TABLE history ADD COLUMN IF NOT EXISTS n BIGSERIAL",
+    """CREATE TABLE IF NOT EXISTS repositories (
+         id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+         url TEXT NOT NULL, branch TEXT NOT NULL DEFAULT '', path_glob TEXT NOT NULL DEFAULT '*',
+         token_enc TEXT, key_hint TEXT NOT NULL DEFAULT '', last_sync TEXT NOT NULL DEFAULT '',
+         last_commit TEXT NOT NULL DEFAULT '', last_error TEXT NOT NULL DEFAULT '', created TEXT NOT NULL)""",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'upload'",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS repo_id TEXT",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS path TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT ''",
     "CREATE INDEX IF NOT EXISTS idx_history_project ON history(project_id, created)",
     "CREATE INDEX IF NOT EXISTS idx_history_item ON history(item_id, created)",
     "CREATE INDEX IF NOT EXISTS idx_reqs_project ON requirements(project_id, seq)",

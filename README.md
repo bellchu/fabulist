@@ -10,7 +10,9 @@ serialized, kits, devices...).
 The app follows common business-analysis practice: BRD → atomic requirements with stable
 IDs → human review → epics, features and stories → requirements traceability matrix (RTM).
 
-1. **Sources**: upload PDF / DOCX / MD / TXT BRDs or paste text. Passages are embedded into
+1. **Sources**: upload PDF / DOCX / MD / TXT BRDs, paste text, or connect a Git repository
+   (HTTPS, optional read-only token, path filters). Repository sync records the commit SHA and
+   adds, updates or removes documents as files change. Passages are embedded into
    Postgres/pgvector for semantic search and retrieval-augmented generation.
 2. **Requirements**: the AI engine extracts atomic requirements (business, functional,
    non-functional, constraint, rule), keeping BRD IDs and source references. Each one is
@@ -20,7 +22,9 @@ IDs → human review → epics, features and stories → requirements traceabili
    acceptance criteria, product-class variants and compliance tags. Each story is scored
    against INVEST and a Definition of Ready, and is shown on a story map or a list.
 4. **Traceability**: a requirement-to-story matrix with coverage, gaps and orphan stories.
-5. **Export**: Excel (stories, requirements, RTM sheets), Jira CSV, Azure DevOps CSV,
+5. **Audit trail**: every manual edit, review decision, deletion, sync and AI run is recorded
+   with who, when and field-level changes.
+6. **Export**: Excel (stories, requirements, RTM sheets), Jira CSV, Azure DevOps CSV,
    Markdown, CSV and JSON.
 
 ## Admin dashboard

@@ -135,3 +135,52 @@ def test_change_history_is_recorded(client):
     latest = client.get("/api/projects/%s/history" % pid).json()[0]
     assert latest["action"] == "deleted" and latest["summary"].startswith("The system shall export")
     assert client.post("/api/projects/%s/requirements/bulk" % pid, json={"ids": [r["id"]], "status": "approved"}).json() == {"updated": 0}
+
+
+def test_repository_sync_lifecycle(client, tmp_path, monkeypatch):
+    from app import repos
+    work = tmp_path / "work"
+    (work / "brd").mkdir(parents=True)
+    (work / "brd" / "orders.md").write_text("# Orders\nThe system shall allow buyers to place orders online.")
+    (work / "brd" / "billing.md").write_text("# Billing\nThe system shall issue invoices for shipped orders.")
+    (work / "README.md").write_text("not a BRD")
+    state = {"sha": "a" * 40, "calls": []}
+
+    def fake_fetch(url, branch, token, dest):
+        import shutil
+        state["calls"].append((url, branch, token))
+        shutil.copytree(str(work), dest)
+        return state["sha"]
+    monkeypatch.setattr(repos, "fetch", fake_fetch)
+
+    pid = client.post("/api/projects", json={"name": "Repo", "platform": "generic"}).json()["id"]
+    assert client.post("/api/projects/%s/repos" % pid, json={"url": "http://insecure/x.git"}).status_code == 400
+    repo = client.post("/api/projects/%s/repos" % pid, json={"url": "https://git.example.com/org/brds.git", "branch": "main",
+                                                             "path_glob": "brd/*", "token": "tok-9876"}).json()
+    assert repo["has_token"] and repo["key_hint"] == "…9876" and "token" not in repo and "token_enc" not in repo
+
+    r = client.post("/api/projects/%s/repos/%s/sync" % (pid, repo["id"])).json()
+    assert sorted(r["added"]) == ["brd/billing.md", "brd/orders.md"] and r["commit"] == "a" * 40
+    assert state["calls"][0] == ("https://git.example.com/org/brds.git", "main", "tok-9876")
+    docs = client.get("/api/projects/%s/documents" % pid).json()
+    assert {d["path"] for d in docs} == {"brd/orders.md", "brd/billing.md"} and all(d["source"] == "repo" for d in docs)
+
+    (work / "brd" / "orders.md").write_text("# Orders\nThe system shall allow buyers to place and cancel orders online.")
+    (work / "brd" / "billing.md").unlink()
+    state["sha"] = "b" * 40
+    r = client.post("/api/projects/%s/repos/%s/sync" % (pid, repo["id"])).json()
+    assert r["updated"] == ["brd/orders.md"] and r["removed"] == ["brd/billing.md"] and r["added"] == []
+    assert client.post("/api/projects/%s/repos/%s/sync" % (pid, repo["id"])).json()["unchanged"] == 1
+    listed = client.get("/api/projects/%s/repos" % pid).json()[0]
+    assert listed["last_commit"] == "b" * 40 and listed["documents"] == 1 and listed["last_error"] == ""
+    assert client.get("/api/projects/%s/history?limit=1" % pid).json()[0]["action"] == "synced"
+
+    def failing(url, branch, token, dest):
+        raise repos.RepoError("git clone failed: repository not found")
+    monkeypatch.setattr(repos, "fetch", failing)
+    bad = client.post("/api/projects/%s/repos/%s/sync" % (pid, repo["id"]))
+    assert bad.status_code == 400 and "not found" in bad.json()["detail"]
+    assert client.get("/api/projects/%s/repos" % pid).json()[0]["last_error"]
+
+    assert client.delete("/api/projects/%s/repos/%s" % (pid, repo["id"])).status_code == 204
+    assert client.get("/api/projects/%s/documents" % pid).json() == []

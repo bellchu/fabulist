@@ -196,8 +196,54 @@ async function viewOverview(body) {
 
 // ---- sources ------------------------------------------------------------
 
+function repoDialog() {
+  const url = h("input", { type: "url", placeholder: "https://github.com/org/brds.git" });
+  const branch = h("input", { type: "text", placeholder: "Default branch" });
+  const glob = h("input", { type: "text", value: "*", placeholder: "docs/brd/*.md, *.pdf" });
+  const token = h("input", { type: "password", autocomplete: "new-password", placeholder: "Only for private repositories" });
+  modal({
+    title: "Connect BRD repository", wide: true,
+    description: "Fabulist shallow-clones the repository over HTTPS on each sync and imports matching PDF, DOCX, Markdown and text files.",
+    body: h("div", { class: "stack" }, field("Repository URL", url, "HTTPS clone URL (GitHub, GitLab, Bitbucket, Azure Repos…)."),
+      h("div", { class: "form-grid" }, field("Branch", branch), field("Path filter", glob, "Comma-separated glob patterns relative to the repo root.")),
+      field("Access token", token, "Read-only token. Stored encrypted; never shown again.")),
+    actions: [{ label: "Connect and sync", kind: "btn-primary", onClick: async () => {
+      const repo = await api.post(base() + "/repos", { url: url.value, branch: branch.value, path_glob: glob.value, token: token.value });
+      await syncRepo(repo.id);
+    } }],
+  });
+}
+
+async function syncRepo(id) {
+  toast("Syncing repository…");
+  try {
+    const r = await api.post(base() + "/repos/" + id + "/sync");
+    toast("Synced " + r.commit.slice(0, 8) + ": " + r.added.length + " added, " + r.updated.length + " updated, " + r.removed.length + " removed" +
+      (r.skipped.length ? ", " + r.skipped.length + " skipped" : ""), "ok");
+  } finally { rerender(); }
+}
+
+function reposCard(repoList) {
+  return h("div", { class: "card", style: { marginBottom: "16px" } },
+    h("div", { class: "card-head" }, h("div", { class: "grow" }, h("h3", {}, "BRD repositories"),
+      h("div", { class: "muted small" }, "Keep BRDs in Git; sync to pull new and changed documents.")),
+      h("button", { class: "btn btn-sm", onclick: repoDialog }, icon("link"), "Connect repository")),
+    repoList.length ? repoList.map((r) => h("div", { class: "provider-row" },
+      h("div", { class: "grow", style: { minWidth: "260px" } },
+        h("div", { class: "row" }, h("b", { class: "mono" }, r.url), r.branch ? badge(r.branch) : null),
+        h("div", { class: "small muted" }, "Path: " + r.path_glob + " · " + r.documents + " documents" + (r.has_token ? " · token " + r.key_hint : "")),
+        r.last_error ? h("div", { class: "small", style: { color: "var(--red)" } }, r.last_error)
+          : h("div", { class: "small muted" }, r.last_sync ? "Synced " + timeAgo(r.last_sync) + " at " + r.last_commit.slice(0, 8) : "Never synced")),
+      h("button", { class: "btn btn-sm", onclick: guard(() => syncRepo(r.id)) }, icon("refresh"), "Sync now"),
+      h("button", { class: "btn btn-sm btn-ghost btn-danger", "aria-label": "Disconnect " + r.url, onclick: guard(async () => {
+        if (!(await confirmBox("Disconnect " + r.url + "? Its " + r.documents + " synced documents are removed; existing requirements are kept.", { danger: true, okLabel: "Disconnect" }))) return;
+        await api.del(base() + "/repos/" + r.id); rerender();
+      }) }, icon("trash"))))
+      : h("div", { class: "card-body muted small" }, "No repository connected. Upload files below, or connect a Git repository that holds your BRDs."));
+}
+
 async function viewSources(body) {
-  const docs = await api.get(base() + "/documents");
+  const [docs, repoList] = await Promise.all([api.get(base() + "/documents"), api.get(base() + "/repos")]);
   const fileInput = h("input", { type: "file", multiple: true, accept: ".pdf,.docx,.md,.markdown,.txt", class: "hidden" });
   const uploadFiles = guard(async (files) => {
     for (const f of files) {
@@ -240,12 +286,14 @@ async function viewSources(body) {
             await api.post(base() + "/documents/text", { name: pasteName.value, text: pasteText.value });
             toast("Document added", "ok"); rerender();
           }) }, icon("plus"), "Add document"))))),
+    reposCard(repoList),
     h("div", { class: "card", style: { marginBottom: "16px" } },
       h("div", { class: "card-head" }, h("h3", { class: "grow" }, "Documents"), h("span", { class: "muted small" }, docs.length + " total")),
       docs.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
-        h("thead", {}, h("tr", {}, ["Name", "Size", "Indexed passages", "Added", ""].map((x) => h("th", {}, x)))),
+        h("thead", {}, h("tr", {}, ["Name", "Source", "Size", "Indexed passages", "Added", ""].map((x) => h("th", {}, x)))),
         h("tbody", {}, docs.map((d) => h("tr", {},
           h("td", {}, h("div", { class: "row" }, icon("file"), h("b", {}, d.filename))),
+          h("td", {}, d.source === "repo" ? badge("Git", "violet") : badge("Upload")),
           h("td", { class: "muted" }, fmt(Math.round(d.chars / 6)) + " words"),
           h("td", {}, d.chunks), h("td", { class: "muted small" }, timeAgo(d.created)),
           h("td", { class: "nowrap", style: { textAlign: "right" } },

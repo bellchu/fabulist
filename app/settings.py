@@ -61,6 +61,14 @@ def _decrypt(value: str) -> str:
         raise SettingsError("Stored API key cannot be decrypted (encryption key changed?). Re-enter it.") from exc
 
 
+def encrypt_secret(value: str) -> str:
+    return _encrypt(value)
+
+
+def decrypt_secret(value: str) -> str:
+    return _decrypt(value)
+
+
 # ---- generation settings -------------------------------------------------
 
 def get_settings() -> Dict[str, Any]:

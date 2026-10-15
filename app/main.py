@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import admin, config, db, embeddings, exporters, history, parsing, pipeline, quality, settings, taxonomy
+from . import admin, config, db, embeddings, exporters, history, parsing, pipeline, quality, repos, settings, taxonomy
 from .profiles import PLATFORMS
 
 log = logging.getLogger("fabulist")
@@ -34,6 +34,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="Fabulist", lifespan=lifespan)
 app.include_router(admin.router)
+app.include_router(repos.router)
 
 
 @app.middleware("http")
@@ -232,7 +233,7 @@ def add_text_document(pid: str, body: TextDocIn):
 @app.get("/api/projects/{pid}/documents")
 def list_documents(pid: str):
     _project(pid)
-    return db.rows("SELECT d.id, d.filename, length(d.text) AS chars, d.created, "
+    return db.rows("SELECT d.id, d.filename, length(d.text) AS chars, d.created, d.source, d.path, d.repo_id, "
                    "(SELECT count(*) FROM chunks c WHERE c.document_id = d.id) AS chunks "
                    "FROM documents d WHERE d.project_id = %s ORDER BY d.created", (pid,))
 
