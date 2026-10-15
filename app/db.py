@@ -60,6 +60,15 @@ SCHEMA = [
          url TEXT NOT NULL, branch TEXT NOT NULL DEFAULT '', path_glob TEXT NOT NULL DEFAULT '*',
          token_enc TEXT, key_hint TEXT NOT NULL DEFAULT '', last_sync TEXT NOT NULL DEFAULT '',
          last_commit TEXT NOT NULL DEFAULT '', last_error TEXT NOT NULL DEFAULT '', created TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS integrations (
+         id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, base_url TEXT NOT NULL,
+         username TEXT NOT NULL DEFAULT '', target TEXT NOT NULL DEFAULT '', token_enc TEXT,
+         key_hint TEXT NOT NULL DEFAULT '', created TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS external_links (
+         id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+         integration_id TEXT NOT NULL REFERENCES integrations(id) ON DELETE CASCADE, target TEXT NOT NULL,
+         item_type TEXT NOT NULL, item_ref TEXT NOT NULL, external_key TEXT NOT NULL, external_url TEXT NOT NULL,
+         updated TEXT NOT NULL, UNIQUE (integration_id, target, item_type, item_ref))""",
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'upload'",
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS repo_id TEXT",
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS path TEXT NOT NULL DEFAULT ''",

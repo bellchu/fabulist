@@ -25,7 +25,9 @@ IDs → human review → epics, features and stories → requirements traceabili
 5. **Audit trail**: every manual edit, review decision, deletion, sync and AI run is recorded
    with who, when and field-level changes.
 6. **Export**: Excel (stories, requirements, RTM sheets), Jira CSV, Azure DevOps CSV,
-   Markdown, CSV and JSON.
+   Markdown, CSV and JSON, or push directly to **Jira** or **Azure DevOps**. Pushes are
+   idempotent: epics and stories are linked to their issues, so pushing again updates them
+   instead of creating duplicates.
 
 ## Admin dashboard
 
@@ -35,6 +37,8 @@ IDs → human review → epics, features and stories → requirements traceabili
   browser.
 - **Generation settings**: temperature, output tokens, timeout, section size, run limits,
   retrieval depth, the embeddings provider and model, and personal-data masking.
+- **Integrations**: Jira (Cloud with email and API token, or Data Center with a PAT) and Azure
+  DevOps (organization URL and PAT), with a connection test and a default target project.
 - **Overview / Activity**: usage, token counts, failure rate and a log of every run.
 
 ## Configuration (environment)

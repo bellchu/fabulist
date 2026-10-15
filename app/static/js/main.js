@@ -20,6 +20,7 @@ function shell(route) {
     navItem("#/admin/overview", "chart", "Overview", route[0] === "admin" && (route[1] || "overview") === "overview"),
     navItem("#/admin/providers", "cpu", "AI providers", route[0] === "admin" && route[1] === "providers"),
     navItem("#/admin/settings", "settings", "Generation settings", route[0] === "admin" && route[1] === "settings"),
+    navItem("#/admin/integrations", "link", "Integrations", route[0] === "admin" && route[1] === "integrations"),
     navItem("#/admin/activity", "activity", "Activity", route[0] === "admin" && route[1] === "activity"),
     h("div", { class: "sidebar-foot" }, "BRD → requirements → stories"));
   const topbar = h("header", { class: "topbar" },

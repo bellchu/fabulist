@@ -3,11 +3,11 @@ import { h, mount, icon, api, guard, toast, modal, confirmBox, badge, statusTone
 import { state, setCrumbs } from "./main.js";
 
 const rerender = () => window.dispatchEvent(new HashChangeEvent("hashchange"));
-const TITLES = { overview: "Overview", providers: "AI providers", settings: "Generation settings", activity: "Activity" };
+const TITLES = { overview: "Overview", providers: "AI providers", settings: "Generation settings", integrations: "Integrations", activity: "Activity" };
 
 export async function renderAdmin(content, tab) {
   setCrumbs({ href: "#/admin/overview", label: "Administration" }, TITLES[tab] || "Overview");
-  const view = { overview: viewOverview, providers: viewProviders, settings: viewSettings, activity: viewActivity }[tab] || viewOverview;
+  const view = { overview: viewOverview, providers: viewProviders, settings: viewSettings, integrations: viewIntegrations, activity: viewActivity }[tab] || viewOverview;
   mount(content, h("div", { class: "tabs" }, Object.entries(TITLES).map(([id, label]) =>
     h("a", { class: "tab" + (id === tab ? " active" : ""), href: "#/admin/" + id }, label))));
   await view(content);
@@ -175,6 +175,76 @@ async function viewSettings(content) {
     card("Privacy", "Applies to text sent to external AI providers.",
       field("Mask personal identifiers", segmented([[true, "On"], [false, "Off"]], redact, (x) => (redact = x)),
         "Emails, phone numbers, SSNs and long account/card numbers are replaced with placeholders before leaving the cluster.")));
+}
+
+// ---- integrations -------------------------------------------------------
+
+async function viewIntegrations(content) {
+  const data = await api.get("/api/integrations");
+  const list = h("div", { class: "card" });
+  mount(content,
+    head("Integrations", "Issue trackers that stories can be pushed to. Re-pushing updates the same issues instead of creating duplicates.",
+      h("button", { class: "btn btn-primary", onclick: () => integrationDialog(data, null) }, icon("plus"), "Add integration")),
+    list);
+  if (!data.integrations.length) {
+    list.append(empty({ iconName: "link", title: "No integrations yet", text: "Connect Jira or Azure DevOps to push approved stories directly." }));
+    return;
+  }
+  list.append(...data.integrations.map((it) => {
+    const result = h("div", { class: "small", style: { flexBasis: "100%" } });
+    return h("div", { class: "provider-row" },
+      h("div", { class: "grow", style: { minWidth: "240px" } },
+        h("div", { class: "row" }, h("b", {}, it.name), badge(it.kind_label, "accent")),
+        h("div", { class: "small muted mono" }, it.base_url + (it.target ? " · default " + it.target : "")),
+        h("div", { class: "small" }, it.has_token ? h("span", { class: "muted" }, (it.username ? it.username + " · " : "") + "token " + it.key_hint)
+          : h("span", { style: { color: "var(--amber)" } }, "No API token"))),
+      h("button", { class: "btn btn-sm", onclick: guard(async () => {
+        result.replaceChildren(h("span", { class: "muted" }, "Testing…"));
+        const r = await api.post("/api/admin/integrations/" + it.id + "/test");
+        result.replaceChildren(r.ok ? h("div", { class: "callout ok" }, icon("check"), r.message) : h("div", { class: "callout error" }, icon("alert"), r.error));
+      }) }, icon("play"), "Test"),
+      h("button", { class: "btn btn-sm", onclick: () => integrationDialog(data, it) }, icon("edit"), "Edit"),
+      h("button", { class: "btn btn-sm btn-ghost btn-danger", "aria-label": "Delete " + it.name, onclick: guard(async () => {
+        if (!(await confirmBox("Delete '" + it.name + "'? Links between stories and pushed issues are forgotten, so a later push creates new issues.", { danger: true, okLabel: "Delete" }))) return;
+        await api.del("/api/admin/integrations/" + it.id); rerender();
+      }) }, icon("trash")),
+      result);
+  }));
+}
+
+function integrationDialog(data, it) {
+  const isNew = !it;
+  it = it || { kind: "jira", name: "", base_url: "", username: "", target: "", has_token: false, key_hint: "" };
+  const kind = select(Object.entries(data.kinds), it.kind);
+  const name = h("input", { type: "text", value: it.name, placeholder: "e.g. Jira – order-to-cash" });
+  const baseUrl = h("input", { type: "url", value: it.base_url });
+  const username = h("input", { type: "text", value: it.username, placeholder: "you@company.com" });
+  const target = h("input", { type: "text", value: it.target });
+  const token = h("input", { type: "password", autocomplete: "new-password", placeholder: it.has_token ? "Saved (" + it.key_hint + "). Leave blank to keep." : "" });
+  const userField = field("Account email", username, "Jira Cloud: your Atlassian email (with an API token). Data Center: leave blank and use a personal access token.");
+  const hints = h("div", { class: "callout small" });
+  const sync = () => {
+    const jira = kind.value === "jira";
+    userField.classList.toggle("hidden", !jira);
+    baseUrl.placeholder = jira ? "https://your-site.atlassian.net" : "https://dev.azure.com/your-organization";
+    target.placeholder = jira ? "Project key, e.g. OTC" : "Project name, e.g. Order to Cash";
+    hints.textContent = jira
+      ? "Creates an Epic per story-map epic and Stories under it (parent link). Needs permission to create issues in the project."
+      : "Creates Epic and User Story work items with acceptance criteria, priority, story points and a parent link. Use a PAT with Work Items (read & write).";
+  };
+  kind.addEventListener("change", sync);
+  sync();
+  modal({
+    title: isNew ? "Add integration" : "Edit " + it.name, wide: true,
+    body: h("div", { class: "stack" }, hints, h("div", { class: "form-grid" }, field("Type", kind), field("Display name", name)),
+      field("Base URL", baseUrl), userField, h("div", { class: "form-grid" }, field("Default target project", target), field("API token", token, "Stored encrypted; never shown again."))),
+    actions: [{ label: isNew ? "Add integration" : "Save", kind: "btn-primary", onClick: async () => {
+      const body = { kind: kind.value, name: name.value, base_url: baseUrl.value, username: username.value, target: target.value, token: token.value };
+      if (isNew) await api.post("/api/admin/integrations", body);
+      else await api.put("/api/admin/integrations/" + it.id, body);
+      toast("Integration saved", "ok"); rerender();
+    } }],
+  });
 }
 
 // ---- activity -----------------------------------------------------------

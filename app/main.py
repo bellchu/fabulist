@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import admin, config, db, embeddings, exporters, history, parsing, pipeline, quality, repos, settings, taxonomy
+from . import admin, config, db, embeddings, exporters, history, integrations, parsing, pipeline, quality, repos, settings, taxonomy
 from .profiles import PLATFORMS
 
 log = logging.getLogger("fabulist")
@@ -35,6 +35,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Fabulist", lifespan=lifespan)
 app.include_router(admin.router)
 app.include_router(repos.router)
+app.include_router(integrations.router)
 
 
 @app.middleware("http")
@@ -351,6 +352,10 @@ def _requirements(pid: str) -> List[Dict[str, Any]]:
 def _stories(pid: str, reqs: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
     reqs = _requirements(pid) if reqs is None else reqs
     valid = {r["key"] for r in reqs if r["status"] != "excluded"}
+    links: Dict[str, List[Dict[str, str]]] = {}
+    for link in db.rows("SELECT l.item_ref, l.external_key, l.external_url, i.kind FROM external_links l "
+                        "JOIN integrations i ON i.id = l.integration_id WHERE l.project_id=%s AND l.item_type='story'", (pid,)):
+        links.setdefault(link["item_ref"], []).append({"key": link["external_key"], "url": link["external_url"], "kind": link["kind"]})
     out = []
     for r in db.rows("SELECT * FROM stories WHERE project_id=%s ORDER BY seq", (pid,)):
         item = db.item_row(r, "US")
@@ -360,6 +365,7 @@ def _stories(pid: str, reqs: Optional[List[Dict[str, Any]]] = None) -> List[Dict
         item["issues"] = quality.story_issues(item, valid)
         item["quality_score"] = quality.score(item["issues"])
         item["ready"] = quality.is_ready(item["issues"])
+        item["external"] = links.get(item["id"], [])
         out.append(item)
     return out
 
@@ -528,6 +534,34 @@ def traceability(pid: str):
     covered = sum(1 for r in rows if r["stories"])
     return {"rows": rows, "orphans": orphans, "covered": covered, "total": len(rows),
             "coverage": round(100 * covered / len(rows)) if rows else 0}
+
+
+class PushIn(BaseModel):
+    integration_id: str
+    target: str = Field(default="", max_length=120)
+    scope: str = "approved"
+
+
+@app.post("/api/projects/{pid}/push")
+def push_to_tracker(pid: str, body: PushIn, request: Request):
+    _project(pid)
+    conn = integrations.get(body.integration_id)
+    target = (body.target or conn["target"]).strip()
+    if not target:
+        raise HTTPException(400, "Choose the target project (Jira project key or Azure DevOps project)")
+    stories = [s for s in _stories(pid) if s["status"] == "approved" or (body.scope == "all" and s["status"] == "draft")]
+    if not stories:
+        raise HTTPException(400, "No stories in scope. Approve stories first or push everything in review.")
+    if len(stories) > 500:
+        raise HTTPException(400, "Push at most 500 stories at a time")
+    try:
+        result = integrations.push(pid, conn, target, stories)
+    except (integrations.TrackerError, settings.SettingsError) as exc:
+        raise HTTPException(400, str(exc))
+    with db.conn() as c:
+        history.record(c, pid, "push", conn["id"], target, "pushed to " + conn["kind"], history.actor(request),
+                       "%s %s: %d created, %d updated, %d failed" % (conn["name"], target, result["created"], result["updated"], len(result["failed"])))
+    return result
 
 
 @app.get("/api/projects/{pid}/export")

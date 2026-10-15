@@ -534,6 +534,8 @@ function storyDrawer(s) {
   const close = drawer({
     subtitle: isNew ? "New story" : s.key + " · " + s.epic + " › " + s.feature, title: isNew ? "Add story" : s.title,
     body: h("div", { class: "stack" },
+      (s.external || []).length ? h("div", { class: "row wrap small" }, h("span", { class: "muted" }, "In tracker:"),
+        s.external.map((x) => h("a", { class: "chip", href: x.url, target: "_blank", rel: "noopener noreferrer" }, icon("link"), x.key))) : null,
       isNew ? null : h("div", { class: "card card-body" },
         h("div", { class: "row", style: { marginBottom: "10px" } }, h("b", { class: "grow" }, "Quality (INVEST, Definition of Ready)"),
           s.ready ? badge("Ready", "green") : badge("Needs work", "amber"), scorePill(s.quality_score)), issueList(s.issues)),
@@ -615,7 +617,36 @@ async function viewExport(body) {
       h("div", { class: "row wrap" }, h("div", { class: "grow" }, h("h3", {}, "What to export"), note),
         segmented([["approved", "Approved only"], ["all", "Everything in review"]], filters.exportScope, (v) => { filters.exportScope = v; render(); }))),
     grid,
-    h("p", { class: "muted small", style: { marginTop: "16px" } },
-      "Direct push to Jira, Azure DevOps and ServiceNow is planned; use the import files meanwhile."));
+    await pushCard());
   render();
+}
+
+async function pushCard() {
+  const { integrations } = await api.get("/api/integrations");
+  const card = h("div", { class: "card", style: { marginTop: "16px" } },
+    h("div", { class: "card-head" }, h("div", { class: "grow" }, h("h3", {}, "Push to issue tracker"),
+      h("div", { class: "muted small" }, "Creates epics and stories in Jira or Azure DevOps. Pushing again updates the same issues."))));
+  if (!integrations.length) {
+    card.append(h("div", { class: "card-body muted small" }, "No tracker connected. An administrator can add Jira or Azure DevOps under ",
+      h("a", { href: "#/admin/integrations" }, "Admin → Integrations"), "."));
+    return card;
+  }
+  const conn = select(integrations.map((i) => [i.id, i.name + " · " + i.kind_label]), integrations[0].id, { "aria-label": "Integration" });
+  const target = h("input", { type: "text", value: integrations[0].target, placeholder: "Target project", style: { maxWidth: "220px" } });
+  conn.addEventListener("change", () => { target.value = (integrations.find((i) => i.id === conn.value) || {}).target || ""; });
+  const result = h("div", { style: { flexBasis: "100%" } });
+  const push = guard(async () => {
+    const approvedOnly = filters.exportScope === "approved";
+    if (!(await confirmBox("Push " + (approvedOnly ? "approved" : "all non-rejected") + " stories to " + conn.selectedOptions[0].textContent + " (" + target.value + ")?", { okLabel: "Push" }))) return;
+    btn.disabled = true; btn.textContent = "Pushing…";
+    try {
+      const r = await api.post(base() + "/push", { integration_id: conn.value, target: target.value, scope: approvedOnly ? "approved" : "all" });
+      result.replaceChildren(h("div", { class: "callout " + (r.failed.length ? "warn" : "ok") }, h("div", { class: "stack", style: { gap: "4px" } },
+        h("b", {}, r.created + " created, " + r.updated + " updated" + (r.failed.length ? ", " + r.failed.length + " failed" : "")),
+        r.failed.map((f) => h("div", { class: "small" }, f.item + ": " + f.error)))));
+    } finally { btn.disabled = false; btn.textContent = "Push stories"; }
+  });
+  const btn = h("button", { class: "btn btn-primary", onclick: push }, "Push stories");
+  card.append(h("div", { class: "runbox" }, conn, target, h("span", { class: "muted small grow" }, "Uses the export scope selected above."), btn, result));
+  return card;
 }

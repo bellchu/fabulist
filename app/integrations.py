@@ -1,0 +1,277 @@
+"""Push stories to issue trackers (Jira, Azure DevOps). Idempotent via external_links."""
+import base64
+import html
+import re
+import time
+from typing import Any, Callable, Dict, List, Optional, Tuple
+from urllib.parse import quote
+
+import httpx
+from fastapi import APIRouter, Body, HTTPException
+
+from . import db, settings
+
+router = APIRouter()
+KINDS = {"jira": "Jira (Cloud or Data Center)", "azure": "Azure DevOps Boards"}
+_URL = re.compile(r"^https://[A-Za-z0-9.-]+(:\d{1,5})?(/[\w.~%@+-]+)*/?$")
+
+
+class TrackerError(RuntimeError):
+    pass
+
+
+def _request(method: str, url: str, headers: Dict[str, str], body: Any = None, content_type: str = "application/json",
+             timeout: float = 30) -> Any:
+    """HTTP call with bounded retries on 429/5xx/network errors."""
+    last = "unknown error"
+    for attempt in range(3):
+        try:
+            resp = httpx.request(method, url, headers=dict(headers, **{"Content-Type": content_type, "Accept": "application/json"}),
+                                 json=body if body is not None else None, timeout=timeout)
+        except httpx.HTTPError as exc:
+            last = "%s contacting tracker" % type(exc).__name__
+        else:
+            if resp.status_code == 429 or resp.status_code >= 500:
+                last = "tracker returned HTTP %d" % resp.status_code
+            elif resp.status_code >= 400:
+                raise TrackerError("HTTP %d: %s" % (resp.status_code, _error_text(resp)))
+            else:
+                return resp.json() if resp.content else {}
+        if attempt < 2:
+            time.sleep(1.5 * (2 ** attempt))
+    raise TrackerError(last)
+
+
+def _error_text(resp: httpx.Response) -> str:
+    try:
+        data = resp.json()
+    except Exception:
+        return resp.text[:200]
+    if isinstance(data, dict):
+        msgs = data.get("errorMessages") or []
+        errs = data.get("errors") or {}
+        parts = list(msgs) + ["%s: %s" % kv for kv in (errs.items() if isinstance(errs, dict) else [])]
+        return "; ".join(str(p) for p in parts)[:300] or str(data.get("message", ""))[:300]
+    return str(data)[:200]
+
+
+# ---- formatting ----------------------------------------------------------
+
+def _jira_description(s: Dict[str, Any]) -> str:
+    out = [s["narrative"], "", "h3. Acceptance criteria"] + ["* " + a for a in s["acceptance_criteria"]]
+    if s.get("variant_criteria"):
+        out += ["", "h3. Product variants"] + ["* *%s*: %s" % (v["scope"], v["criteria"]) for v in s["variant_criteria"]]
+    if s.get("open_questions"):
+        out += ["", "h3. Open questions"] + ["* " + q for q in s["open_questions"]]
+    out += ["", "Requirements: %s | Fabulist %s" % (", ".join(s.get("requirement_ids") or []) or "none", s["key"])]
+    return "\n".join(out)
+
+
+def _labels(s: Dict[str, Any]) -> List[str]:
+    return sorted({re.sub(r"\s+", "-", x.strip())[:60] for x in s.get("labels", []) + s.get("compliance_tags", []) if x.strip()} | {"fabulist"})
+
+
+def _html_list(items: List[str]) -> str:
+    return "<ul>" + "".join("<li>%s</li>" % html.escape(i) for i in items) + "</ul>"
+
+
+# ---- trackers ------------------------------------------------------------
+
+class Jira:
+    def __init__(self, conn: Dict[str, Any], token: str):
+        self.base = conn["base_url"].rstrip("/")
+        auth = ("%s:%s" % (conn["username"], token)) if conn["username"] else None
+        self.headers = {"Authorization": "Basic " + base64.b64encode(auth.encode()).decode()} if auth else {"Authorization": "Bearer " + token}
+
+    def test(self) -> str:
+        me = _request("GET", self.base + "/rest/api/2/myself", self.headers)
+        return "Signed in as %s" % (me.get("displayName") or me.get("name") or "user")
+
+    def _url(self, key: str) -> str:
+        return "%s/browse/%s" % (self.base, key)
+
+    def upsert_epic(self, target: str, name: str, existing: Optional[str]) -> Tuple[str, str]:
+        fields = {"summary": name[:250]}
+        if existing:
+            _request("PUT", "%s/rest/api/2/issue/%s" % (self.base, existing), self.headers, {"fields": fields})
+            return existing, self._url(existing)
+        data = _request("POST", self.base + "/rest/api/2/issue", self.headers,
+                        {"fields": dict(fields, project={"key": target}, issuetype={"name": "Epic"}, labels=["fabulist"])})
+        return data["key"], self._url(data["key"])
+
+    def upsert_story(self, target: str, s: Dict[str, Any], epic_key: Optional[str], existing: Optional[str]) -> Tuple[str, str]:
+        fields: Dict[str, Any] = {"summary": s["title"][:250], "description": _jira_description(s), "labels": _labels(s)}
+        if existing:
+            _request("PUT", "%s/rest/api/2/issue/%s" % (self.base, existing), self.headers, {"fields": fields})
+            return existing, self._url(existing)
+        fields.update(project={"key": target}, issuetype={"name": "Story"})
+        if epic_key:
+            fields["parent"] = {"key": epic_key}
+        data = _request("POST", self.base + "/rest/api/2/issue", self.headers, {"fields": fields})
+        return data["key"], self._url(data["key"])
+
+
+class Azure:
+    PRIORITY = {"High": 1, "Medium": 2, "Low": 3}
+
+    def __init__(self, conn: Dict[str, Any], token: str):
+        self.base = conn["base_url"].rstrip("/")  # https://dev.azure.com/{organization}
+        self.headers = {"Authorization": "Basic " + base64.b64encode((":" + token).encode()).decode()}
+
+    def test(self) -> str:
+        data = _request("GET", self.base + "/_apis/projects?api-version=7.1", self.headers)
+        return "Connected: %d projects visible" % int(data.get("count", 0))
+
+    def _wit(self, target: str, kind: str) -> str:
+        return "%s/%s/_apis/wit/workitems/$%s?api-version=7.1" % (self.base, quote(target), quote(kind))
+
+    def _save(self, target: str, kind: str, ops: List[Dict[str, Any]], existing: Optional[str]) -> Tuple[str, str]:
+        if existing:
+            url = "%s/_apis/wit/workitems/%s?api-version=7.1" % (self.base, existing)
+            data = _request("PATCH", url, self.headers, [dict(o, op="add") for o in ops], "application/json-patch+json")
+        else:
+            data = _request("POST", self._wit(target, kind), self.headers, [dict(o, op="add") for o in ops], "application/json-patch+json")
+        wid = str(data["id"])
+        link = (data.get("_links") or {}).get("html", {}).get("href") or "%s/%s/_workitems/edit/%s" % (self.base, quote(target), wid)
+        return wid, link
+
+    def upsert_epic(self, target: str, name: str, existing: Optional[str]) -> Tuple[str, str]:
+        return self._save(target, "Epic", [{"path": "/fields/System.Title", "value": name[:250]},
+                                           {"path": "/fields/System.Tags", "value": "fabulist"}], existing)
+
+    def upsert_story(self, target: str, s: Dict[str, Any], epic_key: Optional[str], existing: Optional[str]) -> Tuple[str, str]:
+        desc = "<p>%s</p>" % html.escape(s["narrative"])
+        if s.get("variant_criteria"):
+            desc += "<h3>Product variants</h3>" + _html_list(["%s: %s" % (v["scope"], v["criteria"]) for v in s["variant_criteria"]])
+        desc += "<p>Requirements: %s · Fabulist %s</p>" % (html.escape(", ".join(s.get("requirement_ids") or []) or "none"), s["key"])
+        ops = [{"path": "/fields/System.Title", "value": s["title"][:250]},
+               {"path": "/fields/System.Description", "value": desc},
+               {"path": "/fields/Microsoft.VSTS.Common.AcceptanceCriteria", "value": _html_list(s["acceptance_criteria"])},
+               {"path": "/fields/Microsoft.VSTS.Common.Priority", "value": self.PRIORITY.get(s["priority"], 2)},
+               {"path": "/fields/System.Tags", "value": "; ".join(_labels(s))}]
+        if s.get("story_points"):
+            ops.append({"path": "/fields/Microsoft.VSTS.Scheduling.StoryPoints", "value": s["story_points"]})
+        if epic_key and not existing:
+            ops.append({"path": "/relations/-", "value": {"rel": "System.LinkTypes.Hierarchy-Reverse",
+                                                          "url": "%s/_apis/wit/workItems/%s" % (self.base, epic_key)}})
+        return self._save(target, "User Story", ops, existing)
+
+
+TRACKERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {"jira": Jira, "azure": Azure}
+
+
+def client_for(conn: Dict[str, Any]) -> Any:
+    token = settings.decrypt_secret(conn["token_enc"]) if conn["token_enc"] else ""
+    if not token:
+        raise TrackerError("No API token saved for this integration")
+    return TRACKERS[conn["kind"]](conn, token)
+
+
+def push(project_id: str, conn: Dict[str, Any], target: str, stories: List[Dict[str, Any]],
+         progress: Callable[[str], None] = lambda m: None) -> Dict[str, Any]:
+    tracker = client_for(conn)
+    links = {(r["item_type"], r["item_ref"]): r["external_key"] for r in db.rows(
+        "SELECT item_type, item_ref, external_key FROM external_links WHERE integration_id=%s AND target=%s AND project_id=%s",
+        (conn["id"], target, project_id))}
+    result: Dict[str, Any] = {"created": 0, "updated": 0, "failed": [], "items": []}
+
+    def save_link(item_type: str, ref: str, key: str, url: str) -> None:
+        db.execute("INSERT INTO external_links (id, project_id, integration_id, target, item_type, item_ref, external_key, external_url, updated) "
+                   "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (integration_id, target, item_type, item_ref) "
+                   "DO UPDATE SET external_key=EXCLUDED.external_key, external_url=EXCLUDED.external_url, updated=EXCLUDED.updated",
+                   (db.new_id(), project_id, conn["id"], target, item_type, ref, key, url, db.now()))
+
+    epic_keys: Dict[str, Optional[str]] = {}
+    for epic in dict.fromkeys(s["epic"] for s in stories):
+        existing = links.get(("epic", epic))
+        try:
+            key, url = tracker.upsert_epic(target, epic, existing)
+            save_link("epic", epic, key, url)
+            epic_keys[epic] = key
+            result["updated" if existing else "created"] += 1
+        except TrackerError as exc:
+            epic_keys[epic] = None
+            result["failed"].append({"item": "Epic: " + epic, "error": str(exc)})
+    for i, s in enumerate(stories, 1):
+        progress("Pushing %d of %d" % (i, len(stories)))
+        existing = links.get(("story", s["id"]))
+        try:
+            key, url = tracker.upsert_story(target, s, epic_keys.get(s["epic"]), existing)
+            save_link("story", s["id"], key, url)
+            result["updated" if existing else "created"] += 1
+            result["items"].append({"story": s["key"], "external_key": key, "url": url})
+        except TrackerError as exc:
+            result["failed"].append({"item": s["key"], "error": str(exc)})
+    return result
+
+
+# ---- admin CRUD ----------------------------------------------------------
+
+def _public(r: Dict[str, Any]) -> Dict[str, Any]:
+    out = {k: r[k] for k in ("id", "kind", "name", "base_url", "username", "target", "key_hint", "created")}
+    out.update(kind_label=KINDS.get(r["kind"], r["kind"]), has_token=bool(r["token_enc"]))
+    return out
+
+
+def get(iid: str) -> Dict[str, Any]:
+    r = db.one("SELECT * FROM integrations WHERE id=%s", (iid,))
+    if not r:
+        raise HTTPException(404, "Integration not found")
+    return r
+
+
+@router.get("/api/integrations")
+def list_integrations():
+    return {"integrations": [_public(r) for r in db.rows("SELECT * FROM integrations ORDER BY created")], "kinds": KINDS}
+
+
+def _save(body: Dict[str, Any], iid: Optional[str]) -> Dict[str, Any]:
+    kind = str(body.get("kind") or "")
+    name = str(body.get("name") or "").strip()[:80]
+    base_url = str(body.get("base_url") or "").strip().rstrip("/")[:300]
+    username = str(body.get("username") or "").strip()[:120]
+    target = str(body.get("target") or "").strip()[:120]
+    token = str(body.get("token") or "").strip()
+    if kind not in KINDS:
+        raise HTTPException(400, "Unknown integration type")
+    if not name:
+        raise HTTPException(400, "Name is required")
+    if not _URL.match(base_url):
+        raise HTTPException(400, "Base URL must be https://, e.g. https://your-site.atlassian.net or https://dev.azure.com/your-org")
+    current = get(iid) if iid else None
+    enc = current["token_enc"] if current else None
+    hint = current["key_hint"] if current else ""
+    if token:
+        enc, hint = settings.encrypt_secret(token), "…" + token[-4:]
+    if iid:
+        db.execute("UPDATE integrations SET kind=%s, name=%s, base_url=%s, username=%s, target=%s, token_enc=%s, key_hint=%s WHERE id=%s",
+                   (kind, name, base_url, username, target, enc, hint, iid))
+    else:
+        iid = db.new_id()
+        db.execute("INSERT INTO integrations (id, kind, name, base_url, username, target, token_enc, key_hint, created) "
+                   "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)", (iid, kind, name, base_url, username, target, enc, hint, db.now()))
+    return _public(get(iid))
+
+
+@router.post("/api/admin/integrations", status_code=201)
+def create_integration(body: Dict[str, Any] = Body(...)):
+    return _save(body, None)
+
+
+@router.put("/api/admin/integrations/{iid}")
+def update_integration(iid: str, body: Dict[str, Any] = Body(...)):
+    return _save(body, iid)
+
+
+@router.delete("/api/admin/integrations/{iid}", status_code=204)
+def delete_integration(iid: str):
+    get(iid)
+    db.execute("DELETE FROM integrations WHERE id=%s", (iid,))
+
+
+@router.post("/api/admin/integrations/{iid}/test")
+def test_integration(iid: str):
+    try:
+        return {"ok": True, "message": client_for(get(iid)).test()}
+    except (TrackerError, settings.SettingsError) as exc:
+        return {"ok": False, "error": str(exc)}
