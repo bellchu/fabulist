@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fabulist</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><h1>Fabulist</h1><span class="sub">BRD → user stories</span></header>
+<main>
+  <aside>
+    <h2>Projects</h2>
+    <ul id="projects"></ul>
+    <form id="new-project">
+      <input id="p-name" placeholder="New project name" required maxlength="120">
+      <select id="p-platform"></select>
+      <button>Create</button>
+    </form>
+  </aside>
+  <section id="workspace" hidden>
+    <h2 id="title"></h2>
+    <div class="card">
+      <h3>1 · BRD documents</h3>
+      <ul id="docs"></ul>
+      <input type="file" id="file" accept=".pdf,.docx,.md,.markdown,.txt">
+      <button id="upload">Upload</button>
+      <details><summary>or paste text</summary>
+        <input id="t-name" placeholder="Document name" value="pasted-brd.md">
+        <textarea id="t-text" rows="5" placeholder="Paste BRD text…"></textarea>
+        <button id="add-text">Add text</button>
+      </details>
+    </div>
+    <div class="card">
+      <h3>2 · Generate</h3>
+      <label>AI engine <select id="provider"></select></label>
+      <label>Model <input id="model" placeholder="(server default)"></label>
+      <button id="generate">Generate stories</button>
+      <span id="run-status" role="status"></span>
+    </div>
+    <div class="card">
+      <h3>3 · Review &amp; export</h3>
+      <label>Format <select id="format"></select></label>
+      <button id="export">Export</button>
+      <div id="stories"></div>
+    </div>
+    <div class="card">
+      <h3>Search BRDs</h3>
+      <input id="q" placeholder="Search project documents…"><button id="search">Search</button>
+      <ul id="hits"></ul>
+    </div>
+  </section>
+</main>
+<div id="toast" role="alert" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+# IMAGE is substituted by scripts/deploy.sh. Secrets "fabulist-db" and
+# "fabulist-app" are created by that script and are never committed.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fabulist
+  namespace: fabulist
+spec:
+  replicas: 1   # background generation runs in-process; keep a single replica
+  selector:
+    matchLabels:
+      app: fabulist
+  template:
+    metadata:
+      labels:
+        app: fabulist
+    spec:
+      containers:
+        - name: fabulist
+          image: IMAGE
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: fabulist-app
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fabulist-db
+                  key: DATABASE_URL
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8000}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8000}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fabulist
+  namespace: fabulist
+spec:
+  selector:
+    app: fabulist
+  ports:
+    - port: 80
+      targetPort: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fabulist
+  namespace: fabulist
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: FABULIST_HOST
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fabulist
+                port:
+                  number: 80
