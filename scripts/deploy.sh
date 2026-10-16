@@ -49,6 +49,7 @@ docker buildx build --platform linux/amd64 -t "$IMAGE" --load .
 docker save "$IMAGE" | ssh "$DEPLOY_SSH" "sudo microk8s ctr image import -"
 
 sed -e "s|IMAGE|${IMAGE}|" -e "s|FABULIST_HOST|${FABULIST_HOST}|" deploy/k8s/app.yaml | kubectl apply -f -
+sed -e "s|IMAGE|${IMAGE}|" deploy/k8s/audit.yaml | kubectl apply -f -
 kubectl -n "$NS" rollout status deploy/fabulist --timeout=240s
 # Prometheus Operator / Grafana sidecar objects are optional: skip when the CRDs are absent.
 if kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1; then

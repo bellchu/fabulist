@@ -1,0 +1,36 @@
+# Weekly check of the deployed image's Python packages against published advisories.
+# A failed job (vulnerabilities found or audit error) raises FabulistDependencyAudit.
+# IMAGE is substituted by scripts/deploy.sh so the audit always covers what is running.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fabulist-dep-audit
+  namespace: fabulist
+spec:
+  schedule: "0 6 * * 1"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 900
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: pip-audit
+              image: IMAGE
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-c"]
+              # Audit into a throwaway target dir so the app's environment is only read, never changed.
+              args:
+                - >
+                  pip install --quiet --no-cache-dir --target /tmp/audit pip-audit &&
+                  PYTHONPATH=/tmp/audit python -m pip_audit --progress-spinner off --desc on
+              resources:
+                requests: {cpu: 50m, memory: 128Mi}
+                limits: {memory: 512Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true

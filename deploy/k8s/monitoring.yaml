@@ -52,6 +52,12 @@ spec:
           annotations:
             summary: Several AI runs failed in the last hour
             runbook: "README.md#runbook: test the default AI provider in Admin > AI providers"
+        - alert: FabulistDependencyAudit
+          expr: kube_job_status_failed{namespace="fabulist", job_name=~"fabulist-dep-audit.*"} > 0
+          labels: {severity: warning, team: fabulist}
+          annotations:
+            summary: The weekly dependency audit found vulnerable Python packages (or could not run)
+            runbook: "README.md#runbook: read the fabulist-dep-audit job log, upgrade pins, run scripts/test.sh, redeploy"
         - alert: FabulistBackupMissing
           expr: time() - kube_cronjob_status_last_successful_time{namespace="fabulist", cronjob="fabulist-backup"} > 26 * 3600
           for: 30m

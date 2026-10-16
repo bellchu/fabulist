@@ -146,6 +146,7 @@ in-cluster on first deploy. They are never stored in the repository.
 | FabulistDown | `kubectl -n fabulist get pods`; app logs; `/healthz` fails when Postgres is unreachable, so check `postgres-0` too. |
 | FabulistHighErrorRate | Filter logs for `status >= 500`; look for database errors or provider timeouts. |
 | FabulistAIRunsFailing | Admin → Activity shows each run's error. Use Admin → AI providers → Test to verify the endpoint, key and model. |
+| FabulistDependencyAudit | `kubectl -n fabulist logs job/<latest fabulist-dep-audit job>` lists packages and fixed versions; upgrade `requirements.txt`, run `scripts/test.sh`, redeploy. |
 | FabulistBackupMissing | `kubectl -n fabulist get jobs` and the `fabulist-backup` job logs; make sure the backups volume has space. |
 
 ## License
