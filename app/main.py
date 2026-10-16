@@ -1,16 +1,17 @@
 import json
 import logging
 import secrets
+from urllib.parse import quote
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import admin, config, db, exporters, integrations, metrics, pipeline, repos, settings, taxonomy, users, workspace
+from . import admin, config, db, exporters, integrations, metrics, pipeline, repos, settings, sso, taxonomy, users, workspace
 from .profiles import PLATFORMS
 
 log = logging.getLogger("fabulist")
@@ -43,6 +44,7 @@ app.include_router(repos.router)
 app.include_router(integrations.router)
 app.include_router(users.router)
 app.include_router(workspace.router)
+app.include_router(sso.router)
 
 
 class JsonFormatter(logging.Formatter):
@@ -73,7 +75,21 @@ async def auth_and_guards(request: Request, call_next):
         if not config.METRICS_TOKEN or not secrets.compare_digest(token, "Bearer " + config.METRICS_TOKEN):
             return Response(status_code=404)
         return await call_next(request)
-    if users.auth_enabled() and path != "/healthz":
+    session = None
+    if sso.enabled() and not path.startswith("/auth/"):
+        session = await run_in_threadpool(sso.session_user, request)
+        if session:
+            request.state.user, request.state.role = session
+    if session:
+        if path.startswith("/api/") and not users.allowed(session[1], request.method, path):
+            return JSONResponse({"detail": "Your role (%s) does not allow this action" % session[1]}, status_code=403)
+    elif sso.enabled() and not path.startswith(("/auth/", "/static/")) and path != "/healthz" and "authorization" not in request.headers:
+        # Browsers without a session go to the identity provider; API clients get a plain 401.
+        if path.startswith("/api/"):
+            return JSONResponse({"detail": "Sign in required"}, status_code=401)
+        return RedirectResponse("/auth/login?next=" + quote(path), status_code=302)
+    elif ((users.auth_enabled() or sso.enabled()) and path != "/healthz" and not path.startswith("/auth/")
+          and not (sso.enabled() and path.startswith("/static/"))):
         creds = users.parse_basic(request.headers.get("authorization", ""))
         # Throttle per username and per client address (Cloudflare/Traefik forward the real IP).
         client_ip = (request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
@@ -134,8 +150,10 @@ def prometheus_metrics() -> Response:
 
 
 @app.get("/api/me")
-def me(request: Request) -> Dict[str, str]:
-    return users.current(request)
+def me(request: Request) -> Dict[str, Any]:
+    out: Dict[str, Any] = dict(users.current(request))
+    out["sso"] = bool(sso.enabled() and request.cookies.get(sso.SESSION_COOKIE))
+    return out
 
 
 @app.exception_handler(settings.SettingsError)

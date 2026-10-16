@@ -52,8 +52,11 @@ def auth_enabled() -> bool:
 def authenticate(username: str, password: str) -> Optional[str]:
     """Return the user's role, or None. Successful and failed checks are cached briefly
     because scrypt is deliberately slow and Basic auth sends credentials on every request."""
-    if secrets.compare_digest(username, config.BASIC_USER) and secrets.compare_digest(password, config.BASIC_PASSWORD):
+    if (auth_enabled() and secrets.compare_digest(username, config.BASIC_USER)
+            and secrets.compare_digest(password, config.BASIC_PASSWORD)):
         return "admin"
+    if not username or not password:
+        return None
     key = (username, hashlib.sha256(password.encode()).hexdigest())
     now = time.monotonic()
     with _cache_lock:
@@ -99,8 +102,41 @@ def clear_failures(key: str) -> None:
         _failures.pop(key, None)
 
 
+_roles: Dict[str, Tuple[float, Optional[str]]] = {}
+
+
+def role_of(username: str) -> Optional[str]:
+    """Current role of an active named user (cached briefly; invalidated by forget())."""
+    now = time.monotonic()
+    with _cache_lock:
+        hit = _roles.get(username)
+        if hit and now - hit[0] < 60:
+            return hit[1]
+    row = db.one("SELECT role, disabled FROM users WHERE username = %s", (username,))
+    role = row["role"] if row and not row["disabled"] else None
+    with _cache_lock:
+        _roles[username] = (now, role)
+    return role
+
+
+def provision_sso_user(username: str, auto_role: str) -> Optional[str]:
+    """Role for an SSO sign-in: existing active user, or a new account when auto-provisioning is on."""
+    row = db.one("SELECT role, disabled FROM users WHERE username = %s", (username,))
+    if row:
+        return None if row["disabled"] else row["role"]
+    if auto_role not in ROLES:
+        return None
+    # SSO-only account: a random password nobody knows (Basic sign-in stays possible after a reset).
+    db.execute("INSERT INTO users (id, username, password_hash, role, disabled, created) VALUES (%s,%s,%s,%s,FALSE,%s) "
+               "ON CONFLICT (username) DO NOTHING",
+               (db.new_id(), username, hash_password(secrets.token_urlsafe(32)), auto_role, db.now()))
+    forget(username)
+    return role_of(username)
+
+
 def forget(username: str) -> None:
     with _cache_lock:
+        _roles.pop(username, None)
         for key in [k for k in _cache if k[0] == username]:
             del _cache[key]
 

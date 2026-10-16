@@ -86,6 +86,26 @@ def make_default(pid: str):
     return {"ok": True}
 
 
+@router.post("/providers/models")
+def provider_models(body: Dict[str, Any] = Body(...)):
+    """List models for a provider being configured. Uses the key in the request, or the saved key of
+    `provider_id` when the key field was left blank."""
+    kind = str(body.get("kind") or "")
+    base_url = str(body.get("base_url") or "").strip()
+    key = str(body.get("api_key") or "").strip()
+    if kind not in ("openai", "anthropic"):
+        raise HTTPException(400, "Model lists are available for OpenAI-compatible and Anthropic providers")
+    if not re.match(r"^https?://[^\s]+$", base_url):
+        raise HTTPException(400, "Enter the endpoint URL first")
+    if not key and body.get("provider_id"):
+        key = settings.get_provider(str(body["provider_id"]))["api_key"]
+    try:
+        models = llm.list_models(kind, base_url, key)
+    except llm.LLMError as exc:
+        raise HTTPException(400, "Could not load models: %s" % exc)
+    return {"models": models, "embedding_models": [m for m in models if "embed" in m["id"].lower()]}
+
+
 @router.post("/providers/{pid}/test")
 def test_provider(pid: str):
     return llm.test_connection(settings.get_provider(pid), settings.get_settings())

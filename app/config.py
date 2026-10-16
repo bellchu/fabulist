@@ -47,3 +47,13 @@ METRICS_TOKEN = os.environ.get("METRICS_TOKEN", "")
 # Repository URLs that resolve to private/internal addresses are refused unless this is set
 # (e.g. for an internal Git server). Guards against server-side request forgery.
 ALLOW_PRIVATE_REPO_HOSTS = os.environ.get("ALLOW_PRIVATE_REPO_HOSTS", "").lower() in ("1", "true", "yes")
+
+# OpenID Connect single sign-on (optional). Enabled when issuer, client id and redirect URL are set.
+OIDC_ISSUER = os.environ.get("OIDC_ISSUER", "").rstrip("/")
+OIDC_CLIENT_ID = os.environ.get("OIDC_CLIENT_ID", "")
+OIDC_CLIENT_SECRET = os.environ.get("OIDC_CLIENT_SECRET", "")
+OIDC_REDIRECT_URL = os.environ.get("OIDC_REDIRECT_URL", "")  # e.g. https://fabulist.example.com/auth/callback
+OIDC_SCOPES = os.environ.get("OIDC_SCOPES", "openid email profile")
+OIDC_USERNAME_CLAIM = os.environ.get("OIDC_USERNAME_CLAIM", "email")
+# Role for SSO users not yet in Fabulist's user list; empty = only pre-registered users may sign in.
+OIDC_AUTO_PROVISION_ROLE = os.environ.get("OIDC_AUTO_PROVISION_ROLE", "")

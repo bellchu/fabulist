@@ -1,7 +1,7 @@
 """LLM provider adapters for provider profiles managed in the admin dashboard."""
 import re
 import time
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 import httpx
 
@@ -80,6 +80,29 @@ def complete(profile: Dict[str, Any], system: str, user: str, opts: Dict[str, An
         u = data.get("usage") or {}
         return text, {"in": int(u.get("input_tokens") or 0), "out": int(u.get("output_tokens") or 0)}
     raise LLMError("Provider type %s cannot generate text" % kind)
+
+
+def list_models(kind: str, base_url: str, api_key: str) -> List[Dict[str, str]]:
+    """Models the key can use: OpenAI-compatible GET /models, Anthropic GET /v1/models."""
+    base = base_url.rstrip("/")
+    if kind == "openai":
+        url, headers = base + "/models", ({"Authorization": "Bearer " + api_key} if api_key else {})
+    elif kind == "anthropic":
+        url, headers = base + "/v1/models?limit=100", {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+    else:
+        return []
+    try:
+        resp = httpx.get(url, headers=headers, timeout=15)
+    except httpx.HTTPError as exc:
+        raise LLMError("%s contacting provider" % type(exc).__name__)
+    if resp.status_code >= 400:
+        raise LLMError("provider returned HTTP %d: %s" % (resp.status_code, _error_text(resp)))
+    try:
+        items = resp.json().get("data") or []
+    except ValueError:
+        raise LLMError("Provider did not return a model list")
+    models = [{"id": str(m["id"]), "label": str(m.get("display_name") or m["id"])} for m in items if isinstance(m, dict) and m.get("id")]
+    return sorted(models, key=lambda m: m["id"])
 
 
 def test_connection(profile: Dict[str, Any], opts: Dict[str, Any]) -> Dict[str, Any]:

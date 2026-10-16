@@ -97,24 +97,58 @@ function providerDialog(data, p) {
   const name = h("input", { type: "text", value: p.name, placeholder: "e.g. DeepSeek production" });
   const kind = select(Object.entries(data.kinds), p.kind);
   const baseUrl = h("input", { type: "url", value: p.base_url, placeholder: "https://api.example.com/v1" });
-  const model = h("input", { type: "text", value: p.model, placeholder: "Model ID" });
   const key = h("input", { type: "password", autocomplete: "new-password", placeholder: p.has_key ? "Saved (" + p.key_hint + "). Leave blank to keep." : "Paste API key" });
   const clearKey = h("input", { type: "checkbox" });
+  // Model: a dropdown filled from the provider's model list once a key is available, or free text.
+  const model = h("input", { type: "text", value: p.model, placeholder: "Model ID" });
+  const modelSelect = h("select", { class: "hidden", "aria-label": "Model" });
+  const modelStatus = h("div", { class: "hint" }, "Enter the endpoint and API key to load the available models.");
+  const showCustom = () => model.classList.toggle("hidden", !modelSelect.classList.contains("hidden") && modelSelect.value !== "__custom");
+  modelSelect.addEventListener("change", () => { if (modelSelect.value !== "__custom") model.value = modelSelect.value; showCustom(); });
+  let loading = 0;
+  const loadModels = async (quiet) => {
+    if (kind.value === "mock" || !baseUrl.value.trim() || (!key.value.trim() && !p.has_key)) return;
+    const ticket = ++loading;
+    modelStatus.textContent = "Loading models…";
+    try {
+      const r = await api.post("/api/admin/providers/models", { kind: kind.value, base_url: baseUrl.value, api_key: key.value, provider_id: p.id || null });
+      if (ticket !== loading) return;
+      const current = model.value.trim();
+      const ids = r.models.map((m) => m.id);
+      modelSelect.replaceChildren(...r.models.map((m) => h("option", { value: m.id, selected: m.id === current }, m.label === m.id ? m.id : m.label + " (" + m.id + ")")),
+        h("option", { value: "__custom", selected: Boolean(current) && !ids.includes(current) }, "Custom model ID…"));
+      modelSelect.classList.toggle("hidden", !r.models.length);
+      if (r.models.length && !current) { modelSelect.value = r.models[0].id; model.value = r.models[0].id; }
+      modelStatus.textContent = r.models.length ? r.models.length + " models available with this key." : "The provider returned no models; enter a model ID.";
+      showCustom();
+    } catch (e) {
+      if (ticket !== loading) return;
+      modelStatus.textContent = e.message;
+      modelSelect.classList.add("hidden");
+      showCustom();
+      if (!quiet) toast(e.message, "error");
+    }
+  };
+  const loadBtn = h("button", { type: "button", class: "btn btn-sm", onclick: () => loadModels(false) }, icon("refresh"), "Load models");
+  key.addEventListener("change", () => loadModels(true));
+  key.addEventListener("paste", () => setTimeout(() => loadModels(true), 50));
+  baseUrl.addEventListener("change", () => loadModels(true));
   const preset = select([["", "Start from a preset…"], ...data.presets.map((x, i) => [String(i), x.label])], "");
   preset.addEventListener("change", () => {
     const x = data.presets[Number(preset.value)];
     if (!x) return;
     kind.value = x.kind; baseUrl.value = x.base_url; if (x.model) model.value = x.model; if (!name.value) name.value = x.label;
-    sync();
+    sync(); loadModels(true);
   });
   const remote = h("div", { class: "stack" },
     field("Endpoint (base URL)", baseUrl, "OpenAI-compatible: the URL before /chat/completions. Anthropic: https://api.anthropic.com"),
-    field("Model", model),
     field("API key", key, data.encryption_configured ? "Stored encrypted. Never shown again after saving." : "Server has no encryption key configured; keys can't be saved."),
-    p.has_key ? h("label", { class: "switch small" }, clearKey, "Remove the saved key") : null);
+    p.has_key ? h("label", { class: "switch small" }, clearKey, "Remove the saved key") : null,
+    h("div", { class: "field" }, h("label", {}, "Model"), h("div", { class: "row" }, modelSelect, loadBtn), model, modelStatus));
   const sync = () => remote.classList.toggle("hidden", kind.value === "mock");
-  kind.addEventListener("change", sync);
+  kind.addEventListener("change", () => { sync(); loadModels(true); });
   sync();
+  if (p.has_key) loadModels(true);
   modal({
     title: isNew ? "Add AI provider" : "Edit " + p.name, wide: true,
     body: h("div", { class: "stack" }, isNew ? preset : null, h("div", { class: "form-grid" }, field("Display name", name), field("Type", kind)), remote),
@@ -140,6 +174,16 @@ async function viewSettings(content) {
   };
   let redact = v.redact_pii;
   const embedProvider = select([["", "Offline hashing (no external calls)"], ...prov.providers.filter((p) => p.kind === "openai").map((p) => [p.id, p.name + " · " + p.base_url])], v.embed_provider_id);
+  const embedList = h("datalist", { id: "embed-models" });
+  inputs.embed_model.setAttribute("list", "embed-models");
+  const embedLoad = h("button", { type: "button", class: "btn btn-sm", onclick: guard(async () => {
+    const pr = prov.providers.find((x) => x.id === embedProvider.value);
+    if (!pr) throw new Error("Choose an OpenAI-compatible embeddings provider first");
+    const r = await api.post("/api/admin/providers/models", { kind: pr.kind, base_url: pr.base_url, provider_id: pr.id });
+    const list = r.embedding_models.length ? r.embedding_models : r.models;
+    embedList.replaceChildren(...list.map((m) => h("option", { value: m.id })));
+    toast(list.length + " models loaded; pick one in the field", "ok");
+  }) }, "Load", embedList);
   const limit = (k) => "Range " + s.limits[k][0] + " – " + s.limits[k][1] + ". Default " + s.defaults[k] + ".";
   const card = (title, sub, ...children) => h("div", { class: "card", style: { marginBottom: "16px" } },
     h("div", { class: "card-head" }, h("div", {}, h("h3", {}, title), h("div", { class: "muted small" }, sub))), h("div", { class: "card-body" }, ...children));
@@ -168,7 +212,7 @@ async function viewSettings(content) {
         field("Passages per request", inputs.rag_top_k, "0 disables retrieval. " + limit("rag_top_k")),
         field("Vector dimension", h("input", { type: "text", value: String(s.embed_dim), disabled: true }), "Fixed by the database (EMBED_DIM). The model must output this size."),
         field("Embeddings provider", embedProvider, "Only OpenAI-compatible providers expose /embeddings."),
-        field("Embeddings model", inputs.embed_model)),
+        field("Embeddings model", h("div", { class: "row" }, inputs.embed_model, embedLoad), "Use Load to list the provider's embedding models.")),
       h("div", { style: { marginTop: "12px" } }, h("button", { class: "btn btn-sm", onclick: guard(async () => {
         if (!(await confirmBox("Rebuild embeddings for every document? This calls the embeddings provider for all passages.", { okLabel: "Rebuild index" }))) return;
         await api.post("/api/admin/reindex"); toast("Re-indexing started");

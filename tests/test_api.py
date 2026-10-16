@@ -269,3 +269,21 @@ def test_refine_requirement_endpoint(client):
     assert len(p["proposals"]) == 2 and p["proposals"][0]["requirement"]["statement"].startswith("Agents shall be able to")
     assert p["proposals"][0]["quality_score"] > p["before_score"]
     assert len(client.get("/api/projects/%s/requirements" % pid).json()) == 1, "refine must not save"
+
+
+def test_provider_model_list_endpoint(client, monkeypatch):
+    import httpx
+    from app import llm
+    calls = []
+
+    def fake_get(url, headers=None, timeout=None):
+        calls.append(headers)
+        return httpx.Response(200, json={"data": [{"id": "deepseek-chat"}, {"id": "deepseek-embed"}]}, request=httpx.Request("GET", url))
+    monkeypatch.setattr(llm.httpx, "get", fake_get)
+    r = client.post("/api/admin/providers/models", json={"kind": "openai", "base_url": "https://api.deepseek.com/v1", "api_key": "sk-new"}).json()
+    assert [m["id"] for m in r["models"]] == ["deepseek-chat", "deepseek-embed"] and [m["id"] for m in r["embedding_models"]] == ["deepseek-embed"]
+    p = client.post("/api/admin/providers", json={"name": "DS", "kind": "openai", "base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat", "api_key": "sk-saved"}).json()
+    client.post("/api/admin/providers/models", json={"kind": "openai", "base_url": "https://api.deepseek.com/v1", "provider_id": p["id"]})
+    assert calls[-1] == {"Authorization": "Bearer sk-saved"}, "blank key falls back to the saved key"
+    assert client.post("/api/admin/providers/models", json={"kind": "mock", "base_url": "x"}).status_code == 400
+    assert client.post("/api/admin/providers/models", json={"kind": "openai", "base_url": ""}).status_code == 400

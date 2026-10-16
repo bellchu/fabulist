@@ -121,3 +121,24 @@ def test_refine_story_via_llm_constrains_links(monkeypatch):
     assert out["requirement_ids"] == ["REQ-001"] and out["epic"] == "E" and out["persona"] == "buyer"
     prompt = fake.calls[0]["json"]["messages"][1]["content"]
     assert "No acceptance criteria" in prompt and "REQ-001 [functional]" in prompt
+
+
+def test_list_models_openai_and_anthropic(monkeypatch):
+    seen = []
+
+    def fake_get(url, headers=None, timeout=None):
+        seen.append((url, headers))
+        req = httpx.Request("GET", url)
+        if "anthropic" in url:
+            return httpx.Response(200, json={"data": [{"id": "claude-b", "display_name": "Claude B"}, {"id": "claude-a"}]}, request=req)
+        if "bad" in url:
+            return httpx.Response(401, json={"error": {"message": "invalid key"}}, request=req)
+        return httpx.Response(200, json={"data": [{"id": "gpt-x"}, {"id": "text-embedding-y"}, {"nope": 1}]}, request=req)
+    monkeypatch.setattr(llm.httpx, "get", fake_get)
+    assert llm.list_models("openai", "https://api.example.com/v1/", "k") == [{"id": "gpt-x", "label": "gpt-x"}, {"id": "text-embedding-y", "label": "text-embedding-y"}]
+    assert seen[-1] == ("https://api.example.com/v1/models", {"Authorization": "Bearer k"})
+    assert [m["id"] for m in llm.list_models("anthropic", "https://api.anthropic.com", "k")] == ["claude-a", "claude-b"]
+    assert seen[-1][1]["x-api-key"] == "k"
+    with pytest.raises(llm.LLMError, match="invalid key"):
+        llm.list_models("openai", "https://bad.example/v1", "k")
+    assert llm.list_models("mock", "", "") == []

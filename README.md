@@ -37,7 +37,8 @@ IDs → human review → epics, features and stories → requirements traceabili
 ## Admin dashboard
 
 - **AI providers**: any OpenAI-compatible API (OpenAI, DeepSeek, Azure, vLLM, Ollama),
-  Anthropic, or the offline heuristic. You can set the endpoint, model and API key, test the
+  Anthropic, or the offline heuristic. Once an endpoint and API key are entered, the dialog loads
+  the provider's model list into a dropdown (custom IDs are still allowed). You can also test the
   connection and pick a default. API keys are encrypted at rest and never returned to the
   browser.
 - **Generation settings**: temperature, output tokens, timeout, section size, run limits,
@@ -64,6 +65,9 @@ IDs → human review → epics, features and stories → requirements traceabili
 | `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | optional provider seeded on first start | - |
 | `MAX_UPLOAD_MB`, `CHUNK_CHARS`, `MAX_CHUNKS_PER_RUN`, `RAG_TOP_K` | limits and defaults | 10, 6000, 200, 3 |
 | `METRICS_TOKEN` | bearer token for `/metrics` (disabled when unset) | - |
+| `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL` | single sign-on (Okta, Entra ID, Google, Keycloak, Salesforce...) | off |
+| `OIDC_USERNAME_CLAIM`, `OIDC_SCOPES` | claim used as username; requested scopes | `email`; `openid email profile` |
+| `OIDC_AUTO_PROVISION_ROLE` | role for first-time SSO users (empty = only pre-registered users) | empty |
 | `ALLOW_PRIVATE_REPO_HOSTS` | allow repository URLs on private networks (internal Git) | `false` |
 
 Everything else is managed in the admin dashboard.
@@ -100,8 +104,11 @@ in-cluster on first deploy. They are never stored in the repository.
 
 ## Security
 
-- HTTP Basic sign-in with named users and roles. Repeated failed sign-ins are throttled per
-  user and per client address.
+- Single sign-on through any OpenID Connect provider (authorization code with PKCE; signed,
+  HttpOnly, SameSite session cookies; issuer, audience, expiry and nonce checks). Roles come from
+  Fabulist's user list, so admins control access even with SSO.
+- HTTP Basic sign-in with named users and roles remains available for API clients and as
+  break-glass access. Repeated failed sign-ins are throttled per user and per client address.
 - Mutating API calls require an `X-Requested-With` header (CSRF), and responses carry a strict
   Content-Security-Policy, `X-Frame-Options: DENY`, `nosniff` and `no-referrer`.
 - API keys and tokens are encrypted at rest and never returned to the browser.
