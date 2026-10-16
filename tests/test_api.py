@@ -356,3 +356,19 @@ def test_comments_thread_counts_and_history(client):
     assert client.get("/api/projects/%s/comments" % pid).json() == {s["id"]: 1}
     assert client.get("/api/projects/%s/history?limit=1" % pid).json()[0]["action"] == "commented"
     assert client.delete("/api/projects/%s/comments/%s" % (pid, a["id"])).status_code == 204
+
+
+def test_product_class_coverage(client):
+    pid = client.post("/api/projects", json={"name": "Prod", "platform": "generic"}).json()["id"]
+    vac = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall ship vaccines in validated cold chain packaging."}).json()
+    ret = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall accept returns of vaccines within 30 days."}).json()
+    implant = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall capture UDI for implants at receipt."}).json()
+    assert "Biologics and vaccines" in vac["product_scope"] and "Implants and devices" in implant["product_scope"]
+    client.post("/api/projects/%s/stories" % pid, json={"title": "Ship vaccines", "requirement_ids": [vac["key"]],
+                                                        "variant_criteria": [{"scope": "Biologics and vaccines", "criteria": "Temperature logged"}]})
+    client.post("/api/projects/%s/stories" % pid, json={"title": "Accept returns", "requirement_ids": [ret["key"]], "product_scope": []})
+    prods = {p["product_class"]: p for p in client.get("/api/projects/%s/traceability" % pid).json()["products"]}
+    bio = prods["Biologics and vaccines"]
+    assert bio["requirements"] == 2 and bio["covered"] == 1
+    assert bio["gaps"] == [{"key": ret["key"], "statement": ret["statement"], "reason": "linked stories do not address this product class"}]
+    assert prods["Implants and devices"]["gaps"][0]["reason"] == "no linked story"

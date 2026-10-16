@@ -747,6 +747,20 @@ async function viewTrace(body) {
       h("div", { class: "stat" }, h("div", { class: "label" }, "Covered requirements"), h("div", { class: "value" }, t.covered + " / " + t.total)),
       h("div", { class: "stat" }, h("div", { class: "label" }, "Gaps"), h("div", { class: "value", style: { color: t.total - t.covered ? "var(--red)" : "" } }, t.total - t.covered), h("div", { class: "foot" }, "Requirements without stories")),
       h("div", { class: "stat" }, h("div", { class: "label" }, "Orphan stories"), h("div", { class: "value" }, t.orphans.length), h("div", { class: "foot" }, "Stories without requirements"))),
+    t.products.length ? h("div", { class: "card", style: { marginBottom: "16px" } },
+      h("div", { class: "card-head" }, h("div", { class: "grow" }, h("h3", {}, "Product-class coverage"),
+        h("div", { class: "muted small" }, "Do the stories linked to each requirement address the product classes it names?"))),
+      h("div", { class: "table-wrap", style: { marginTop: "8px" } }, h("table", { class: "table" },
+        h("thead", {}, h("tr", {}, ["Product class", "Requirements", "Addressed", "Gaps"].map((x) => h("th", {}, x)))),
+        h("tbody", {}, t.products.map((p) => {
+          const pct = Math.round((100 * p.covered) / p.requirements);
+          return h("tr", {},
+            h("td", {}, h("b", {}, p.product_class)),
+            h("td", {}, String(p.requirements)),
+            h("td", { style: { minWidth: "140px" } }, p.covered + " of " + p.requirements + " (" + pct + "%)", meter(pct)),
+            h("td", {}, p.gaps.length ? h("div", { class: "row wrap" }, p.gaps.map((g) =>
+              h("span", { class: "chip", title: g.statement + " (" + g.reason + ")" }, issueIcon("warning"), g.key))) : badge("Covered", "green")));
+        }))))) : null,
     t.orphans.length ? h("div", { class: "callout warn", style: { marginBottom: "16px" } }, icon("alert"),
       h("div", {}, h("b", {}, "Stories not linked to any requirement: "),
         h("span", { class: "row wrap", style: { display: "inline-flex" } }, t.orphans.map((o) => h("button", { class: "chip", style: { cursor: "pointer" }, onclick: () => storyDrawer(byId[o.id]) }, o.key + " " + o.title))))) : null,

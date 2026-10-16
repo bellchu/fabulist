@@ -627,7 +627,30 @@ def traceability(pid: str):
     orphans = [{"key": s["key"], "id": s["id"], "title": s["title"]} for s in stories if not s["requirement_ids"]]
     covered = sum(1 for r in rows if r["stories"])
     return {"rows": rows, "orphans": orphans, "covered": covered, "total": len(rows),
-            "coverage": round(100 * covered / len(rows)) if rows else 0}
+            "coverage": round(100 * covered / len(rows)) if rows else 0, "products": _product_coverage(reqs, stories)}
+
+
+def _product_coverage(reqs: List[Dict[str, Any]], stories: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Per product class: requirements that name it, and whether their linked stories address it
+    (story product scope or a product-variant criterion for that class)."""
+    by_key = {}
+    for s in stories:
+        for k in s["requirement_ids"]:
+            by_key.setdefault(k, []).append(s)
+    classes: Dict[str, Dict[str, Any]] = {}
+    for r in reqs:
+        for cls in r.get("product_scope") or []:
+            entry = classes.setdefault(cls, {"product_class": cls, "requirements": 0, "covered": 0, "gaps": []})
+            entry["requirements"] += 1
+            linked = by_key.get(r["key"], [])
+            addressed = any(cls in (s.get("product_scope") or []) or any(v.get("scope") == cls for v in s.get("variant_criteria") or [])
+                            for s in linked)
+            if addressed:
+                entry["covered"] += 1
+            else:
+                entry["gaps"].append({"key": r["key"], "statement": r["statement"][:160],
+                                      "reason": "no linked story" if not linked else "linked stories do not address this product class"})
+    return sorted(classes.values(), key=lambda c: (-len(c["gaps"]), c["product_class"]))
 
 
 class PushIn(BaseModel):

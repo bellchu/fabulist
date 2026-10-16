@@ -27,7 +27,9 @@ IDs → human review → epics, features and stories → requirements traceabili
    **Refine with AI** proposes an improved version of a story that fixes its issues; you
    review a before/after comparison before applying it. **Estimate with AI** proposes relative
    story points with a rationale for each unestimated story. Long AI runs can be cancelled.
-4. **Traceability**: a requirement-to-story matrix with coverage, gaps and orphan stories.
+4. **Traceability**: a requirement-to-story matrix with coverage, gaps and orphan stories, plus
+   product-class coverage: whether the stories linked to each requirement actually address the
+   product classes it names (for example, a cold-chain requirement with no cold-chain criteria).
 5. **Baselines**: freeze numbered, read-only snapshots of the backlog (for example a release
    sign-off), export them exactly as they were, and compare them with later versions.
 6. **Review discussions**: comment threads on requirements and stories, with resolve/reopen and
