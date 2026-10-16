@@ -97,7 +97,7 @@ export const api = {
 let toastBox;
 export function toast(message, kind = "") {
   if (!toastBox) { toastBox = h("div", { class: "toasts", role: "status" }); document.body.append(toastBox); }
-  const t = h("div", { class: "toast " + kind }, message);
+  const t = h("div", { class: "toast " + kind, role: kind === "error" ? "alert" : null }, message);
   toastBox.append(t);
   setTimeout(() => t.remove(), kind === "error" ? 6000 : 3500);
 }
@@ -108,27 +108,46 @@ export function guard(fn) {
   };
 }
 
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 function layer(panel, onClose) {
+  const opener = document.activeElement;
   const overlay = h("div", { class: "overlay" });
-  const close = () => { overlay.remove(); panel.remove(); document.removeEventListener("keydown", esc); onClose && onClose(); };
-  const esc = (e) => { if (e.key === "Escape") close(); };
+  const close = () => {
+    overlay.remove(); panel.remove(); document.removeEventListener("keydown", keys);
+    if (opener && opener.isConnected && opener.focus) opener.focus();  // return focus where the user was
+    onClose && onClose();
+  };
+  const keys = (e) => {
+    if (!panel.isConnected || panel !== [...document.querySelectorAll(".modal, .drawer")].pop()) return;  // topmost layer only
+    if (e.key === "Escape") { e.stopPropagation(); close(); return; }
+    if (e.key !== "Tab") return;
+    const items = [...panel.querySelectorAll(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+    if (!items.length) return;
+    const first = items[0], last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  };
   overlay.addEventListener("click", close);
-  document.addEventListener("keydown", esc);
+  document.addEventListener("keydown", keys);
   document.body.append(overlay, panel);
   return close;
 }
 
+let layerSeq = 0;
+
 export function modal({ title, body, actions = [], wide = false, description }) {
   const foot = h("div", { class: "modal-foot" });
-  const panel = h("div", { class: "modal" + (wide ? " wide" : ""), role: "dialog", "aria-modal": "true" },
-    h("div", { class: "modal-head" }, h("h2", {}, title), description ? h("p", { class: "muted small", style: { marginTop: "4px" } }, description) : null),
+  const titleId = "dlg-" + ++layerSeq;
+  const panel = h("div", { class: "modal" + (wide ? " wide" : ""), role: "dialog", "aria-modal": "true", "aria-labelledby": titleId },
+    h("div", { class: "modal-head" }, h("h2", { id: titleId }, title), description ? h("p", { class: "muted small", style: { marginTop: "4px" } }, description) : null),
     h("div", { class: "modal-body" }, body), foot);
   const close = layer(panel);
   for (const a of actions) {
     foot.append(h("button", { class: "btn " + (a.kind || ""), onclick: guard(async () => { if ((await a.onClick()) !== false) close(); }) }, a.label));
   }
   foot.prepend(h("button", { class: "btn btn-ghost", onclick: close }, actions.length ? "Cancel" : "Close"));
-  const first = panel.querySelector("input, textarea, select");
+  const first = panel.querySelector("input, textarea, select") || foot.querySelector(".btn-primary") || foot.querySelector("button");
   if (first) setTimeout(() => first.focus(), 30);
   return close;
 }
@@ -143,17 +162,21 @@ export function confirmBox(message, { okLabel = "Confirm", danger = false, title
         h("button", { class: "btn btn-ghost", onclick: () => close() }, "Cancel"),
         h("button", { class: "btn " + (danger ? "btn-danger" : "btn-primary"), onclick: () => { ok = true; close(); } }, okLabel)));
     const close = layer(panel, () => resolve(ok));
+    setTimeout(() => panel.querySelector(".modal-foot button:last-child").focus(), 30);
   });
 }
 
 export function drawer({ title, subtitle, body, footer }) {
-  const panel = h("aside", { class: "drawer", role: "dialog", "aria-modal": "true" },
+  const titleId = "dlg-" + ++layerSeq;
+  const panel = h("aside", { class: "drawer", role: "dialog", "aria-modal": "true", "aria-labelledby": titleId },
     h("div", { class: "drawer-head" },
-      h("div", { class: "grow" }, subtitle ? h("div", { class: "muted small" }, subtitle) : null, h("h2", {}, title)),
+      h("div", { class: "grow" }, subtitle ? h("div", { class: "muted small" }, subtitle) : null, h("h2", { id: titleId }, title)),
       h("button", { class: "btn btn-ghost icon-btn", "aria-label": "Close", onclick: () => close() }, icon("x"))),
     h("div", { class: "drawer-body" }, body),
     footer ? h("div", { class: "drawer-foot" }, footer) : null);
   const close = layer(panel);
+  const first = panel.querySelector(".drawer-body " + FOCUSABLE) || panel.querySelector("button");
+  if (first) setTimeout(() => first.focus(), 30);
   return close;
 }
 

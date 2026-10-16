@@ -42,6 +42,9 @@ p { margin: 0; }
 .hidden { display: none !important; }
 
 /* ---- shell: global header + navigation bar ---- */
+.skip-link { position: absolute; left: 8px; top: -40px; z-index: 100; background: var(--accent); color: #fff; padding: 6px 12px; border-radius: var(--radius); }
+.skip-link:focus { top: 8px; color: #fff; }
+.content:focus { outline: none; }
 .shell { min-height: 100vh; display: flex; flex-direction: column; }
 .global-header { height: var(--header-h); background: var(--surface); display: flex; align-items: center; gap: 12px; padding: 0 12px; position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--border); }
 .app-logo { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 700; font-size: 15px; }

@@ -38,8 +38,9 @@ function shell(route) {
     navItem("#/", "Projects", route[0] === "" || (route[0] === "p" && !current)),
     current ? navItem("#/p/" + current.id, current.name, true, "folder") : null,
     isAdmin ? navItem("#/admin/overview", "Setup", route[0] === "admin") : null);
-  const content = h("div", { class: "content", id: "content" }, h("div", { class: "crumbs", id: "crumbs" }));
-  document.getElementById("app").replaceChildren(h("div", { class: "shell" }, header, nav, h("main", { class: "main" }, content)));
+  const content = h("div", { class: "content", id: "content", tabindex: "-1" }, h("div", { class: "crumbs", id: "crumbs" }));
+  const skip = h("a", { class: "skip-link", href: "#content", onclick: (e) => { e.preventDefault(); content.focus(); } }, "Skip to content");
+  document.getElementById("app").replaceChildren(h("div", { class: "shell" }, skip, header, nav, h("main", { class: "main" }, content)));
   return content;
 }
 
