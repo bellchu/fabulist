@@ -5,34 +5,41 @@ import { renderAdmin } from "./admin.js";
 
 export const state = { meta: null, projects: [], me: null };
 
-function navItem(href, iconName, label, active) {
-  return h("a", { class: "nav-item" + (active ? " active" : ""), href }, icon(iconName), label);
+function navItem(href, label, active, iconName) {
+  return h("a", { class: "nav-item" + (active ? " active" : ""), href }, iconName ? icon(iconName) : null, label);
+}
+
+function globalSearch() {
+  const listId = "project-search";
+  const input = h("input", { type: "search", list: listId, placeholder: "Search projects…", "aria-label": "Search projects" });
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const q = input.value.trim().toLowerCase();
+    const hit = state.projects.find((p) => p.name.toLowerCase() === q) || state.projects.find((p) => p.name.toLowerCase().includes(q));
+    if (hit) location.hash = "#/p/" + hit.id;
+  });
+  return h("div", { class: "global-search" }, icon("search"), input, h("datalist", { id: listId }, state.projects.map((p) => h("option", { value: p.name }))));
 }
 
 function shell(route) {
-  const sidebar = h("nav", { class: "sidebar", "aria-label": "Main" },
-    h("a", { class: "brand", href: "#/" }, h("span", { class: "brand-mark" }, "F"), "Fabulist"),
-    h("div", { class: "nav-label" }, "Workspace"),
-    navItem("#/", "folder", "Projects", route[0] === "" || route[0] === "p"),
-    ...state.projects.slice(0, 6).map((p) =>
-      h("a", { class: "nav-item nav-sub" + (route[0] === "p" && route[1] === p.id ? " active" : ""), href: "#/p/" + p.id }, p.name)),
-    state.me.role !== "admin" ? null : [
-    h("div", { class: "nav-label" }, "Administration"),
-    navItem("#/admin/overview", "chart", "Overview", route[0] === "admin" && (route[1] || "overview") === "overview"),
-    navItem("#/admin/providers", "cpu", "AI providers", route[0] === "admin" && route[1] === "providers"),
-    navItem("#/admin/settings", "settings", "Generation settings", route[0] === "admin" && route[1] === "settings"),
-    navItem("#/admin/taxonomy", "list", "Product taxonomy", route[0] === "admin" && route[1] === "taxonomy"),
-    navItem("#/admin/integrations", "link", "Integrations", route[0] === "admin" && route[1] === "integrations"),
-    navItem("#/admin/users", "users", "Users & roles", route[0] === "admin" && route[1] === "users"),
-    navItem("#/admin/activity", "activity", "Activity", route[0] === "admin" && route[1] === "activity")],
-    h("div", { class: "sidebar-foot" }, "BRD → requirements → stories"));
-  const topbar = h("header", { class: "topbar" },
-    h("div", { class: "mobile-nav" }, h("a", { class: "btn btn-sm", href: "#/" }, "Projects"), h("a", { class: "btn btn-sm", href: "#/admin/overview" }, "Admin")),
-    h("div", { class: "crumbs", id: "crumbs" }),
-    h("div", { class: "right row small" }, state.me.role === "viewer" ? badge("Read-only", "amber") : null,
-      h("span", { class: "muted" }, state.me.username), badge(state.me.role, state.me.role === "admin" ? "accent" : "")));
-  const content = h("div", { class: "content", id: "content" });
-  document.getElementById("app").replaceChildren(h("div", { class: "shell" }, sidebar, h("main", { class: "main" }, topbar, content)));
+  const isAdmin = state.me.role === "admin";
+  const current = route[0] === "p" ? state.projects.find((p) => p.id === route[1]) : null;
+  const header = h("header", { class: "global-header" },
+    h("a", { class: "app-logo", href: "#/" }, h("span", { class: "brand-mark" }, "F"), "Fabulist"),
+    globalSearch(),
+    h("div", { class: "user-chip" },
+      state.me.role === "viewer" ? badge("Read-only", "amber") : null,
+      isAdmin ? h("a", { class: "btn btn-ghost icon-btn", href: "#/admin/overview", title: "Setup", "aria-label": "Setup" }, icon("settings")) : null,
+      h("span", { class: "muted small" }, state.me.username + " · " + state.me.role),
+      h("span", { class: "avatar", title: state.me.username }, (state.me.username || "?").slice(0, 2))));
+  const nav = h("nav", { class: "context-bar", "aria-label": "Main" },
+    h("a", { class: "waffle", href: "#/", title: "App launcher", "aria-label": "Home" }, h("span", {}, Array.from({ length: 9 }, () => h("i")))),
+    h("span", { class: "app-name" }, "Story Studio"),
+    navItem("#/", "Projects", route[0] === "" || (route[0] === "p" && !current)),
+    current ? navItem("#/p/" + current.id, current.name, true, "folder") : null,
+    isAdmin ? navItem("#/admin/overview", "Setup", route[0] === "admin") : null);
+  const content = h("div", { class: "content", id: "content" }, h("div", { class: "crumbs", id: "crumbs" }));
+  document.getElementById("app").replaceChildren(h("div", { class: "shell" }, header, nav, h("main", { class: "main" }, content)));
   return content;
 }
 
@@ -70,9 +77,10 @@ async function route() {
 function renderHome(content) {
   setCrumbs("Projects");
   const head = h("div", { class: "page-head" },
-    h("div", { class: "grow" }, h("h1", {}, "Projects"),
-      h("p", { class: "sub" }, "Each project turns a set of BRDs into reviewed requirements and a traceable backlog.")),
-    h("button", { class: "btn btn-primary", onclick: newProjectDialog }, icon("plus"), "New project"));
+    h("span", { class: "object-icon project" }, icon("folder")),
+    h("div", { class: "grow" }, h("div", { class: "object-label" }, "Projects"), h("h1", {}, "All projects"),
+      h("p", { class: "sub" }, state.projects.length + " items · Each project turns BRDs into reviewed requirements and a traceable backlog.")),
+    h("button", { class: "btn btn-primary", onclick: newProjectDialog }, "New"));
   if (!state.projects.length) {
     mount(content, head, h("div", { class: "card" }, empty({
       iconName: "folder", title: "No projects yet",

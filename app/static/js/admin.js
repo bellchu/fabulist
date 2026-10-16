@@ -14,7 +14,8 @@ export async function renderAdmin(content, tab) {
 }
 
 function head(title, sub, action) {
-  return h("div", { class: "page-head" }, h("div", { class: "grow" }, h("h1", {}, title), h("p", { class: "sub" }, sub)), action || null);
+  return h("div", { class: "page-head" }, h("span", { class: "object-icon setup" }, icon("settings")),
+    h("div", { class: "grow" }, h("div", { class: "object-label" }, "Setup"), h("h1", {}, title), h("p", { class: "sub" }, sub)), action || null);
 }
 
 // ---- overview -----------------------------------------------------------

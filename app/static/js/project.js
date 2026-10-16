@@ -7,7 +7,7 @@ import { state, setCrumbs } from "./main.js";
 
 const TABS = [["overview", "Overview"], ["sources", "Sources"], ["requirements", "Requirements"],
   ["stories", "Stories"], ["trace", "Traceability"], ["export", "Export"]];
-const TYPE_COLORS = { business: "var(--violet)", functional: "var(--blue)", "non-functional": "var(--amber)", constraint: "var(--red)", rule: "var(--accent)" };
+const TYPE_COLORS = { business: "#5867e8", functional: "#0176d3", "non-functional": "#dd7a01", constraint: "#ba0517", rule: "#06a59a" };
 
 // Filters survive re-renders within the session.
 const filters = { reqQ: "", reqType: "", reqStatus: "", reqFlagged: false, storyQ: "", storyStatus: "", storyView: "map", storyReady: "", traceGaps: false, exportScope: "all" };
@@ -32,11 +32,16 @@ export async function renderProject(content, pid, tab) {
 // ---- chrome -------------------------------------------------------------
 
 function header(p) {
+  const kv = (label, value) => h("div", {}, h("div", { class: "object-label" }, label), h("div", {}, value));
   return h("div", { class: "page-head" },
-    h("div", { class: "grow" },
-      h("div", { class: "row" }, h("h1", {}, p.name), badge(state.meta.platforms[p.platform] || p.platform, "accent")),
-      h("p", { class: "sub" }, p.description || "No description")),
-    h("button", { class: "btn", onclick: editProjectDialog }, icon("edit"), "Project settings"));
+    h("span", { class: "object-icon project" }, icon("folder")),
+    h("div", { class: "grow" }, h("div", { class: "object-label" }, "Project"), h("h1", {}, p.name)),
+    h("div", { class: "row" }, h("button", { class: "btn", onclick: editProjectDialog }, "Edit"),
+      h("a", { class: "btn", href: "#/p/" + p.id + "/export" }, "Export")),
+    h("div", { class: "row wrap", style: { flexBasis: "100%", gap: "32px", paddingLeft: "44px" } },
+      kv("Target platform", state.meta.platforms[p.platform] || p.platform),
+      kv("BRDs", String(p.documents)), kv("Requirements", String(p.requirements)), kv("Stories", String(p.stories)),
+      kv("Coverage", p.coverage + "%"), kv("Description", p.description || "–")));
 }
 
 function stepper(p) {
@@ -48,10 +53,12 @@ function stepper(p) {
     ["export", "Export", p.stories_approved + " approved stories", p.stories_approved > 0],
   ];
   const current = steps.findIndex((s) => !s[3]);
-  return h("div", { class: "stepper" }, steps.map(([tab, t, s, done], i) =>
-    h("a", { class: "step" + (done ? " done" : "") + (i === current ? " current" : ""), href: "#/p/" + p.id + "/" + tab },
-      h("span", { class: "num" }, done ? icon("check") : String(i + 1)),
-      h("div", {}, h("div", { class: "t" }, t), h("div", { class: "s" }, s)))));
+  return h("div", { class: "path-wrap" },
+    h("div", { class: "stepper", role: "list", "aria-label": "Workflow" }, steps.map(([tab, t, s, done], i) =>
+      h("a", { class: "step" + (done ? " done" : "") + (i === current ? " current" : ""), href: "#/p/" + p.id + "/" + tab, role: "listitem", title: t + ": " + s,
+        "aria-current": i === current ? "step" : null },
+        h("span", { class: "num" }, icon("check")), h("span", { class: "t" }, t)))),
+    h("div", { class: "path-detail" }, steps.map(([, t, s]) => h("div", {}, t, h("b", {}, s)))));
 }
 
 function tabBar(p, active) {
