@@ -18,6 +18,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 
 from . import config, db
 
+_COMMENT_PATH = re.compile(r"^/api/projects/[^/]+/comments(/[^/]+/resolve)?$")
 ROLES = {"admin": "Administrator", "analyst": "Business analyst", "viewer": "Viewer (read-only)"}
 _N, _R, _P = 2 ** 14, 8, 1
 _CACHE_TTL = 300
@@ -147,7 +148,8 @@ def allowed(role: str, method: str, path: str) -> bool:
     if path.startswith("/api/admin/"):
         return False
     if role == "viewer":
-        return method in ("GET", "HEAD")
+        # Reviewers may read everything and take part in discussions, but not change the backlog.
+        return method in ("GET", "HEAD") or (method == "POST" and bool(_COMMENT_PATH.match(path)))
     return role == "analyst"
 
 

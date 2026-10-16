@@ -788,3 +788,64 @@ def export_baseline(pid: str, bid: str, format: str = "xlsx"):
     if format == "html":
         headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; img-src data:"
     return Response(payload, media_type=mime, headers=headers)
+
+
+
+# ---- review discussions -----------------------------------------------------
+
+class CommentIn(BaseModel):
+    item_id: str = Field(min_length=1, max_length=40)
+    body: str = Field(min_length=1, max_length=4000)
+
+
+def _item_kind(pid: str, item_id: str) -> str:
+    if db.one("SELECT 1 AS x FROM requirements WHERE id=%s AND project_id=%s", (item_id, pid)):
+        return "requirement"
+    if db.one("SELECT 1 AS x FROM stories WHERE id=%s AND project_id=%s", (item_id, pid)):
+        return "story"
+    raise HTTPException(404, "Item not found")
+
+
+@router.get("/api/projects/{pid}/comments")
+def list_comments(pid: str, item_id: str = ""):
+    _project(pid)
+    if item_id:
+        return db.rows("SELECT * FROM comments WHERE project_id=%s AND item_id=%s ORDER BY created", (pid, item_id))
+    # Open-discussion counts per item, for badges in lists and the story map.
+    return {r["item_id"]: r["n"] for r in db.rows(
+        "SELECT item_id, count(*) AS n FROM comments WHERE project_id=%s AND NOT resolved GROUP BY item_id", (pid,))}
+
+
+@router.post("/api/projects/{pid}/comments", status_code=201)
+def add_comment(pid: str, body: CommentIn, request: Request):
+    _project(pid)
+    kind = _item_kind(pid, body.item_id)
+    who = history.actor(request)
+    cid = db.new_id()
+    with db.conn() as c:
+        c.execute("INSERT INTO comments (id, project_id, item_type, item_id, author, body, created) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                  (cid, pid, kind, body.item_id, who, body.body.strip(), db.now()))
+        seq = c.execute("SELECT seq FROM %s WHERE id=%%s" % ("requirements" if kind == "requirement" else "stories"),
+                        (body.item_id,)).fetchone()["seq"]
+        history.record(c, pid, kind, body.item_id, history.item_key(kind, seq), "commented", who, body.body.strip()[:160])
+    return db.one("SELECT * FROM comments WHERE id=%s", (cid,))
+
+
+@router.post("/api/projects/{pid}/comments/{cid}/resolve")
+def resolve_comment(pid: str, cid: str, request: Request):
+    row = db.one("SELECT * FROM comments WHERE id=%s AND project_id=%s", (cid, pid))
+    if not row:
+        raise HTTPException(404, "Comment not found")
+    resolved = not row["resolved"]
+    db.execute("UPDATE comments SET resolved=%s, resolved_by=%s WHERE id=%s", (resolved, history.actor(request) if resolved else "", cid))
+    return db.one("SELECT * FROM comments WHERE id=%s", (cid,))
+
+
+@router.delete("/api/projects/{pid}/comments/{cid}", status_code=204)
+def delete_comment(pid: str, cid: str, request: Request):
+    row = db.one("SELECT author FROM comments WHERE id=%s AND project_id=%s", (cid, pid))
+    if not row:
+        raise HTTPException(404, "Comment not found")
+    if row["author"] != history.actor(request) and getattr(request.state, "role", "admin") != "admin":
+        raise HTTPException(403, "Only the author or an administrator can delete a comment")
+    db.execute("DELETE FROM comments WHERE id=%s", (cid,))

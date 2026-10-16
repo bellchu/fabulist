@@ -341,3 +341,18 @@ def test_estimate_and_apply_points(client):
     assert client.post("/api/projects/%s/stories/points" % pid, json={"points": {small["id"]: 4}}).status_code == 400
     assert client.get("/api/projects/%s/history?limit=1" % pid).json()[0]["action"] == "estimated"
     assert len(client.post("/api/projects/%s/stories/estimate" % pid, json={"scope": "all"}).json()["proposals"]) == 3
+
+
+def test_comments_thread_counts_and_history(client):
+    pid = client.post("/api/projects", json={"name": "Talk", "platform": "generic"}).json()["id"]
+    s = client.post("/api/projects/%s/stories" % pid, json={"title": "Cancel orders"}).json()
+    a = client.post("/api/projects/%s/comments" % pid, json={"item_id": s["id"], "body": "Is cancellation allowed after picking?"}).json()
+    client.post("/api/projects/%s/comments" % pid, json={"item_id": s["id"], "body": "Only before the pick wave starts."})
+    assert client.post("/api/projects/%s/comments" % pid, json={"item_id": "nope", "body": "x"}).status_code == 404
+    assert client.post("/api/projects/%s/comments" % pid, json={"item_id": s["id"], "body": ""}).status_code == 422
+    assert [c["body"][:5] for c in client.get("/api/projects/%s/comments" % pid, params={"item_id": s["id"]}).json()] == ["Is ca", "Only "]
+    assert client.get("/api/projects/%s/comments" % pid).json() == {s["id"]: 2}
+    client.post("/api/projects/%s/comments/%s/resolve" % (pid, a["id"]))
+    assert client.get("/api/projects/%s/comments" % pid).json() == {s["id"]: 1}
+    assert client.get("/api/projects/%s/history?limit=1" % pid).json()[0]["action"] == "commented"
+    assert client.delete("/api/projects/%s/comments/%s" % (pid, a["id"])).status_code == 204

@@ -61,6 +61,11 @@ SCHEMA = [
          url TEXT NOT NULL, branch TEXT NOT NULL DEFAULT '', path_glob TEXT NOT NULL DEFAULT '*',
          token_enc TEXT, key_hint TEXT NOT NULL DEFAULT '', last_sync TEXT NOT NULL DEFAULT '',
          last_commit TEXT NOT NULL DEFAULT '', last_error TEXT NOT NULL DEFAULT '', created TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS comments (
+         id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+         item_type TEXT NOT NULL, item_id TEXT NOT NULL, author TEXT NOT NULL, body TEXT NOT NULL,
+         resolved BOOLEAN NOT NULL DEFAULT FALSE, resolved_by TEXT NOT NULL DEFAULT '', created TEXT NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS idx_comments_item ON comments(item_id, created)",
     """CREATE TABLE IF NOT EXISTS baselines (
          id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
          version INTEGER NOT NULL, name TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', scope TEXT NOT NULL,

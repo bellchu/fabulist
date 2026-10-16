@@ -82,3 +82,17 @@ def test_security_headers(client):
     r = client.get("/")
     assert "frame-ancestors 'none'" in r.headers["Content-Security-Policy"] and r.headers["X-Content-Type-Options"] == "nosniff"
     assert client.get("/api/meta").headers["X-Frame-Options"] == "DENY"
+
+
+
+def test_viewers_can_discuss_but_not_edit(secured):
+    c = secured
+    pid = c.post("/api/projects", json={"name": "Review", "platform": "generic"}, auth=creds("ana")).json()["id"]
+    req = c.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall export invoices to CSV."}, auth=creds("ana")).json()
+    com = c.post("/api/projects/%s/comments" % pid, json={"item_id": req["id"], "body": "Which CSV columns does Finance need?"}, auth=creds("vic"))
+    assert com.status_code == 201 and com.json()["author"] == "vic"
+    assert c.patch("/api/projects/%s/requirements/%s" % (pid, req["id"]), json={"status": "approved"}, auth=creds("vic")).status_code == 403
+    assert c.delete("/api/projects/%s/comments/%s" % (pid, com.json()["id"]), auth=creds("vic")).status_code == 403, "viewers cannot delete"
+    assert c.delete("/api/projects/%s/comments/%s" % (pid, com.json()["id"]), auth=creds("ana")).status_code == 403, "only author or admin"
+    r = c.post("/api/projects/%s/comments/%s/resolve" % (pid, com.json()["id"]), auth=creds("ana")).json()
+    assert r["resolved"] and r["resolved_by"] == "ana"

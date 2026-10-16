@@ -333,6 +333,35 @@ async function viewSources(body) {
         h("button", { class: "btn", onclick: search }, icon("search"), "Find passages")), results)));
 }
 
+function discussionSection(itemId) {
+  const list = h("div", { class: "stack", style: { gap: "8px" } });
+  const body = h("textarea", { rows: 2, placeholder: "Ask a question or leave review feedback…", "aria-label": "New comment" });
+  const load = guard(async () => {
+    const items = await api.get(base() + "/comments?item_id=" + encodeURIComponent(itemId));
+    list.replaceChildren(...(items.length ? items.map((c) => h("div", { class: "callout" + (c.resolved ? "" : " info"), style: { opacity: c.resolved ? ".65" : "1" } },
+      h("span", { class: "avatar", style: { width: "24px", height: "24px", fontSize: "10px", flex: "none" } }, c.author.slice(0, 2)),
+      h("div", { class: "grow" },
+        h("div", { class: "row small" }, h("b", {}, c.author), h("span", { class: "muted" }, timeAgo(c.created)),
+          c.resolved ? badge("Resolved" + (c.resolved_by ? " by " + c.resolved_by : ""), "green") : null,
+          h("span", { class: "right row" },
+            h("button", { class: "btn btn-sm btn-ghost", onclick: guard(async () => { await api.post(base() + "/comments/" + c.id + "/resolve"); load(); }) },
+              c.resolved ? "Reopen" : "Resolve"),
+            state.me.role === "admin" || state.me.username === c.author ? h("button", { class: "btn btn-sm btn-ghost btn-danger", "aria-label": "Delete comment",
+              onclick: guard(async () => { await api.del(base() + "/comments/" + c.id); load(); }) }, icon("trash")) : null)),
+        h("div", { style: { whiteSpace: "pre-wrap", marginTop: "2px" } }, c.body))))
+      : [h("p", { class: "muted small" }, "No discussion yet.")]));
+  });
+  const post = guard(async () => {
+    if (!body.value.trim()) return;
+    await api.post(base() + "/comments", { item_id: itemId, body: body.value });
+    body.value = ""; load();
+  });
+  body.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) post(); });
+  load();
+  return h("div", { class: "card card-body stack", style: { gap: "8px" } }, h("div", { class: "row" }, icon("chat"), h("b", {}, "Discussion")), list,
+    body, h("div", { class: "row" }, h("button", { class: "btn btn-sm btn-primary", onclick: post }, "Post"), h("span", { class: "muted small" }, "Ctrl/⌘ + Enter to post")));
+}
+
 function historySection(itemId) {
   const box = h("div", { class: "muted small" }, "Loading…");
   const details = h("details", { class: "card card-body" }, h("summary", { style: { cursor: "pointer", fontWeight: 600 } }, "Change history"), box);
@@ -345,8 +374,10 @@ function historySection(itemId) {
 
 // ---- requirements -------------------------------------------------------
 
+const talkBadge = (n) => (n ? h("span", { class: "chip", title: n + " open discussion" + (n === 1 ? "" : "s") }, icon("chat"), String(n)) : null);
+
 async function viewRequirements(body) {
-  const reqs = await api.get(base() + "/requirements");
+  const [reqs, talk] = await Promise.all([api.get(base() + "/requirements"), api.get(base() + "/comments")]);
   mount(body, runPanel("requirements"));
   if (!reqs.length) {
     mount(body, h("div", { class: "card" }, empty({ iconName: "list", title: "No requirements yet",
@@ -390,7 +421,7 @@ async function viewRequirements(body) {
           r.issues.length ? h("div", { class: "issues" }, r.issues.map((i) => h("span", { class: "chip", title: i.message }, issueIcon(i.severity), i.code))) : null),
         h("td", { class: "small muted" }, r.section),
         h("td", {}, scorePill(r.quality_score)),
-        h("td", {}, badge(r.status, statusTone[r.status]))))
+        h("td", {}, h("div", { class: "row" }, badge(r.status, statusTone[r.status]), talkBadge(talk[r.id])))))
         : h("tr", {}, h("td", { colspan: "7", class: "muted", style: { textAlign: "center", padding: "28px" } }, "No requirements match the filters."))))));
   };
   q.addEventListener("input", () => { filters.reqQ = q.value; renderTable(); });
@@ -441,6 +472,7 @@ function reqDrawer(r) {
       field("Product classes", scope.el, "Leave empty if it applies to all products."),
       field("Compliance", compliance.el),
       field("Rationale", rationale), field("Notes", notes),
+      isNew ? null : discussionSection(r.id),
       isNew ? null : historySection(r.id)),
     footer: [h("button", { class: "btn btn-primary", onclick: save }, "Save"),
       isNew ? null : h("button", { class: "btn", onclick: guard(() => refineRequirementDialog(r, close)) }, icon("sparkles"), "Refine with AI"),
@@ -476,8 +508,9 @@ async function refineRequirementDialog(r, closeDrawer) {
 // ---- stories ------------------------------------------------------------
 
 async function viewStories(body) {
-  const [stories, reqs] = await Promise.all([api.get(base() + "/stories"), api.get(base() + "/requirements")]);
+  const [stories, reqs, talk] = await Promise.all([api.get(base() + "/stories"), api.get(base() + "/requirements"), api.get(base() + "/comments")]);
   ctx.reqs = reqs;
+  ctx.talk = talk;
   mount(body, runPanel("stories"));
   if (!stories.length) {
     mount(body, h("div", { class: "card" }, empty({ iconName: "map", title: "No stories yet",
@@ -552,6 +585,7 @@ function storyMap(rows) {
         h("div", { class: "t" }, s.title),
         h("div", { class: "row small muted" }, h("span", { class: "grow" }, s.persona),
           s.story_points ? badge(s.story_points + " pt") : null,
+          talkBadge((ctx.talk || {})[s.id]),
           s.ready ? h("span", { title: "Meets Definition of Ready", style: { color: "var(--green)", display: "inline-flex" } }, icon("check")) : null,
           scorePill(s.quality_score)))))));
 }
@@ -567,7 +601,7 @@ function storyTable(rows) {
       h("td", {}, s.story_points || "–"),
       h("td", { class: "small mono" }, s.requirement_ids.join(", ") || "–"),
       h("td", { class: "nowrap" }, h("span", { class: "row" }, scorePill(s.quality_score), s.ready ? badge("Ready", "green") : null)),
-      h("td", {}, badge(s.status, statusTone[s.status])))))));
+      h("td", {}, h("div", { class: "row" }, badge(s.status, statusTone[s.status]), talkBadge((ctx.talk || {})[s.id]))))))));
 }
 
 function storyDrawer(s) {
@@ -625,6 +659,7 @@ function storyDrawer(s) {
         linked.map((r) => h("div", {}, h("b", { class: "mono" }, r.key + " "), r.statement)))) : null,
       field("Labels", labels.el), field("Product classes", scope.el), field("Compliance", compliance.el),
       field("Open questions", questions, "Stories with open questions don't meet the Definition of Ready."), field("Notes", notes),
+      isNew ? null : discussionSection(s.id),
       isNew ? null : historySection(s.id)),
     footer: [h("button", { class: "btn btn-primary", onclick: save }, "Save"),
       isNew ? null : h("button", { class: "btn", onclick: guard(() => refineDialog(s, close)) }, icon("sparkles"), "Refine with AI"),
