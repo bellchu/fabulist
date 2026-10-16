@@ -106,7 +106,8 @@ async def auth_and_guards(request: Request, call_next):
     if path.startswith("/static/"):
         # Revalidate via ETag so a deploy is picked up without a hard refresh.
         response.headers["Cache-Control"] = "no-cache"
-    response.headers.update(SECURITY_HEADERS)
+    for k, v in SECURITY_HEADERS.items():
+        response.headers.setdefault(k, v)  # a route may set a stricter/different policy (e.g. the HTML report)
     return response
 
 
@@ -195,6 +196,10 @@ class RunIn(BaseModel):
 class SearchIn(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     k: int = Field(default=6, ge=1, le=20)
+
+
+class RefineIn(BaseModel):
+    provider_id: Optional[str] = None
 
 
 class BulkIn(BaseModel):
@@ -584,6 +589,29 @@ def update_requirement(pid: str, rid: str, request: Request, body: Dict[str, Any
     return next(r for r in _requirements(pid) if r["id"] == rid)
 
 
+@app.post("/api/projects/{pid}/requirements/{rid}/refine")
+def refine_requirement(pid: str, rid: str, body: RefineIn):
+    """Propose a rewrite (possibly split into several requirements). Nothing is saved."""
+    project = _project(pid)
+    req = next((r for r in _requirements(pid) if r["id"] == rid), None)
+    if req is None:
+        raise HTTPException(404, "Requirement not found")
+    profile = settings.get_provider(body.provider_id) if body.provider_id else settings.default_provider()
+    usage = {"in": 0, "out": 0}
+    try:
+        proposals = pipeline.refine_requirement(req, req["issues"], project["platform"], profile, settings.get_settings(), usage)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(502, "Refinement failed: %s" % exc)
+    finally:
+        metrics.inc("fabulist_llm_tokens_total", usage["in"], direction="in")
+        metrics.inc("fabulist_llm_tokens_total", usage["out"], direction="out")
+    out = []
+    for p in proposals:
+        issues = quality.requirement_issues(p)
+        out.append({"requirement": p, "issues": issues, "quality_score": quality.score(issues)})
+    return {"proposals": out, "before_score": req["quality_score"], "provider": profile["name"], "usage": usage}
+
+
 @app.delete("/api/projects/{pid}/requirements/{rid}", status_code=204)
 def delete_requirement(pid: str, rid: str, request: Request):
     _delete_item("requirements", pid, rid, history.actor(request))
@@ -613,10 +641,6 @@ def create_story(pid: str, request: Request, body: Dict[str, Any] = Body(...)):
 def update_story(pid: str, sid: str, request: Request, body: Dict[str, Any] = Body(...)):
     _save_item("stories", pid, sid, body, history.actor(request))
     return next(s for s in _stories(pid) if s["id"] == sid)
-
-
-class RefineIn(BaseModel):
-    provider_id: Optional[str] = None
 
 
 @app.post("/api/projects/{pid}/stories/{sid}/refine")
@@ -710,7 +734,7 @@ def push_to_tracker(pid: str, body: PushIn, request: Request):
 
 
 @app.get("/api/projects/{pid}/export")
-def export(pid: str, format: str = "xlsx", scope: str = "approved-or-all"):
+def export(pid: str, format: str = "xlsx", scope: str = "approved-or-all", inline: bool = False):
     project = _project(pid)
     entry = exporters.EXPORTERS.get(format)
     if not entry:
@@ -724,10 +748,15 @@ def export(pid: str, format: str = "xlsx", scope: str = "approved-or-all"):
         raise HTTPException(404, "Nothing to export yet")
     for item in stories + reqs:
         item.pop("issues", None)
-    payload, mime = entry[0](stories, reqs)
+    payload, mime = (exporters.html_report(stories, reqs, project["name"] + " backlog") if format == "html"
+                     else entry[0](stories, reqs))
     slug = re.sub(r"[^a-z0-9]+", "-", project["name"].lower()).strip("-") or "backlog"
-    return Response(payload, media_type=mime,
-                    headers={"Content-Disposition": 'attachment; filename="%s-%s.%s"' % (slug, format, entry[1])})
+    headers = {"Content-Disposition": '%s; filename="%s-%s.%s"' % ("inline" if inline and format == "html" else "attachment",
+                                                                     slug, format, entry[1])}
+    if format == "html":
+        # Static document: inline styles only, no scripts or remote content.
+        headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+    return Response(payload, media_type=mime, headers=headers)
 
 
 @app.get("/", include_in_schema=False)

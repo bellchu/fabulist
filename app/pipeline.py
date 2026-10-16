@@ -7,7 +7,7 @@ import json
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import embeddings, llm, taxonomy
+from . import embeddings, llm, quality, taxonomy
 from .profiles import PLATFORMS
 
 REQ_TYPES = ["business", "functional", "non-functional", "constraint", "rule"]
@@ -446,3 +446,55 @@ def refine_story(story: Dict[str, Any], reqs: List[Dict[str, Any]], issues: List
     allowed = set(story.get("requirement_ids") or []) | {r["key"] for r in reqs}
     refined["requirement_ids"] = [k for k in refined["requirement_ids"] if k in allowed] or list(story.get("requirement_ids") or [])
     return refined
+
+
+# ---- single-requirement refinement ----------------------------------------
+
+REQ_REFINE_SYSTEM = (
+    "You are a senior business analyst improving one requirement to meet ISO/IEC/IEEE 29148: unambiguous, singular, "
+    "verifiable, complete. If it combines several requirements, split it into separate items. Keep the original meaning "
+    "and terminology; never invent numbers, thresholds or scope. When a measurable value is missing, keep the wording "
+    "and put the question for the business in 'notes'. Use 'shall' for mandatory requirements. Reply with ONLY a JSON "
+    "array of requirement objects: {\"statement\": str, \"type\": \"business|functional|non-functional|constraint|rule\", "
+    "\"actors\": [str], \"notes\": str}."
+)
+_SPLIT = re.compile(r",?\s+and\s+(?=(?:the\s+|all\s+|each\s+)?[\w\s/-]{0,40}?\b(?:shall|must|should|will)\b)", re.I)
+
+
+def mock_refine_requirement(req: Dict[str, Any], issues: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    parts = [p.strip().rstrip(".") for p in _SPLIT.split(req["statement"]) if p.strip()]
+    out = []
+    for part in parts:
+        text = re.sub(r"\b(should|could|may)\b(?= be able to| support| allow| provide| display| record| validate)", "shall", part, flags=re.I)
+        text = re.sub(r"\bshould\b", "shall", text, flags=re.I) if req.get("type") != "business" else text
+        text = text[:1].upper() + text[1:] + "."
+        notes = []
+        vague = [i["message"] for i in quality.requirement_issues({"statement": text, "type": req.get("type")}) if i["code"] in ("ambiguous", "incomplete", "not-verifiable")]
+        if vague:
+            notes.append("Needs business input: " + " ".join(vague))
+        out.append({"statement": text, "type": classify(text), "actors": req.get("actors") or [], "notes": " ".join(notes)})
+    return out
+
+
+def refine_requirement(req: Dict[str, Any], issues: List[Dict[str, str]], platform: str, profile: Dict[str, Any],
+                       opts: Dict[str, Any], usage: Usage) -> List[Dict[str, Any]]:
+    if profile["kind"] == "mock":
+        raw = mock_refine_requirement(req, issues)
+    else:
+        prompt = "%s\n\nQuality issues:\n%s\n\nRequirement %s (%s, section '%s'):\n%s" % (
+            _platform_context(platform), "\n".join("- " + i["message"] for i in issues) or "- none (polish only)",
+            req.get("key", ""), req.get("type", ""), req.get("section", ""), req["statement"])
+        raw = _ask(profile, opts, REQ_REFINE_SYSTEM, prompt, usage)[:10]
+    section = {"epic": req.get("epic", ""), "heading": req.get("section", "")}
+    out = []
+    for r in raw:
+        if not isinstance(r, dict):
+            continue
+        keep = {k: req.get(k) for k in ("epic", "section", "source_ref", "source_id", "product_scope", "compliance_tags")}
+        item = normalize_requirement(dict(keep, **{k: v for k, v in r.items() if k in ("statement", "type", "actors", "notes")}),
+                                     section, req.get("source_ref", ""))
+        if item:
+            out.append(item)
+    if not out:
+        raise ValueError("The AI provider returned no usable requirement")
+    return out

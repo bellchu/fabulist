@@ -250,3 +250,22 @@ def test_metrics_endpoint_and_access_log(client, monkeypatch, caplog):
     assert 'route="/api/projects/{pid}",status="404"' in body
     assert "fabulist_http_request_duration_seconds_bucket" in body and "fabulist_projects 1" in body
     assert pid not in body, "raw paths must not become labels"
+
+
+def test_html_report_inline_preview(client):
+    pid = client.post("/api/projects", json={"name": "Report", "platform": "generic"}).json()["id"]
+    client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall export invoices to CSV."})
+    r = client.get("/api/projects/%s/export" % pid, params={"format": "html", "scope": "all", "inline": "true"})
+    assert r.status_code == 200 and r.headers["content-disposition"].startswith("inline")
+    assert r.headers["content-security-policy"] == "default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+    assert "Report backlog" in r.text and "REQ-001" in r.text
+    assert client.get("/api/projects/%s/export" % pid, params={"format": "csv-nope"}).status_code == 400
+
+
+def test_refine_requirement_endpoint(client):
+    pid = client.post("/api/projects", json={"name": "RR", "platform": "generic"}).json()["id"]
+    r = client.post("/api/projects/%s/requirements" % pid, json={"statement": "Agents should be able to place orders and the screens must be fast."}).json()
+    p = client.post("/api/projects/%s/requirements/%s/refine" % (pid, r["id"]), json={}).json()
+    assert len(p["proposals"]) == 2 and p["proposals"][0]["requirement"]["statement"].startswith("Agents shall be able to")
+    assert p["proposals"][0]["quality_score"] > p["before_score"]
+    assert len(client.get("/api/projects/%s/requirements" % pid).json()) == 1, "refine must not save"

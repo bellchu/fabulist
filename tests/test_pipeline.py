@@ -146,3 +146,21 @@ def test_duplicate_requirements_detected():
             {"key": "REQ-004", "statement": "Short."}]
     d = quality.duplicate_pairs(reqs)
     assert d == {"REQ-001": ["REQ-002"], "REQ-002": ["REQ-001"]}
+
+
+def test_html_report_escapes_and_flags_gaps():
+    data, mime = exporters.html_report([_story(title="<script>x</script>")], [REQ, dict(REQ, key="REQ-002")], "Demo <b>")
+    text = data.decode()
+    assert mime == "text/html" and "<script>x" not in text and "&lt;script&gt;" in text and "Demo &lt;b&gt;" in text
+    assert "<span class='gap'>Gap</span>" in text and "50%" in text
+
+
+def test_mock_refine_requirement_splits_and_strengthens():
+    req = {"key": "REQ-004", "type": "functional", "section": "Order capture", "epic": "Orders", "source_ref": "brd.md > Order capture",
+           "source_id": "BR-104", "actors": ["customer service agent"],
+           "statement": "Customer service agents should be able to place orders on behalf of a clinic and the order screens must be user-friendly."}
+    out = pipeline.refine_requirement(req, quality.requirement_issues(req), "generic", {"kind": "mock"}, {}, {"in": 0, "out": 0})
+    assert [r["statement"] for r in out] == ["Customer service agents shall be able to place orders on behalf of a clinic.",
+                                             "The order screens must be user-friendly."]
+    assert all(r["source_id"] == "BR-104" and r["section"] == "Order capture" for r in out)
+    assert "user-friendly" in out[1]["notes"] and out[0]["notes"] == ""
