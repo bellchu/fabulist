@@ -6,4 +6,4 @@ cd "$(dirname "$0")/.."
 eval "$(scripts/dev-env.sh)"
 export DATABASE_URL="${DATABASE_URL%/fabulist}/${DEV_DB:-fabulist_test}"
 export SETTINGS_ENCRYPTION_KEY="${SETTINGS_ENCRYPTION_KEY:-dev-only-key}"
-exec .venv/bin/uvicorn app.main:app --port "${PORT:-8765}" --reload
+exec "${PYTHON_BIN:-.venv/bin}/uvicorn" app.main:app --port "${PORT:-8765}" --reload

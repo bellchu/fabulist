@@ -81,12 +81,18 @@ Everything else is managed in the admin dashboard.
 
 ## Development
 
+Requires Python 3.12 (the production runtime) or Docker.
+
 ```bash
-python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 scripts/dev-db.sh &              # port-forward the cluster Postgres to localhost:5433
 scripts/dev-server.sh            # app on :8765 against a separate fabulist_test database
-TEST_DATABASE_URL=postgresql://... .venv/bin/pytest
-.venv/bin/python -m pyflakes app tests   # lint
+scripts/test.sh                  # lint + tests in a Python 3.12 container
+```
+
+Check dependencies for known vulnerabilities before releases:
+
+```bash
+docker run --rm -v "$PWD:/src" -w /src python:3.12-slim sh -c "pip install -q pip-audit && pip-audit -r requirements.txt"
 ```
 
 `samples/order-to-cash-brd.md` is a small BRD for trying the workflow.
