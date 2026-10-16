@@ -126,7 +126,7 @@ export function modal({ title, body, actions = [], wide = false, description }) 
   for (const a of actions) {
     foot.append(h("button", { class: "btn " + (a.kind || ""), onclick: guard(async () => { if ((await a.onClick()) !== false) close(); }) }, a.label));
   }
-  foot.prepend(h("button", { class: "btn btn-ghost", onclick: close }, "Cancel"));
+  foot.prepend(h("button", { class: "btn btn-ghost", onclick: close }, actions.length ? "Cancel" : "Close"));
   const first = panel.querySelector("input, textarea, select");
   if (first) setTimeout(() => first.focus(), 30);
   return close;

@@ -27,9 +27,11 @@ IDs → human review → epics, features and stories → requirements traceabili
    **Refine with AI** proposes an improved version of a story that fixes its issues; you
    review a before/after comparison before applying it. Long AI runs can be cancelled.
 4. **Traceability**: a requirement-to-story matrix with coverage, gaps and orphan stories.
-5. **Audit trail**: every manual edit, review decision, deletion, sync and AI run is recorded
+5. **Baselines**: freeze numbered, read-only snapshots of the backlog (for example a release
+   sign-off), export them exactly as they were, and compare them with later versions.
+6. **Audit trail**: every manual edit, review decision, deletion, sync and AI run is recorded
    with who, when and field-level changes.
-6. **Export**: a stakeholder HTML report (preview in the browser, print to PDF), Excel (stories, requirements, RTM sheets), Jira CSV, Azure DevOps CSV,
+7. **Export**: a stakeholder HTML report (preview in the browser, print to PDF), Excel (stories, requirements, RTM sheets), Jira CSV, Azure DevOps CSV,
    Markdown, CSV and JSON, or push directly to **Jira**, **Azure DevOps** or **GitHub Issues**,
    or to any system through a signed JSON **webhook**. Tracker pushes are
    idempotent: epics and stories are linked to their issues, so pushing again updates them

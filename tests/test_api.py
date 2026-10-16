@@ -297,3 +297,29 @@ def test_ask_brds_with_citations(client):
     r = client.post("/api/projects/%s/ask" % pid, json={"question": "How many days do customers have to return supplies?"}).json()
     assert "30 days" in r["answer"] and "[1]" in r["answer"] and r["citations"][0]["filename"] == "returns.md"
     assert client.post("/api/projects/%s/ask" % pid, json={"question": "x"}).status_code == 422
+
+
+def test_baselines_snapshot_compare_and_export(client):
+    pid = client.post("/api/projects", json={"name": "Base", "platform": "generic"}).json()["id"]
+    assert client.post("/api/projects/%s/baselines" % pid, json={"name": "empty"}).status_code == 400
+    r = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall export invoices to CSV.", "status": "approved"}).json()
+    s1 = client.post("/api/projects/%s/stories" % pid, json={"title": "Export invoices", "narrative": "As a finance analyst, I want CSV, so that I reconcile.",
+                                                             "acceptance_criteria": ["Given invoices, when I export, then a CSV downloads."],
+                                                             "requirement_ids": [r["key"]], "status": "approved"}).json()
+    b1 = client.post("/api/projects/%s/baselines" % pid, json={"name": "Sign-off", "note": "Steering committee"}).json()
+    assert b1["version"] == 1
+    client.patch("/api/projects/%s/stories/%s" % (pid, s1["id"]), json={"title": "Export invoices to CSV", "story_points": 3})
+    client.post("/api/projects/%s/stories" % pid, json={"title": "Email invoices", "status": "draft"})
+    cmp = client.get("/api/projects/%s/baselines/%s/compare" % (pid, b1["id"])).json()
+    assert cmp["from"] == "v1" and cmp["to"] == "current backlog"
+    assert cmp["stories"]["changed"] == [{"key": "US-001", "title": "Export invoices to CSV", "fields": ["title", "story_points"]}]
+    assert [a["key"] for a in cmp["stories"]["added"]] == ["US-002"] and cmp["requirements"]["changed"] == []
+    b2 = client.post("/api/projects/%s/baselines" % pid, json={"name": "Sprint 2", "scope": "all"}).json()
+    assert b2["version"] == 2
+    listing = client.get("/api/projects/%s/baselines" % pid).json()
+    assert [(b["version"], b["stories"]) for b in listing] == [(2, 2), (1, 1)] and listing[1]["note"] == "Steering committee"
+    assert client.get("/api/projects/%s/baselines/%s/compare" % (pid, b1["id"]), params={"to": b2["id"]}).json()["to"] == "v2"
+    x = client.get("/api/projects/%s/baselines/%s/export" % (pid, b1["id"]), params={"format": "json"})
+    assert x.status_code == 200 and "base-v1-json" in x.headers["content-disposition"]
+    assert [s["title"] for s in x.json()["stories"]] == ["Export invoices"], "baseline keeps the frozen version"
+    assert client.get("/api/projects/%s/history?limit=1" % pid).json()[0]["action"] == "baselined"

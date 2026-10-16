@@ -707,8 +707,58 @@ async function viewExport(body) {
       h("div", { class: "row wrap" }, h("div", { class: "grow" }, h("h3", {}, "What to export"), note),
         segmented([["approved", "Approved only"], ["all", "Everything in review"]], filters.exportScope, (v) => { filters.exportScope = v; render(); }))),
     grid,
+    await baselinesCard(),
     await pushCard());
   render();
+}
+
+async function baselinesCard() {
+  const list = await api.get(base() + "/baselines");
+  const create = guard(async () => {
+    const name = h("input", { type: "text", placeholder: "e.g. Release 1 sign-off", maxlength: "120" });
+    const note = h("textarea", { rows: 2, placeholder: "Approvers, meeting, scope notes (optional)" });
+    let scope = filters.exportScope === "approved" ? "approved" : "all";
+    modal({
+      title: "Create baseline", description: "Freezes a numbered, read-only copy of the backlog that can be exported and compared later.",
+      body: h("div", { class: "stack" }, field("Name", name), field("Contents", segmented([["approved", "Approved items only"], ["all", "Approved + draft"]], scope, (v) => (scope = v))),
+        field("Note", note)),
+      actions: [{ label: "Create baseline", kind: "btn-primary", onClick: async () => {
+        if (!name.value.trim()) throw new Error("Name is required");
+        const r = await api.post(base() + "/baselines", { name: name.value, note: note.value, scope });
+        toast("Baseline v" + r.version + " created", "ok"); rerender();
+      } }],
+    });
+  });
+  const compare = guard(async (b) => {
+    const c = await api.get(base() + "/baselines/" + b.id + "/compare");
+    const section = (title, d) => h("div", { class: "stack", style: { gap: "6px" } }, h("b", {}, title),
+      !d.added.length && !d.removed.length && !d.changed.length ? h("div", { class: "muted small" }, "No changes.") : null,
+      d.added.map((x) => h("div", { class: "row small" }, badge("Added", "green"), h("span", { class: "mono" }, x.key), x.title)),
+      d.removed.map((x) => h("div", { class: "row small" }, badge("Removed", "red"), h("span", { class: "mono" }, x.key), x.title)),
+      d.changed.map((x) => h("div", { class: "row small" }, badge("Changed", "amber"), h("span", { class: "mono" }, x.key), x.title,
+        h("span", { class: "muted" }, "(" + x.fields.map((f) => f.replace(/_/g, " ")).join(", ") + ")"))));
+    modal({ title: "Changes since " + c.from, description: "Compared with the " + c.to + ".", wide: true,
+      body: h("div", { class: "stack" }, section("Stories", c.stories), section("Requirements", c.requirements)), actions: [] });
+  });
+  return h("div", { class: "card", style: { marginTop: "12px" } },
+    h("div", { class: "card-head" }, h("div", { class: "grow" }, h("h3", {}, "Baselines"),
+      h("div", { class: "muted small" }, "Versioned sign-off snapshots of the backlog for audit and release planning.")),
+      h("button", { class: "btn btn-sm", onclick: create }, icon("plus"), "Create baseline")),
+    list.length ? h("div", { class: "table-wrap", style: { marginTop: "8px" } }, h("table", { class: "table" },
+      h("thead", {}, h("tr", {}, ["Version", "Name", "Contents", "Created", ""].map((x) => h("th", {}, x)))),
+      h("tbody", {}, list.map((b) => {
+        const fmtSel = select(state.meta.formats.map((f) => [f.id, f.label]), "xlsx", { "aria-label": "Format", style: { width: "auto" } });
+        return h("tr", {},
+          h("td", {}, badge("v" + b.version, "accent")),
+          h("td", {}, h("b", {}, b.name), b.note ? h("div", { class: "muted small" }, b.note) : null),
+          h("td", { class: "small" }, b.requirements + " requirements · " + b.stories + " stories", h("div", { class: "muted" }, b.scope === "approved" ? "Approved only" : "Approved + draft")),
+          h("td", { class: "small" }, timeAgo(b.created), h("div", { class: "muted" }, "by " + (b.actor || "–"))),
+          h("td", { class: "nowrap", style: { textAlign: "right" } },
+            h("span", { class: "row", style: { justifyContent: "flex-end" } }, fmtSel,
+              h("button", { class: "btn btn-sm", onclick: () => download(base() + "/baselines/" + b.id + "/export?format=" + encodeURIComponent(fmtSel.value)) }, icon("download"), "Export"),
+              h("button", { class: "btn btn-sm", onclick: () => compare(b) }, "Compare with current"))));
+      }))))
+      : h("div", { class: "card-body muted small" }, "No baselines yet. Create one when the backlog is signed off."));
 }
 
 async function pushCard() {

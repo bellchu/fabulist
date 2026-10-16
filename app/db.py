@@ -61,6 +61,11 @@ SCHEMA = [
          url TEXT NOT NULL, branch TEXT NOT NULL DEFAULT '', path_glob TEXT NOT NULL DEFAULT '*',
          token_enc TEXT, key_hint TEXT NOT NULL DEFAULT '', last_sync TEXT NOT NULL DEFAULT '',
          last_commit TEXT NOT NULL DEFAULT '', last_error TEXT NOT NULL DEFAULT '', created TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS baselines (
+         id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+         version INTEGER NOT NULL, name TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', scope TEXT NOT NULL,
+         actor TEXT NOT NULL DEFAULT '', snapshot JSONB NOT NULL, created TEXT NOT NULL,
+         UNIQUE (project_id, version))""",
     """CREATE TABLE IF NOT EXISTS product_classes (
          id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, attributes JSONB NOT NULL DEFAULT '[]',
          keywords JSONB NOT NULL DEFAULT '[]', description TEXT NOT NULL DEFAULT '', created TEXT NOT NULL)""",

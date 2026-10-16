@@ -631,3 +631,106 @@ def export(pid: str, format: str = "xlsx", scope: str = "approved-or-all", inlin
         # Static document: inline styles only, no scripts or remote content.
         headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; img-src data:"
     return Response(payload, media_type=mime, headers=headers)
+
+
+
+# ---- baselines (frozen, versioned snapshots of the backlog) ---------------
+
+class BaselineIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    note: str = Field(default="", max_length=2000)
+    scope: str = "approved"
+
+
+SNAPSHOT_STORY_FIELDS = ("title", "narrative", "acceptance_criteria", "priority", "story_points", "status", "epic", "feature",
+                         "requirement_ids", "variant_criteria", "open_questions")
+SNAPSHOT_REQ_FIELDS = ("statement", "type", "status", "section")
+
+
+def _snapshot(pid: str, scope: str) -> Dict[str, Any]:
+    reqs = [r for r in _requirements(pid) if r["status"] == "approved" or (scope == "all" and r["status"] == "draft")]
+    stories = [s for s in _stories(pid) if s["status"] == "approved" or (scope == "all" and s["status"] == "draft")]
+    for item in reqs + stories:
+        for k in ("issues", "external", "project_id"):
+            item.pop(k, None)
+    return {"requirements": reqs, "stories": stories}
+
+
+def _baseline(pid: str, bid: str) -> Dict[str, Any]:
+    b = db.one("SELECT * FROM baselines WHERE id=%s AND project_id=%s", (bid, pid))
+    if not b:
+        raise HTTPException(404, "Baseline not found")
+    return b
+
+
+def _diff(old: List[Dict[str, Any]], new: List[Dict[str, Any]], fields: Any) -> Dict[str, Any]:
+    before, after = {x["key"]: x for x in old}, {x["key"]: x for x in new}
+    changed = []
+    for key in sorted(set(before) & set(after)):
+        fields_changed = [f for f in fields if before[key].get(f) != after[key].get(f)]
+        if fields_changed:
+            changed.append({"key": key, "title": after[key].get("title") or after[key].get("statement", ""), "fields": fields_changed})
+    label = lambda x: x.get("title") or x.get("statement", "")  # noqa: E731
+    return {"added": [{"key": k, "title": label(after[k])} for k in sorted(set(after) - set(before))],
+            "removed": [{"key": k, "title": label(before[k])} for k in sorted(set(before) - set(after))],
+            "changed": changed}
+
+
+@router.post("/api/projects/{pid}/baselines", status_code=201)
+def create_baseline(pid: str, body: BaselineIn, request: Request):
+    _project(pid)
+    if body.scope not in ("approved", "all"):
+        raise HTTPException(400, "scope must be approved or all")
+    snap = _snapshot(pid, body.scope)
+    if not snap["stories"] and not snap["requirements"]:
+        raise HTTPException(400, "Nothing to baseline. Approve requirements or stories first, or include drafts.")
+    who = history.actor(request)
+    with db.conn() as c:
+        c.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (pid,))  # serialize version numbering per project
+        version = c.execute("SELECT coalesce(max(version), 0) + 1 AS v FROM baselines WHERE project_id=%s", (pid,)).fetchone()["v"]
+        bid = db.new_id()
+        c.execute("INSERT INTO baselines (id, project_id, version, name, note, scope, actor, snapshot, created) "
+                  "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                  (bid, pid, version, body.name.strip(), body.note.strip(), body.scope, who, json.dumps(snap), db.now()))
+        history.record(c, pid, "baseline", bid, "v%d" % version, "baselined", who,
+                       "%s: %d requirements, %d stories" % (body.name.strip(), len(snap["requirements"]), len(snap["stories"])))
+    return {"id": bid, "version": version}
+
+
+@router.get("/api/projects/{pid}/baselines")
+def list_baselines(pid: str):
+    _project(pid)
+    return db.rows("SELECT id, version, name, note, scope, actor, created, jsonb_array_length(snapshot->'requirements') AS requirements, "
+                   "jsonb_array_length(snapshot->'stories') AS stories FROM baselines WHERE project_id=%s ORDER BY version DESC", (pid,))
+
+
+@router.get("/api/projects/{pid}/baselines/{bid}/compare")
+def compare_baseline(pid: str, bid: str, to: str = "current"):
+    """Differences from a baseline to another baseline (id) or to the current backlog."""
+    base = _baseline(pid, bid)
+    if to == "current":
+        target, label = _snapshot(pid, "all"), "current backlog"
+    else:
+        other = _baseline(pid, to)
+        target, label = other["snapshot"], "v%d" % other["version"]
+    return {"from": "v%d" % base["version"], "to": label,
+            "stories": _diff(base["snapshot"]["stories"], target["stories"], SNAPSHOT_STORY_FIELDS),
+            "requirements": _diff(base["snapshot"]["requirements"], target["requirements"], SNAPSHOT_REQ_FIELDS)}
+
+
+@router.get("/api/projects/{pid}/baselines/{bid}/export")
+def export_baseline(pid: str, bid: str, format: str = "xlsx"):
+    project = _project(pid)
+    b = _baseline(pid, bid)
+    entry = exporters.EXPORTERS.get(format)
+    if not entry:
+        raise HTTPException(400, "Unknown format")
+    snap = b["snapshot"]
+    title = "%s backlog v%d (%s)" % (project["name"], b["version"], b["name"])
+    payload, mime = (exporters.html_report(snap["stories"], snap["requirements"], title) if format == "html"
+                     else entry[0](snap["stories"], snap["requirements"]))
+    slug = re.sub(r"[^a-z0-9]+", "-", project["name"].lower()).strip("-") or "backlog"
+    headers = {"Content-Disposition": 'attachment; filename="%s-v%d-%s.%s"' % (slug, b["version"], format, entry[1])}
+    if format == "html":
+        headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+    return Response(payload, media_type=mime, headers=headers)
