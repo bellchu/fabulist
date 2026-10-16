@@ -164,3 +164,16 @@ def test_mock_refine_requirement_splits_and_strengthens():
                                              "The order screens must be user-friendly."]
     assert all(r["source_id"] == "BR-104" and r["section"] == "Order capture" for r in out)
     assert "user-friendly" in out[1]["notes"] and out[0]["notes"] == ""
+
+
+def test_quality_false_positives_from_real_run():
+    identify = {"key": "REQ-010", "statement": "The system shall enable Compliance to identify affected lots within 4 hours of a recall notice."}
+    quarantine = {"key": "REQ-011", "statement": "The system shall enable Compliance to quarantine affected lots within 4 hours of a recall notice."}
+    assert quality.duplicate_pairs([identify, quarantine]) == {}, "one different action verb = distinct requirements"
+    audit = {"statement": "The system shall capture all pricing changes in an audit trail recording the user, timestamp, and reason.", "type": "non-functional"}
+    assert quality.requirement_issues(audit) == []
+    slow = {"statement": "Inventory availability checks must respond quickly.", "type": "non-functional"}
+    assert "not-verifiable" in {i["code"] for i in quality.requirement_issues(slow)}
+    noted = {"statement": "The system shall require UDI capture for returned implants.", "type": "rule", "notes": "Credit rules TBD"}
+    assert "incomplete" in {i["code"] for i in quality.requirement_issues(noted)}
+    assert "TBD" in pipeline.REQ_SYSTEM

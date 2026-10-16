@@ -39,7 +39,8 @@ REQ_SYSTEM = (
     "\"actors\": [str], \"source_id\": str (requirement ID used in the BRD, or empty), \"rationale\": str}. "
     "Rules: one verifiable requirement per element (split compound statements); keep the BRD's meaning and "
     "terminology; never invent requirements; skip background, narrative and table-of-contents text; prefer "
-    "'The system shall ...' phrasing for functional requirements."
+    "'The system shall ...' phrasing for functional requirements. Keep open-item markers such as TBD, TBC or "
+    "'to be confirmed' verbatim in the statement; never resolve or drop them."
 )
 STORY_SYSTEM = (
     "You are a senior business analyst writing an agile backlog from approved requirements. Reply with ONLY a "

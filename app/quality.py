@@ -17,6 +17,9 @@ TBD = ["tbd", "tbc", "to be determined", "to be confirmed", "???"]
 _VAGUE_RE = re.compile(r"(?<![\w-])(" + "|".join(re.escape(v) for v in VAGUE) + r")(?![\w-])", re.I)
 _WEAK_RE = re.compile(r"\b(" + "|".join(WEAK) + r")\b", re.I)
 _TBD_RE = re.compile(r"(?<!\w)(" + "|".join(re.escape(t) for t in TBD) + r")(?!\w)", re.I)
+_MEASURABLE = re.compile(r"\b(perform\w*|response|respond\w*|latency|fast\w*|quick\w*|slow\w*|speed|second\w*|availab\w*|uptime|"
+                         r"scal\w*|load|concurrent\w*|throughput|capacity|volume|user[- ]friendly|usab\w*|intuitive|easy|easily|"
+                         r"responsive|efficient\w*|reliab\w*|downtime|recover\w*)\b", re.I)
 _NARRATIVE = re.compile(r"^\s*as an?\s+.+?,?\s+i (want|need|can)\b.+?,?\s+so that\b.+", re.I | re.S)
 _GWT = re.compile(r"^\s*(given|when|then|and|but)\b", re.I)
 
@@ -32,7 +35,7 @@ def vague_terms(text: str) -> List[str]:
 def requirement_issues(req: Dict[str, Any]) -> List[Issue]:
     text = req.get("statement", "")
     out: List[Issue] = []
-    if _TBD_RE.search(text):
+    if _TBD_RE.search(text) or _TBD_RE.search(req.get("notes") or ""):
         out.append(_issue("incomplete", "error", "Contains TBD/TBC: requirement is incomplete."))
     terms = vague_terms(text)
     if terms:
@@ -41,7 +44,9 @@ def requirement_issues(req: Dict[str, Any]) -> List[Issue]:
         out.append(_issue("weak-modal", "info", "Weak modal verb; confirm whether this is mandatory (shall/must)."))
     if len(re.findall(r"\b(and|or)\b", text, re.I)) >= 3 or len(re.findall(r"\b(shall|must|should|will)\b", text, re.I)) > 1:
         out.append(_issue("not-singular", "warning", "May combine several requirements; split into atomic statements."))
-    if req.get("type") == "non-functional" and not re.search(r"\d", text):
+    # Only quality attributes that need a threshold (performance, availability, capacity, usability) must
+    # carry a number; e.g. "changes are recorded in an audit trail" is verifiable as stated.
+    if req.get("type") == "non-functional" and _MEASURABLE.search(text) and not re.search(r"\d", text):
         out.append(_issue("not-verifiable", "warning", "Non-functional requirement has no measurable threshold."))
     if len(text) > 450:
         out.append(_issue("too-long", "info", "Long statement; consider splitting."))
@@ -94,7 +99,7 @@ def _tokens(text: str) -> set:
     return {t for t in re.findall(r"[a-z0-9]+", text.lower()) if t not in _STOP and len(t) > 1}
 
 
-def duplicate_pairs(reqs: List[Dict[str, Any]], threshold: float = 0.75) -> Dict[str, List[str]]:
+def duplicate_pairs(reqs: List[Dict[str, Any]], threshold: float = 0.85) -> Dict[str, List[str]]:
     """Map requirement key -> keys of near-duplicates (token Jaccard >= threshold).
 
     Uses an inverted index so only requirements that share a token are compared."""
