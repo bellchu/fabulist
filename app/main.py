@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import secrets
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
@@ -11,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
-from . import admin, config, db, embeddings, exporters, history, integrations, parsing, pipeline, quality, repos, settings, taxonomy, users
+from . import admin, config, db, embeddings, exporters, history, integrations, metrics, parsing, pipeline, quality, repos, settings, taxonomy, users
 from .profiles import PLATFORMS
 
 log = logging.getLogger("fabulist")
@@ -38,10 +39,34 @@ app.include_router(integrations.router)
 app.include_router(users.router)
 
 
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        entry = {"ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"), "level": record.levelname.lower(),
+                 "logger": record.name, "msg": record.getMessage()}
+        entry.update(getattr(record, "fields", {}))
+        if record.exc_info:
+            entry["exc"] = self.formatException(record.exc_info)
+        return json.dumps(entry)
+
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(JsonFormatter())
+logging.getLogger("fabulist").handlers[:] = [_handler]
+logging.getLogger("fabulist").setLevel(logging.INFO)
+logging.getLogger("fabulist").propagate = False
+access_log = logging.getLogger("fabulist.access")
+
+
 @app.middleware("http")
 async def auth_and_guards(request: Request, call_next):
     request.state.user, request.state.role = "anonymous", "admin"
     path = request.url.path
+    if path == "/metrics":
+        # Scraped by Prometheus with a bearer token; never behind user Basic auth.
+        token = request.headers.get("authorization", "")
+        if not config.METRICS_TOKEN or not secrets.compare_digest(token, "Bearer " + config.METRICS_TOKEN):
+            return Response(status_code=404)
+        return await call_next(request)
     if users.auth_enabled() and path != "/healthz":
         creds = users.parse_basic(request.headers.get("authorization", ""))
         role = await run_in_threadpool(users.authenticate, *creds) if creds else None
@@ -60,6 +85,32 @@ async def auth_and_guards(request: Request, call_next):
         # Revalidate via ETag so a deploy is picked up without a hard refresh.
         response.headers["Cache-Control"] = "no-cache"
     return response
+
+
+# Registered last so it wraps auth: rejected requests are logged and counted too.
+@app.middleware("http")
+async def observe(request: Request, call_next):
+    """JSON access log line and Prometheus metrics per request (route templates, not raw paths)."""
+    started = time.monotonic()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    finally:
+        route = getattr(request.scope.get("route"), "path", None) or ("/static" if request.url.path.startswith("/static/") else "other")
+        elapsed = time.monotonic() - started
+        if request.url.path not in ("/healthz", "/metrics"):
+            metrics.inc("fabulist_http_requests_total", method=request.method, route=route, status=str(status))
+            metrics.observe_request(route, elapsed)
+            access_log.info("request", extra={"fields": {"method": request.method, "route": route, "path": request.url.path,
+                                                         "status": status, "ms": int(elapsed * 1000),
+                                                         "user": getattr(request.state, "user", "")}})
+
+
+@app.get("/metrics", include_in_schema=False)
+def prometheus_metrics() -> Response:
+    return Response(metrics.render(), media_type="text/plain; version=0.0.4")
 
 
 @app.get("/api/me")
@@ -282,6 +333,15 @@ def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str
             raise RunCancelled()
 
     try:
+        _run_stage(run_id, pid, stage, provider_id, scope, started, usage, progress)
+    finally:
+        metrics.inc("fabulist_llm_tokens_total", usage["in"], direction="in")
+        metrics.inc("fabulist_llm_tokens_total", usage["out"], direction="out")
+
+
+def _run_stage(run_id: str, pid: str, stage: str, provider_id: str, scope: str, started: float,
+               usage: Dict[str, int], progress: Any) -> None:
+    try:
         project = _project(pid)
         profile = settings.get_provider(provider_id)
         opts = settings.get_settings()
@@ -311,10 +371,13 @@ def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str
             c.execute("UPDATE runs SET status='done', item_count=%s, story_count=%s, progress='', tokens_in=%s, "
                       "tokens_out=%s, duration_ms=%s WHERE id=%s",
                       (len(items), len(items), usage["in"], usage["out"], int((time.monotonic() - started) * 1000), run_id))
+        metrics.inc("fabulist_runs_total", stage=stage, status="done")
     except RunCancelled:
+        metrics.inc("fabulist_runs_total", stage=stage, status="cancelled")
         db.execute("UPDATE runs SET status='cancelled', error='Cancelled; existing data was kept', progress='', "
                    "duration_ms=%s WHERE id=%s", (int((time.monotonic() - started) * 1000), run_id))
     except Exception as exc:
+        metrics.inc("fabulist_runs_total", stage=stage, status="failed")
         log.exception("run %s failed", run_id)
         msg = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else "Internal error (%s)" % type(exc).__name__
         db.execute("UPDATE runs SET status='failed', error=%s, progress='', tokens_in=%s, tokens_out=%s, duration_ms=%s "
@@ -548,6 +611,9 @@ def refine_story(pid: str, sid: str, body: RefineIn):
         proposal = pipeline.refine_story(story, linked, story["issues"], project["platform"], profile, settings.get_settings(), usage)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(502, "Refinement failed: %s" % exc)
+    finally:
+        metrics.inc("fabulist_llm_tokens_total", usage["in"], direction="in")
+        metrics.inc("fabulist_llm_tokens_total", usage["out"], direction="out")
     valid = {r["key"] for r in reqs if r["status"] != "excluded"}
     issues = quality.story_issues(proposal, valid)
     return {"story": proposal, "issues": issues, "quality_score": quality.score(issues), "ready": quality.is_ready(issues),
@@ -611,6 +677,9 @@ def push_to_tracker(pid: str, body: PushIn, request: Request):
         result = integrations.push(pid, conn, target, stories)
     except (integrations.TrackerError, settings.SettingsError) as exc:
         raise HTTPException(400, str(exc))
+    for outcome in ("created", "updated"):
+        metrics.inc("fabulist_tracker_items_total", result[outcome], tracker=conn["kind"], result=outcome)
+    metrics.inc("fabulist_tracker_items_total", len(result["failed"]), tracker=conn["kind"], result="failed")
     with db.conn() as c:
         history.record(c, pid, "push", conn["id"], target, "pushed to " + conn["kind"], history.actor(request),
                        "%s %s: %d created, %d updated, %d failed" % (conn["name"], target, result["created"], result["updated"], len(result["failed"])))

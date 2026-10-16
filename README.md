@@ -87,6 +87,24 @@ kubectl -n fabulist exec -i postgres-0 -- pg_restore -U fabulist -d fabulist --c
 The script generates the database password, the Basic-auth password and the encryption key
 in-cluster on first deploy. They are never stored in the repository.
 
+## Operations
+
+- **Logs**: one JSON line per request (`method`, `route`, `status`, `ms`, `user`) and per error,
+  ready for Loki or any log pipeline.
+- **Metrics**: `/metrics` in Prometheus format, enabled by `METRICS_TOKEN` (bearer auth). It
+  covers request rate, status and latency per route, AI runs by stage and outcome, LLM tokens,
+  tracker pushes, and inventory gauges. `deploy/k8s/monitoring.yaml` adds a ServiceMonitor,
+  alert rules and a Grafana dashboard for kube-prometheus-stack.
+
+### Runbook
+
+| Alert | Check |
+|---|---|
+| FabulistDown | `kubectl -n fabulist get pods`; app logs; `/healthz` fails when Postgres is unreachable, so check `postgres-0` too. |
+| FabulistHighErrorRate | Filter logs for `status >= 500`; look for database errors or provider timeouts. |
+| FabulistAIRunsFailing | Admin → Activity shows each run's error. Use Admin → AI providers → Test to verify the endpoint, key and model. |
+| FabulistBackupMissing | `kubectl -n fabulist get jobs` and the `fabulist-backup` job logs; make sure the backups volume has space. |
+
 ## License
 
 MIT

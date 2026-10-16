@@ -234,3 +234,18 @@ def test_duplicate_flag_ignores_excluded(client):
     client.patch("/api/projects/%s/requirements/%s" % (pid, b["id"]), json={"status": "excluded"})
     reqs = client.get("/api/projects/%s/requirements" % pid).json()
     assert not any(i["code"] == "duplicate" for r in reqs for i in r["issues"])
+
+
+def test_metrics_endpoint_and_access_log(client, monkeypatch, caplog):
+    from app import config
+    assert client.get("/metrics").status_code == 404  # disabled without a token
+    monkeypatch.setattr(config, "METRICS_TOKEN", "scrape-token")
+    assert client.get("/metrics").status_code == 404
+    pid = client.post("/api/projects", json={"name": "M", "platform": "generic"}).json()["id"]
+    client.get("/api/projects/%s" % pid)
+    client.get("/api/projects/does-not-exist")
+    body = client.get("/metrics", headers={"Authorization": "Bearer scrape-token"}).text
+    assert 'fabulist_http_requests_total{method="GET",route="/api/projects/{pid}",status="200"}' in body
+    assert 'route="/api/projects/{pid}",status="404"' in body
+    assert "fabulist_http_request_duration_seconds_bucket" in body and "fabulist_projects 1" in body
+    assert pid not in body, "raw paths must not become labels"

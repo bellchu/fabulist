@@ -1,0 +1,395 @@
+# Prometheus Operator and Grafana sidecar objects (kube-prometheus-stack).
+# Labels match this cluster's selectors: release=kube-prom-stack, grafana_dashboard=1.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: fabulist
+  namespace: fabulist
+  labels:
+    release: kube-prom-stack
+spec:
+  selector:
+    matchLabels:
+      app: fabulist
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      authorization:
+        type: Bearer
+        credentials:
+          name: fabulist-app
+          key: METRICS_TOKEN
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: fabulist
+  namespace: fabulist
+  labels:
+    release: kube-prom-stack
+spec:
+  groups:
+    - name: fabulist
+      rules:
+        - alert: FabulistDown
+          expr: up{namespace="fabulist", job="fabulist"} == 0 or absent(up{namespace="fabulist", job="fabulist"})
+          for: 5m
+          labels: {severity: critical, team: fabulist}
+          annotations:
+            summary: Fabulist is not reachable by Prometheus
+            runbook: "README.md#runbook: check pod status, logs and the database"
+        - alert: FabulistHighErrorRate
+          expr: sum(rate(fabulist_http_requests_total{status=~"5.."}[10m])) / clamp_min(sum(rate(fabulist_http_requests_total[10m])), 1e-9) > 0.05
+          for: 10m
+          labels: {severity: warning, team: fabulist}
+          annotations:
+            summary: More than 5% of Fabulist requests fail with 5xx
+            runbook: "README.md#runbook: inspect JSON logs for status>=500 and database health"
+        - alert: FabulistAIRunsFailing
+          expr: increase(fabulist_runs_total{status="failed"}[1h]) > 3
+          labels: {severity: warning, team: fabulist}
+          annotations:
+            summary: Several AI runs failed in the last hour
+            runbook: "README.md#runbook: test the default AI provider in Admin > AI providers"
+        - alert: FabulistBackupMissing
+          expr: time() - kube_cronjob_status_last_successful_time{namespace="fabulist", cronjob="fabulist-backup"} > 26 * 3600
+          for: 30m
+          labels: {severity: warning, team: fabulist}
+          annotations:
+            summary: No successful Fabulist database backup in 26 hours
+            runbook: "README.md#runbook: inspect the fabulist-backup job logs and the backups volume"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fabulist-dashboard
+  namespace: fabulist
+  labels:
+    grafana_dashboard: "1"
+data:
+  fabulist.json: |
+    {
+     "title": "Fabulist",
+     "uid": "fabulist-overview",
+     "schemaVersion": 39,
+     "time": {
+      "from": "now-24h",
+      "to": "now"
+     },
+     "refresh": "1m",
+     "templating": {
+      "list": [
+       {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "label": "Data source"
+       }
+      ]
+     },
+     "panels": [
+      {
+       "type": "stat",
+       "title": "Projects",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 4
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "fabulist_projects",
+         "refId": "A"
+        }
+       ]
+      },
+      {
+       "type": "stat",
+       "title": "BRD documents",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 4,
+        "h": 4
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "fabulist_documents",
+         "refId": "A"
+        }
+       ]
+      },
+      {
+       "type": "stat",
+       "title": "Requirements",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 4,
+        "h": 4
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "fabulist_requirements",
+         "refId": "A"
+        }
+       ]
+      },
+      {
+       "type": "stat",
+       "title": "Stories",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 4,
+        "h": 4
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "fabulist_stories",
+         "refId": "A"
+        }
+       ]
+      },
+      {
+       "type": "stat",
+       "title": "Runs in progress",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 4,
+        "h": 4
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "fabulist_running_runs",
+         "refId": "A"
+        }
+       ]
+      },
+      {
+       "type": "stat",
+       "title": "Up",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 4
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "up{namespace=\"fabulist\",job=\"fabulist\"}",
+         "refId": "A"
+        }
+       ]
+      },
+      {
+       "type": "timeseries",
+       "title": "Requests by status",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+       },
+       "fieldConfig": {
+        "defaults": {
+         "unit": "reqps"
+        },
+        "overrides": []
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "sum by (status) (rate(fabulist_http_requests_total[5m]))",
+         "legendFormat": "{{status}}",
+         "refId": "A"
+        }
+       ]
+      },
+      {
+       "type": "timeseries",
+       "title": "p95 latency by route",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+       },
+       "fieldConfig": {
+        "defaults": {
+         "unit": "s"
+        },
+        "overrides": []
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "histogram_quantile(0.95, sum by (le, route) (rate(fabulist_http_request_duration_seconds_bucket[5m])))",
+         "legendFormat": "{{route}}",
+         "refId": "A"
+        }
+       ]
+      },
+      {
+       "type": "timeseries",
+       "title": "AI runs",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+       },
+       "fieldConfig": {
+        "defaults": {
+         "unit": "short"
+        },
+        "overrides": []
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "sum by (stage, status) (increase(fabulist_runs_total[1h]))",
+         "legendFormat": "{{stage}} {{status}}",
+         "refId": "A"
+        }
+       ]
+      },
+      {
+       "type": "timeseries",
+       "title": "LLM tokens per hour",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+       },
+       "fieldConfig": {
+        "defaults": {
+         "unit": "short"
+        },
+        "overrides": []
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "sum by (direction) (increase(fabulist_llm_tokens_total[1h]))",
+         "legendFormat": "{{direction}}",
+         "refId": "A"
+        }
+       ]
+      },
+      {
+       "type": "timeseries",
+       "title": "Tracker pushes",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 8
+       },
+       "fieldConfig": {
+        "defaults": {
+         "unit": "short"
+        },
+        "overrides": []
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "sum by (tracker, result) (increase(fabulist_tracker_items_total[1h]))",
+         "legendFormat": "{{tracker}} {{result}}",
+         "refId": "A"
+        }
+       ]
+      }
+     ],
+     "tags": [
+      "fabulist"
+     ]
+    }

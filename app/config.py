@@ -40,3 +40,6 @@ SETTINGS_KEY = os.environ.get("SETTINGS_ENCRYPTION_KEY", "")
 # Optional HTTP Basic protection for the whole app.
 BASIC_USER = os.environ.get("APP_BASIC_USER", "")
 BASIC_PASSWORD = os.environ.get("APP_BASIC_PASSWORD", "")
+
+# Bearer token Prometheus uses to scrape /metrics; the endpoint is disabled when unset.
+METRICS_TOKEN = os.environ.get("METRICS_TOKEN", "")

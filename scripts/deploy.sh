@@ -36,6 +36,10 @@ if [ -z "$(kubectl -n "$NS" get secret fabulist-app -o jsonpath='{.data.SETTINGS
   kubectl -n "$NS" patch secret fabulist-app --type merge \
     -p "{\"stringData\":{\"SETTINGS_ENCRYPTION_KEY\":\"$(openssl rand -hex 32)\"}}" >/dev/null
 fi
+if [ -z "$(kubectl -n "$NS" get secret fabulist-app -o jsonpath='{.data.METRICS_TOKEN}')" ]; then
+  kubectl -n "$NS" patch secret fabulist-app --type merge \
+    -p "{\"stringData\":{\"METRICS_TOKEN\":\"$(openssl rand -hex 24)\"}}" >/dev/null
+fi
 kubectl apply -f deploy/k8s/postgres.yaml
 kubectl -n "$NS" rollout status statefulset/postgres --timeout=240s
 kubectl apply -f deploy/k8s/backup.yaml
@@ -45,5 +49,9 @@ docker save "$IMAGE" | ssh "$DEPLOY_SSH" "sudo microk8s ctr image import -"
 
 sed -e "s|IMAGE|${IMAGE}|" -e "s|FABULIST_HOST|${FABULIST_HOST}|" deploy/k8s/app.yaml | kubectl apply -f -
 kubectl -n "$NS" rollout status deploy/fabulist --timeout=240s
+# Prometheus Operator / Grafana sidecar objects are optional: skip when the CRDs are absent.
+if kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1; then
+  kubectl apply -f deploy/k8s/monitoring.yaml
+fi
 echo "Deployed ${IMAGE} at http://${FABULIST_HOST}"
 echo "Basic-auth credentials: kubectl -n ${NS} get secret fabulist-app -o jsonpath='{.data}'"

@@ -49,11 +49,14 @@ kind: Service
 metadata:
   name: fabulist
   namespace: fabulist
+  labels:
+    app: fabulist
 spec:
   selector:
     app: fabulist
   ports:
-    - port: 80
+    - name: http
+      port: 80
       targetPort: 8000
 ---
 apiVersion: networking.k8s.io/v1
