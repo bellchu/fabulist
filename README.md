@@ -75,6 +75,7 @@ python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 scripts/dev-db.sh &              # port-forward the cluster Postgres to localhost:5433
 scripts/dev-server.sh            # app on :8765 against a separate fabulist_test database
 TEST_DATABASE_URL=postgresql://... .venv/bin/pytest
+.venv/bin/python -m pyflakes app tests   # lint
 ```
 
 `samples/order-to-cash-brd.md` is a small BRD for trying the workflow.

@@ -228,7 +228,7 @@ def test_refine_story_proposes_without_saving(client):
 
 def test_duplicate_flag_ignores_excluded(client):
     pid = client.post("/api/projects", json={"name": "Dupes", "platform": "generic"}).json()["id"]
-    a = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall allow buyers to cancel open orders before shipment."}).json()
+    client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall allow buyers to cancel open orders before shipment."})
     b = client.post("/api/projects/%s/requirements" % pid, json={"statement": "Buyers must be able to cancel open orders before shipment."}).json()
     reqs = client.get("/api/projects/%s/requirements" % pid).json()
     assert all(any(i["code"] == "duplicate" for i in r["issues"]) for r in reqs)

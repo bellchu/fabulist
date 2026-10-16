@@ -1,7 +1,7 @@
 """LLM provider adapters for provider profiles managed in the admin dashboard."""
 import re
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 import httpx
 

@@ -5,7 +5,7 @@ drive requirement variants. Generic starting point; meant to be extended.
 """
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 DEFAULT_CLASSES: List[Dict] = [
     {"name": "Prescription pharmaceuticals", "attributes": ["serialized", "lot_expiry_tracked", "rx_required"],
