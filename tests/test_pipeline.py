@@ -177,3 +177,19 @@ def test_quality_false_positives_from_real_run():
     noted = {"statement": "The system shall require UDI capture for returned implants.", "type": "rule", "notes": "Credit rules TBD"}
     assert "incomplete" in {i["code"] for i in quality.requirement_issues(noted)}
     assert "TBD" in pipeline.REQ_SYSTEM
+
+
+def test_gherkin_steps_and_feature_zip():
+    import io
+    import zipfile
+    assert exporters.gherkin_steps("Given I am signed in as a buyer, when I submit an order, then I see a confirmation.") == [
+        "Given I am signed in as a buyer", "When I submit an order", "Then I see a confirmation"]
+    assert exporters.gherkin_steps("Order status becomes Cancelled") == ["Then order status becomes Cancelled"]
+    story = _story(title="Cancel orders", acceptance_criteria=["Given an open order, when I cancel it, then it is cancelled.", "Audit entry is written"],
+                   variant_criteria=[{"scope": "Controlled substances", "criteria": "Cancellation is reported to DEA."}])
+    data, mime = exporters.gherkin_zip([story], [REQ])
+    z = zipfile.ZipFile(io.BytesIO(data))
+    assert mime == "application/zip" and z.namelist() == ["features/e-f.feature"]
+    text = z.read("features/e-f.feature").decode()
+    assert "Feature: E / F" in text and "@US-001 @REQ-001 @DEA" in text and "    When I cancel it" in text
+    assert "Then audit entry is written" in text and 'Given the product is in class "Controlled substances"' in text

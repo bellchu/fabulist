@@ -33,7 +33,8 @@ IDs → human review → epics, features and stories → requirements traceabili
 6. **Audit trail**: every manual edit, review decision, deletion, sync and AI run is recorded
    with who, when and field-level changes.
 7. **Export**: a stakeholder HTML report (preview in the browser, print to PDF), Excel (stories, requirements, RTM sheets), Jira CSV, Azure DevOps CSV,
-   Markdown, CSV and JSON, or push directly to **Jira**, **Azure DevOps** or **GitHub Issues**,
+   Markdown, CSV, JSON and Gherkin `.feature` test scenarios (tagged with story, requirement and
+   compliance IDs for end-to-end traceability), or push directly to **Jira**, **Azure DevOps** or **GitHub Issues**,
    or to any system through a signed JSON **webhook**. Tracker pushes are
    idempotent: epics and stories are linked to their issues, so pushing again updates them
    instead of creating duplicates.

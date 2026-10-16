@@ -3,6 +3,8 @@ import csv
 import html
 import io
 import json
+import re
+import zipfile
 from typing import Any, Callable, Dict, List, Tuple
 
 from openpyxl import Workbook
@@ -209,6 +211,49 @@ def html_report(stories: List[Item], reqs: List[Item], title: str = "Product bac
     return "".join(out).encode("utf-8"), "text/html"
 
 
+_STEP = re.compile(r"\b(given|when|then|and|but)\b", re.I)
+
+
+def gherkin_steps(criterion: str) -> List[str]:
+    """Split 'Given x, when y, then z' (or a single 'Then z') into Gherkin steps."""
+    text = criterion.strip().rstrip(".")
+    starts = [m.start() for m in _STEP.finditer(text) if m.start() == 0 or text[m.start() - 1] in " ,;"]
+    if not starts or starts[0] != 0:
+        return ["Then " + text[0].lower() + text[1:]] if text else []
+    parts = [text[a:b].strip(" ,;") for a, b in zip(starts, starts[1:] + [len(text)])]
+    return [p[0].upper() + p[1:] for p in parts if p]
+
+
+def _tag(value: str) -> str:
+    return "@" + re.sub(r"[^\w.-]+", "-", value.strip()).strip("-")
+
+
+def gherkin_zip(stories: List[Item], reqs: List[Item]) -> Output:
+    """One .feature file per story feature; one scenario per acceptance criterion, tagged for traceability."""
+    by_feature: Dict[str, List[Item]] = {}
+    for s in stories:
+        by_feature.setdefault("%s / %s" % (s.get("epic", "General"), s.get("feature", "General")), []).append(s)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, items in sorted(by_feature.items()):
+            lines = ["Feature: %s" % name, ""]
+            for s in items:
+                tags = [_tag(s["key"])] + [_tag(r) for r in s.get("requirement_ids", [])] + [_tag(c) for c in s.get("compliance_tags", [])]
+                lines += ["  # %s" % s.get("narrative", "")]
+                for i, ac in enumerate(s.get("acceptance_criteria") or [], 1):
+                    steps = gherkin_steps(ac)
+                    if not steps:
+                        continue
+                    lines += ["  %s" % " ".join(tags), "  Scenario: %s: %s (%d)" % (s["key"], s["title"], i)]
+                    lines += ["    " + st for st in steps] + [""]
+                for v in s.get("variant_criteria") or []:
+                    lines += ["  %s %s" % (" ".join(tags), _tag("variant")), "  Scenario: %s: %s [%s]" % (s["key"], s["title"], v["scope"]),
+                              "    Given the product is in class \"%s\"" % v["scope"], "    Then " + v["criteria"].rstrip(".")[0].lower() + v["criteria"].rstrip(".")[1:], ""]
+            fname = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "feature"
+            z.writestr("features/%s.feature" % fname, "\n".join(lines).rstrip() + "\n")
+    return buf.getvalue(), "application/zip"
+
+
 # key -> (function, file extension, label, description)
 EXPORTERS: Dict[str, Tuple[Callable[[List[Item], List[Item]], Output], str, str, str]] = {
     "html": (html_report, "html", "Stakeholder report (HTML)", "Readable backlog with coverage summary; open in a browser and print to PDF."),
@@ -216,6 +261,7 @@ EXPORTERS: Dict[str, Tuple[Callable[[List[Item], List[Item]], Output], str, str,
     "jira-csv": (jira_csv, "csv", "Jira import (CSV)", "For Jira's external system CSV import, with an Epic Link column."),
     "azure-csv": (azure_csv, "csv", "Azure DevOps import (CSV)", "Work items for Azure Boards CSV import."),
     "md": (markdown, "md", "Markdown", "Readable backlog for Confluence, wikis or pull requests."),
+    "gherkin": (gherkin_zip, "zip", "Test scenarios (Gherkin)", "Feature files from acceptance criteria, tagged with story, requirement and compliance IDs."),
     "stories-csv": (stories_csv, "csv", "Stories (CSV)", "Every story field, one row per story."),
     "requirements-csv": (requirements_csv, "csv", "Requirements (CSV)", "Extracted requirements with quality scores."),
     "rtm-csv": (rtm_csv, "csv", "Traceability matrix (CSV)", "Requirement-to-story coverage, with gaps flagged."),
