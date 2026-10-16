@@ -575,10 +575,24 @@ function storyMap(rows) {
     if (!cols.has(k)) cols.set(k, { epic: s.epic, feature: s.feature, items: [] });
     cols.get(k).items.push(s);
   }
+  // Drag a card onto another column to move the story to that epic/feature (saved and audited).
+  const dropTarget = (c) => ({
+    ondragover: (e) => { if (e.dataTransfer.types.includes("text/fabulist-story")) { e.preventDefault(); e.currentTarget.classList.add("drop"); } },
+    ondragleave: (e) => e.currentTarget.classList.remove("drop"),
+    ondrop: guard(async (e) => {
+      e.preventDefault(); e.currentTarget.classList.remove("drop");
+      const id = e.dataTransfer.getData("text/fabulist-story");
+      const story = rows.find((x) => x.id === id);
+      if (!story || (story.epic === c.epic && story.feature === c.feature)) return;
+      await api.patch(base() + "/stories/" + id, { epic: c.epic, feature: c.feature });
+      toast(story.key + " moved to " + c.feature, "ok"); rerender();
+    }),
+  });
   return h("div", { class: "map" }, [...cols.values()].map((c) =>
-    h("div", { class: "map-col" },
+    h("div", Object.assign({ class: "map-col", "aria-label": c.epic + " / " + c.feature }, dropTarget(c)),
       h("div", { class: "map-col-head" }, h("div", { class: "grow" }, h("div", { class: "map-feature", style: { padding: 0 } }, c.epic), h("h3", {}, c.feature)), badge(String(c.items.length))),
       c.items.sort((a, b) => order[a.priority] - order[b.priority]).map((s) => h("div", { class: "story-card " + s.status, tabindex: "0", role: "button", onclick: () => storyDrawer(s),
+        draggable: "true", ondragstart: (e) => { e.dataTransfer.setData("text/fabulist-story", s.id); e.dataTransfer.effectAllowed = "move"; },
         onkeydown: (e) => { if (e.key === "Enter") storyDrawer(s); } },
         h("div", { class: "row" }, h("span", { class: "dot " + s.priority, title: s.priority + " priority" }), h("span", { class: "k" }, s.key),
           h("span", { class: "right" }, s.status !== "draft" ? badge(s.status, statusTone[s.status]) : null)),

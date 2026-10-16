@@ -194,7 +194,9 @@ table.table { width: 100%; border-collapse: collapse; background: var(--surface)
 
 /* ---- story map ---- */
 .map { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 12px; align-items: flex-start; }
-.map-col { flex: 0 0 290px; background: var(--neutral-soft); border-radius: var(--radius); padding: 8px; }
+.map-col { flex: 0 0 290px; background: var(--neutral-soft); border-radius: var(--radius); padding: 8px; border: 2px dashed transparent; }
+.map-col.drop { border-color: var(--accent); background: var(--accent-soft); }
+.story-card[draggable="true"] { cursor: grab; }
 .map-col-head { padding: 4px 4px 8px; display: flex; align-items: center; gap: 8px; }
 .map-col-head h3 { font-size: 14px; }
 .map-feature { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3); font-weight: 700; padding: 6px 4px 4px; }
