@@ -3,11 +3,11 @@ import { h, mount, icon, api, guard, toast, modal, confirmBox, badge, statusTone
 import { state, setCrumbs } from "./main.js";
 
 const rerender = () => window.dispatchEvent(new HashChangeEvent("hashchange"));
-const TITLES = { overview: "Overview", providers: "AI providers", settings: "Generation settings", integrations: "Integrations", users: "Users & roles", activity: "Activity" };
+const TITLES = { overview: "Overview", providers: "AI providers", settings: "Generation settings", taxonomy: "Product taxonomy", integrations: "Integrations", users: "Users & roles", activity: "Activity" };
 
 export async function renderAdmin(content, tab) {
   setCrumbs({ href: "#/admin/overview", label: "Administration" }, TITLES[tab] || "Overview");
-  const view = { overview: viewOverview, providers: viewProviders, settings: viewSettings, integrations: viewIntegrations, users: viewUsers, activity: viewActivity }[tab] || viewOverview;
+  const view = { overview: viewOverview, providers: viewProviders, settings: viewSettings, taxonomy: viewTaxonomy, integrations: viewIntegrations, users: viewUsers, activity: viewActivity }[tab] || viewOverview;
   mount(content, h("div", { class: "tabs" }, Object.entries(TITLES).map(([id, label]) =>
     h("a", { class: "tab" + (id === tab ? " active" : ""), href: "#/admin/" + id }, label))));
   await view(content);
@@ -175,6 +175,90 @@ async function viewSettings(content) {
     card("Privacy", "Applies to text sent to external AI providers.",
       field("Mask personal identifiers", segmented([[true, "On"], [false, "Off"]], redact, (x) => (redact = x)),
         "Emails, phone numbers, SSNs and long account/card numbers are replaced with placeholders before leaving the cluster.")));
+}
+
+// ---- product taxonomy ---------------------------------------------------
+
+async function viewTaxonomy(content) {
+  const t = await api.get("/api/admin/taxonomy");
+  const fileInput = h("input", { type: "file", accept: ".csv,text/csv", class: "hidden" });
+  fileInput.addEventListener("change", guard(async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    const text = await file.text();
+    let mode = "merge";
+    modal({
+      title: "Import " + file.name, description: "Columns: name, attributes, keywords, description. Separate list values with ';'.",
+      body: field("Import mode", segmented([["merge", "Merge (add and update)"], ["replace", "Replace (remove classes not in file)"]], mode, (v) => (mode = v))),
+      actions: [{ label: "Import", kind: "btn-primary", onClick: async () => {
+        const r = await api.post("/api/admin/taxonomy/import", { csv: text, mode });
+        state.meta = null; toast(r.created + " created, " + r.updated + " updated, " + r.removed + " removed", "ok"); rerender();
+      } }],
+    });
+    fileInput.value = "";
+  }));
+  const q = h("input", { type: "search", class: "search", placeholder: "Search classes, attributes, keywords" });
+  const tableBox = h("div");
+  const render = () => {
+    const needle = q.value.toLowerCase();
+    const rows = t.classes.filter((c) => !needle || (c.name + " " + c.attributes.join(" ") + " " + c.keywords.join(" ")).toLowerCase().includes(needle));
+    tableBox.replaceChildren(h("div", { class: "card table-wrap" }, h("table", { class: "table" },
+      h("thead", {}, h("tr", {}, ["Product class", "Behaviour attributes", "Detection keywords", ""].map((x) => h("th", {}, x)))),
+      h("tbody", {}, rows.length ? rows.map((c) => h("tr", {},
+        h("td", {}, h("b", {}, c.name), c.description ? h("div", { class: "muted small" }, c.description) : null),
+        h("td", {}, h("div", { class: "row wrap" }, c.attributes.map((a) => badge(a, t.attribute_rules.some((r) => r.attribute === a) ? "accent" : "")))),
+        h("td", { class: "small" }, h("div", { class: "row wrap" }, c.keywords.slice(0, 8).map((k) => h("span", { class: "chip" }, k)),
+          c.keywords.length > 8 ? h("span", { class: "muted" }, "+" + (c.keywords.length - 8)) : null)),
+        h("td", { class: "nowrap", style: { textAlign: "right" } },
+          h("button", { class: "btn btn-sm btn-ghost", onclick: () => classDialog(c) }, "Edit"),
+          h("button", { class: "btn btn-sm btn-ghost btn-danger", "aria-label": "Delete " + c.name, onclick: guard(async () => {
+            if (!(await confirmBox("Delete product class '" + c.name + "'?", { danger: true, okLabel: "Delete" }))) return;
+            await api.del("/api/admin/taxonomy/classes/" + c.id); state.meta = null; rerender();
+          }) }, icon("trash")))))
+        : h("tr", {}, h("td", { colspan: "4", class: "muted", style: { textAlign: "center", padding: "24px" } }, "No classes match."))))));
+  };
+  q.addEventListener("input", render);
+
+  const attrs = [...new Set([...t.classes.flatMap((c) => c.attributes), ...t.attribute_rules.map((r) => r.attribute)])].sort();
+  const ruleInputs = Object.fromEntries(attrs.map((a) => [a, h("textarea", { rows: 2, value: (t.attribute_rules.find((r) => r.attribute === a) || {}).criteria || "",
+    placeholder: "Acceptance criterion added to stories for products with this attribute (optional)" })]));
+  const rulesCard = h("div", { class: "card", style: { marginTop: "16px" } },
+    h("div", { class: "card-head" }, h("div", { class: "grow" }, h("h3", {}, "Attribute rules"),
+      h("div", { class: "muted small" }, "When a story affects a product class, each of its attributes adds this criterion as a product variant.")),
+      h("button", { class: "btn btn-sm btn-primary", onclick: guard(async () => {
+        const rules = Object.fromEntries(Object.entries(ruleInputs).map(([a, el]) => [a, el.value]));
+        await api.put("/api/admin/taxonomy/rules", { rules }); toast("Attribute rules saved", "ok"); rerender();
+      }) }, "Save rules")),
+    h("div", { class: "card-body stack" }, attrs.map((a) => h("div", { class: "form-grid", style: { gridTemplateColumns: "200px 1fr" } },
+      h("div", {}, badge(a, "accent")), ruleInputs[a]))));
+
+  mount(content,
+    head("Product taxonomy", t.classes.length + " product classes. Keywords detect which classes a requirement affects; attributes drive product-specific acceptance criteria.",
+      h("div", { class: "row" }, h("a", { class: "btn", href: "/api/admin/taxonomy.csv" }, icon("download"), "Export CSV"),
+        h("button", { class: "btn", onclick: () => fileInput.click() }, icon("upload"), "Import CSV"),
+        h("button", { class: "btn btn-primary", onclick: () => classDialog(null) }, icon("plus"), "Add class"))),
+    fileInput, h("div", { class: "toolbar" }, q), tableBox, rulesCard);
+  render();
+}
+
+function classDialog(c) {
+  const isNew = !c;
+  c = c || { name: "", attributes: [], keywords: [], description: "" };
+  const name = h("input", { type: "text", value: c.name, placeholder: "e.g. Radiopharmaceuticals" });
+  const attributes = h("input", { type: "text", value: c.attributes.join("; "), placeholder: "cold_chain; serialized; lot_expiry_tracked" });
+  const keywords = h("textarea", { rows: 3, value: c.keywords.join("; "), placeholder: "Words or phrases that indicate this class, separated by ';'" });
+  const description = h("input", { type: "text", value: c.description });
+  modal({
+    title: isNew ? "Add product class" : "Edit " + c.name, wide: true,
+    body: h("div", { class: "stack" }, field("Name", name), field("Behaviour attributes", attributes, "Lowercase identifiers separated by ';'. Each can have an attribute rule."),
+      field("Detection keywords", keywords, "Case-insensitive substrings matched against requirement text."), field("Description", description)),
+    actions: [{ label: isNew ? "Add class" : "Save", kind: "btn-primary", onClick: async () => {
+      const body = { name: name.value, attributes: attributes.value, keywords: keywords.value, description: description.value };
+      if (isNew) await api.post("/api/admin/taxonomy/classes", body);
+      else await api.put("/api/admin/taxonomy/classes/" + c.id, body);
+      state.meta = null; toast("Product class saved", "ok"); rerender();
+    } }],
+  });
 }
 
 // ---- integrations -------------------------------------------------------

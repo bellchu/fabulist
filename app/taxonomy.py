@@ -3,9 +3,11 @@
 Product classes carry behaviour attributes (cold chain, serialization, ...) that
 drive requirement variants. Generic starting point; meant to be extended.
 """
-from typing import Dict, List
+import threading
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
-PRODUCT_CLASSES: List[Dict] = [
+DEFAULT_CLASSES: List[Dict] = [
     {"name": "Prescription pharmaceuticals", "attributes": ["serialized", "lot_expiry_tracked", "rx_required"],
      "keywords": ["prescription", "rx", "pharmaceutical", "drug", "generic", "brand"]},
     {"name": "Controlled substances", "attributes": ["controlled_substance", "serialized", "lot_expiry_tracked", "licensed_only"],
@@ -49,17 +51,12 @@ COMPLIANCE_AC: Dict[str, str] = {
 }
 
 
-def match_classes(text: str) -> List[str]:
-    t = text.lower()
-    return [c["name"] for c in PRODUCT_CLASSES if any(k in t for k in c["keywords"])]
-
-
 def match_compliance(text: str) -> List[str]:
     t = text.lower()
     return [tag for tag, kws in COMPLIANCE_KEYWORDS.items() if any(k in t for k in kws)]
 
 # Acceptance-criteria variants driven by product behaviour attributes.
-ATTRIBUTE_AC: Dict[str, str] = {
+DEFAULT_ATTRIBUTE_AC: Dict[str, str] = {
     "cold_chain": "Temperature excursions are captured and block allocation or shipment until dispositioned.",
     "controlled_substance": "Only licensed, authorized parties can order; quantities are checked against limits.",
     "serialized": "Product identifiers (GTIN, serial, lot, expiry) are captured at each custody change.",
@@ -71,13 +68,71 @@ ATTRIBUTE_AC: Dict[str, str] = {
 }
 
 
+# ---- live taxonomy (admin-managed, cached) ---------------------------------
+
+_cache: Dict[str, Any] = {"at": 0.0, "classes": None, "rules": None}
+_lock = threading.Lock()
+_TTL = 30.0
+
+
+def invalidate() -> None:
+    with _lock:
+        _cache["at"] = 0.0
+
+
+def _load() -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
+    from . import config, db  # local: keeps this module importable without a database
+
+    if not config.DATABASE_URL:
+        return DEFAULT_CLASSES, DEFAULT_ATTRIBUTE_AC
+    with _lock:
+        if _cache["classes"] is not None and time.monotonic() - _cache["at"] < _TTL:
+            return _cache["classes"], _cache["rules"]
+    classes = db.rows("SELECT id, name, attributes, keywords, description FROM product_classes ORDER BY name")
+    rules = {r["attribute"]: r["criteria"] for r in db.rows("SELECT attribute, criteria FROM attribute_rules")}
+    with _lock:
+        _cache.update(at=time.monotonic(), classes=classes, rules=rules)
+    return classes, rules
+
+
+def classes() -> List[Dict[str, Any]]:
+    return _load()[0]
+
+
+def attribute_rules() -> Dict[str, str]:
+    return _load()[1]
+
+
+def match_classes(text: str) -> List[str]:
+    t = text.lower()
+    return [c["name"] for c in classes() if any(k in t for k in c["keywords"])]
+
+
 def variant_criteria(class_names: List[str]) -> List[Dict[str, str]]:
+    rules = attribute_rules()
     out, seen = [], set()
-    for c in PRODUCT_CLASSES:
+    for c in classes():
         if c["name"] not in class_names:
             continue
         for attr in c["attributes"]:
-            if attr in ATTRIBUTE_AC and attr not in seen:
+            if attr in rules and attr not in seen:
                 seen.add(attr)
-                out.append({"scope": c["name"], "criteria": ATTRIBUTE_AC[attr]})
+                out.append({"scope": c["name"], "criteria": rules[attr]})
     return out
+
+
+def seed() -> None:
+    """First start: load the built-in medical-distribution taxonomy."""
+    import json
+
+    from . import db
+
+    with db.conn() as c:
+        if c.execute("SELECT 1 FROM product_classes LIMIT 1").fetchone() is None:
+            for d in DEFAULT_CLASSES:
+                c.execute("INSERT INTO product_classes (id, name, attributes, keywords, description, created) VALUES (%s,%s,%s,%s,'',%s)",
+                          (db.new_id(), d["name"], json.dumps(d["attributes"]), json.dumps(d["keywords"]), db.now()))
+        if c.execute("SELECT 1 FROM attribute_rules LIMIT 1").fetchone() is None:
+            for attr, criteria in DEFAULT_ATTRIBUTE_AC.items():
+                c.execute("INSERT INTO attribute_rules (attribute, criteria) VALUES (%s,%s)", (attr, criteria))
+    invalidate()

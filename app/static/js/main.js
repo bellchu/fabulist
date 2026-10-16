@@ -21,6 +21,7 @@ function shell(route) {
     navItem("#/admin/overview", "chart", "Overview", route[0] === "admin" && (route[1] || "overview") === "overview"),
     navItem("#/admin/providers", "cpu", "AI providers", route[0] === "admin" && route[1] === "providers"),
     navItem("#/admin/settings", "settings", "Generation settings", route[0] === "admin" && route[1] === "settings"),
+    navItem("#/admin/taxonomy", "list", "Product taxonomy", route[0] === "admin" && route[1] === "taxonomy"),
     navItem("#/admin/integrations", "link", "Integrations", route[0] === "admin" && route[1] === "integrations"),
     navItem("#/admin/users", "users", "Users & roles", route[0] === "admin" && route[1] === "users"),
     navItem("#/admin/activity", "activity", "Activity", route[0] === "admin" && route[1] === "activity")],

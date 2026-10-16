@@ -1,0 +1,7 @@
+name,attributes,keywords,description
+Radiopharmaceuticals,radioactive; short_half_life; licensed_only,radiopharm; isotope; tc-99m; nuclear medicine,Time-critical radioactive diagnostics and therapeutics
+Cytotoxic oncology drugs,hazardous; lot_expiry_tracked; rx_required,cytotoxic; chemotherapy; oncology; antineoplastic,Hazardous drugs requiring special handling
+Blood products and derivatives,cold_chain; lot_expiry_tracked; recall_sensitive,plasma; albumin; immunoglobulin; blood product,Plasma-derived therapies
+Ophthalmic devices,udi_tracked; sterile,ophthalmic; intraocular; contact lens,Eye-care devices and lenses
+Respiratory therapy equipment,serial_tracked; rental_or_service; returnable,ventilator; cpap; nebulizer; oxygen concentrator,Respiratory DME
+Wound care,lot_expiry_tracked; uom_hierarchy,wound; dressing; negative pressure,Advanced wound care supplies

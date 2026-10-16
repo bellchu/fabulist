@@ -39,6 +39,10 @@ IDs → human review → epics, features and stories → requirements traceabili
   browser.
 - **Generation settings**: temperature, output tokens, timeout, section size, run limits,
   retrieval depth, the embeddings provider and model, and personal-data masking.
+- **Product taxonomy**: product classes with behaviour attributes (cold chain, controlled,
+  serialized, ...) and detection keywords, plus attribute rules that become product-variant
+  acceptance criteria. Supports CSV import (merge or replace) and export; see
+  `samples/product-taxonomy-extension.csv`.
 - **Integrations**: Jira (Cloud with email and API token, or Data Center with a PAT) and Azure
   DevOps (organization URL and PAT), with a connection test and a default target project.
 - **Users & roles**: named accounts (scrypt-hashed passwords) with admin, analyst or viewer

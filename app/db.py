@@ -61,6 +61,10 @@ SCHEMA = [
          url TEXT NOT NULL, branch TEXT NOT NULL DEFAULT '', path_glob TEXT NOT NULL DEFAULT '*',
          token_enc TEXT, key_hint TEXT NOT NULL DEFAULT '', last_sync TEXT NOT NULL DEFAULT '',
          last_commit TEXT NOT NULL DEFAULT '', last_error TEXT NOT NULL DEFAULT '', created TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS product_classes (
+         id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, attributes JSONB NOT NULL DEFAULT '[]',
+         keywords JSONB NOT NULL DEFAULT '[]', description TEXT NOT NULL DEFAULT '', created TEXT NOT NULL)""",
+    "CREATE TABLE IF NOT EXISTS attribute_rules (attribute TEXT PRIMARY KEY, criteria TEXT NOT NULL)",
     """CREATE TABLE IF NOT EXISTS users (
          id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
          role TEXT NOT NULL, disabled BOOLEAN NOT NULL DEFAULT FALSE, created TEXT NOT NULL)""",

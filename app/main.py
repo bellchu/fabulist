@@ -26,6 +26,7 @@ CSRF_HEADER = "fabulist"
 async def lifespan(_app: FastAPI):
     db.init()
     settings.seed()
+    taxonomy.seed()
     # A restart kills in-process runs; don't leave them "running" forever.
     db.execute("UPDATE runs SET status='failed', error='Interrupted by server restart' WHERE status='running'")
     yield
@@ -137,7 +138,7 @@ def meta() -> Dict[str, Any]:
         "requirement_types": pipeline.REQ_TYPES,
         "priorities": pipeline.PRIORITIES,
         "points": pipeline.POINTS,
-        "product_classes": [c["name"] for c in taxonomy.PRODUCT_CLASSES],
+        "product_classes": [c["name"] for c in taxonomy.classes()],
         "compliance_tags": list(taxonomy.COMPLIANCE_KEYWORDS),
         "providers": [{"id": p["id"], "name": p["name"], "kind": p["kind"], "model": p["model"], "is_default": p["is_default"]}
                       for p in settings.list_providers()],

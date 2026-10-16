@@ -225,7 +225,7 @@ def _ask(profile: Dict[str, Any], opts: Dict[str, Any], system: str, prompt: str
 
 def _platform_context(platform: str) -> str:
     profile = PLATFORMS.get(platform, PLATFORMS["generic"])
-    classes = "; ".join("%s (%s)" % (c["name"], ", ".join(c["attributes"])) for c in taxonomy.PRODUCT_CLASSES)
+    classes = "; ".join("%s (%s)" % (c["name"], ", ".join(c["attributes"])) for c in taxonomy.classes())
     return "\n".join([
         "Target platform: %s. %s" % (profile["label"], profile["guidance"]),
         "Product classes and behaviour attributes: " + classes,
