@@ -1,12 +1,12 @@
 // App shell, routing and the projects home view.
-import { h, mount, icon, api, guard, modal, field, select, empty, badge, timeAgo, meter } from "./core.js";
+import { h, mount, icon, api, guard, modal, field, requireValue, select, empty, badge, timeAgo, meter } from "./core.js";
 import { renderProject } from "./project.js";
 import { renderAdmin } from "./admin.js";
 
 export const state = { meta: null, projects: [], me: null };
 
 function navItem(href, label, active, iconName) {
-  return h("a", { class: "nav-item" + (active ? " active" : ""), href }, iconName ? icon(iconName) : null, label);
+  return h("a", { class: "nav-item" + (active ? " active" : ""), href, "aria-current": active ? "page" : null }, iconName ? icon(iconName) : null, label);
 }
 
 function globalSearch() {
@@ -58,10 +58,32 @@ export async function refreshProjects() {
   state.projects = await api.get("/api/projects");
 }
 
+// Lives outside #app, which every route replaces.
+const busyBar = h("div", { class: "route-busy", hidden: true });
+document.body.prepend(busyBar);
+function setBusy(on) {
+  busyBar.hidden = !on;
+  document.getElementById("app").toggleAttribute("aria-busy", on);
+}
+
+// A selector for the focused control, so a re-render of the same view (e.g. after saving in
+// a drawer) can put keyboard focus back instead of dropping it to the top of the page.
+function focusKey() {
+  const el = document.activeElement;
+  if (!el || !el.closest("#app")) return null;
+  const label = el.getAttribute("aria-label");
+  if (label) return el.tagName.toLowerCase() + '[aria-label="' + CSS.escape(label) + '"]';
+  // Generated field ids (fld-N) change on every render, so they can't identify a control.
+  return el.id && !el.id.startsWith("fld-") ? "#" + CSS.escape(el.id) : null;
+}
+
 let rendering = 0;
 async function route() {
   const ticket = ++rendering;
+  const hash = location.hash, refocus = focusKey();
   const parts = location.hash.replace(/^#\/?/, "").split("/");
+  // Delayed so fast navigations don't flash; slow ones show the old page is being replaced.
+  const busy = setTimeout(() => setBusy(true), 150);
   try {
     if (!state.meta) [state.meta, state.me] = await Promise.all([api.get("/api/meta"), api.get("/api/me")]);
     await refreshProjects();
@@ -70,8 +92,18 @@ async function route() {
     if (parts[0] === "p" && parts[1]) await renderProject(content, parts[1], parts[2] || "overview");
     else if (parts[0] === "admin" && state.me.role === "admin") await renderAdmin(content, parts[1] || "overview");
     else renderHome(content);
+    if (refocus && ticket === rendering && location.hash === hash && (!document.activeElement || document.activeElement === document.body)) {
+      document.querySelector("#app " + refocus)?.focus();
+    }
   } catch (e) {
-    document.getElementById("app").replaceChildren(h("div", { class: "content" }, h("div", { class: "callout error" }, e.message)));
+    if (ticket !== rendering) return;
+    const error = h("div", { class: "callout error", role: "alert" }, h("span", { class: "grow" }, e.message), h("a", { href: "#/" }, "Back to projects"));
+    // Keep the header and navigation when we can, so a stale link isn't a dead end.
+    if (state.me) mount(shell(parts), error);
+    else document.getElementById("app").replaceChildren(h("div", { class: "content" }, error));
+  } finally {
+    clearTimeout(busy);
+    if (ticket === rendering) setBusy(false);
   }
 }
 
@@ -80,7 +112,7 @@ function renderHome(content) {
   const head = h("div", { class: "page-head" },
     h("span", { class: "object-icon project" }, icon("folder")),
     h("div", { class: "grow" }, h("div", { class: "object-label" }, "Projects"), h("h1", {}, "All projects"),
-      h("p", { class: "sub" }, state.projects.length + " items · Each project turns BRDs into reviewed requirements and a traceable backlog.")),
+      h("p", { class: "sub" }, state.projects.length + (state.projects.length === 1 ? " item" : " items") + " · Each project turns BRDs into reviewed requirements and a traceable backlog.")),
     h("button", { class: "btn btn-primary", onclick: newProjectDialog }, "New"));
   if (!state.projects.length) {
     mount(content, head, h("div", { class: "card" }, empty({
@@ -112,7 +144,7 @@ export function newProjectDialog() {
     title: "New project", description: "The target platform shapes story vocabulary (objects, modules, integrations).",
     body: h("div", { class: "stack" }, field("Project name", name), field("Target platform", platform), field("Description", desc)),
     actions: [{ label: "Create project", kind: "btn-primary", onClick: async () => {
-      if (!name.value.trim()) throw new Error("Project name is required");
+      requireValue(name, "Project name is required");
       const p = await api.post("/api/projects", { name: name.value, platform: platform.value, description: desc.value });
       location.hash = "#/p/" + p.id + "/sources";
     } }],

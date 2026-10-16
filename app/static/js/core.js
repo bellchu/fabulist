@@ -228,8 +228,46 @@ export const duration = (ms) => (!ms ? "–" : ms < 1000 ? ms + " ms" : (ms / 10
 
 // ---- form helpers -------------------------------------------------------
 
+let fieldSeq = 0;
 export function field(label, control, hint, cls = "") {
-  return h("div", { class: "field " + cls }, h("label", {}, label), control, hint ? h("div", { class: "hint" }, hint) : null);
+  const labelEl = h("label", {}, label);
+  const hintEl = hint ? h("div", { class: "hint" }, hint) : null;
+  // Tie the label (and hint) to the control so it has an accessible name and clicking the label
+  // focuses it. Wrappers holding exactly one form control are linked to that control.
+  const CONTROLS = "input, select, textarea";
+  const inner = control instanceof Element ? (control.matches(CONTROLS) ? [control] : control.querySelectorAll(CONTROLS)) : [];
+  if (inner.length === 1) {
+    const el = inner[0];
+    if (!el.id) el.id = "fld-" + ++fieldSeq;
+    labelEl.htmlFor = el.id;
+    if (hintEl) { hintEl.id = el.id + "-hint"; el.setAttribute("aria-describedby", hintEl.id); }
+  } else if (control instanceof Element) {  // e.g. a segmented button group: label it as a group
+    labelEl.id = "fld-" + ++fieldSeq + "-label";
+    if (!control.getAttribute("role")) control.setAttribute("role", "group");
+    control.setAttribute("aria-labelledby", labelEl.id);
+  }
+  return h("div", { class: "field " + cls }, labelEl, control, hintEl);
+}
+
+// Inline required-field validation: marks the control invalid, shows the message beside it
+// (read with the control), focuses it, and throws so guard() also announces it.
+export function requireValue(control, message) {
+  if (control.value.trim()) return;
+  const errId = (control.id || (control.id = "fld-" + ++fieldSeq)) + "-err";
+  let err = document.getElementById(errId);
+  if (!err) {
+    err = h("div", { class: "field-error", id: errId }, message);
+    control.after(err);
+    control.setAttribute("aria-describedby", [control.getAttribute("aria-describedby"), errId].filter(Boolean).join(" "));
+    control.addEventListener("input", () => {
+      control.removeAttribute("aria-invalid"); err.remove();
+      control.setAttribute("aria-describedby", control.getAttribute("aria-describedby").replace(errId, "").trim());
+      if (!control.getAttribute("aria-describedby")) control.removeAttribute("aria-describedby");
+    }, { once: true });
+  }
+  control.setAttribute("aria-invalid", "true");
+  control.focus();
+  throw new Error(message);
 }
 
 export function select(options, value, attrs = {}) {

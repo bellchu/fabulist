@@ -8,8 +8,8 @@ const TITLES = { overview: "Overview", providers: "AI providers", settings: "Gen
 export async function renderAdmin(content, tab) {
   setCrumbs({ href: "#/admin/overview", label: "Administration" }, TITLES[tab] || "Overview");
   const view = { overview: viewOverview, providers: viewProviders, settings: viewSettings, taxonomy: viewTaxonomy, integrations: viewIntegrations, users: viewUsers, activity: viewActivity }[tab] || viewOverview;
-  mount(content, h("div", { class: "tabs" }, Object.entries(TITLES).map(([id, label]) =>
-    h("a", { class: "tab" + (id === tab ? " active" : ""), href: "#/admin/" + id }, label))));
+  mount(content, h("nav", { class: "tabs", "aria-label": "Setup sections" }, Object.entries(TITLES).map(([id, label]) =>
+    h("a", { class: "tab" + (id === tab ? " active" : ""), href: "#/admin/" + id, "aria-current": id === tab ? "page" : null }, label))));
   await view(content);
 }
 
@@ -242,7 +242,7 @@ async function viewTaxonomy(content) {
     });
     fileInput.value = "";
   }));
-  const q = h("input", { type: "search", class: "search", placeholder: "Search classes, attributes, keywords" });
+  const q = h("input", { type: "search", class: "search", placeholder: "Search classes, attributes, keywords", "aria-label": "Search product taxonomy" });
   const tableBox = h("div");
   const render = () => {
     const needle = q.value.toLowerCase();
@@ -266,7 +266,7 @@ async function viewTaxonomy(content) {
 
   const attrs = [...new Set([...t.classes.flatMap((c) => c.attributes), ...t.attribute_rules.map((r) => r.attribute)])].sort();
   const ruleInputs = Object.fromEntries(attrs.map((a) => [a, h("textarea", { rows: 2, value: (t.attribute_rules.find((r) => r.attribute === a) || {}).criteria || "",
-    placeholder: "Acceptance criterion added to stories for products with this attribute (optional)" })]));
+    placeholder: "Acceptance criterion added to stories for products with this attribute (optional)", "aria-label": "Acceptance criterion for " + a })]));
   const rulesCard = h("div", { class: "card", style: { marginTop: "16px" } },
     h("div", { class: "card-head" }, h("div", { class: "grow" }, h("h3", {}, "Attribute rules"),
       h("div", { class: "muted small" }, "When a story affects a product class, each of its attributes adds this criterion as a product variant.")),
