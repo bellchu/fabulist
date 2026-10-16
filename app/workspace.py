@@ -541,6 +541,60 @@ def refine_story(pid: str, sid: str, body: RefineIn):
             "before_score": story["quality_score"], "provider": profile["name"], "usage": usage}
 
 
+class EstimateIn(BaseModel):
+    scope: str = "unestimated"
+
+
+@router.post("/api/projects/{pid}/stories/estimate")
+def estimate_stories(pid: str, body: EstimateIn):
+    """Propose story points; nothing is saved until the client applies them."""
+    _project(pid)
+    stories = [s for s in _stories(pid) if s["status"] != "rejected" and (body.scope == "all" or not s.get("story_points"))]
+    if not stories:
+        return {"proposals": []}
+    profile = settings.default_provider()
+    usage = {"in": 0, "out": 0}
+    try:
+        proposals = pipeline.estimate_stories(stories, profile, settings.get_settings(), usage)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(502, "Estimation failed: %s" % exc)
+    finally:
+        metrics.inc("fabulist_llm_tokens_total", usage["in"], direction="in")
+        metrics.inc("fabulist_llm_tokens_total", usage["out"], direction="out")
+    by_key = {s["key"]: s for s in stories}
+    return {"proposals": [dict(p, id=by_key[p["key"]]["id"], title=by_key[p["key"]]["title"], current=by_key[p["key"]].get("story_points"))
+                          for p in proposals]}
+
+
+class PointsIn(BaseModel):
+    points: Dict[str, int]
+
+
+@router.post("/api/projects/{pid}/stories/points")
+def apply_points(pid: str, body: PointsIn, request: Request):
+    """Set story points for several stories at once (audited)."""
+    _project(pid)
+    if any(p not in pipeline.POINTS for p in body.points.values()):
+        raise HTTPException(400, "Points must be one of %s" % pipeline.POINTS)
+    who = history.actor(request)
+    updated = 0
+    with db.conn() as c:
+        rows = c.execute("SELECT id, seq, data FROM stories WHERE project_id=%s AND id = ANY(%s) FOR UPDATE",
+                         (pid, list(body.points))).fetchall()
+        for r in rows:
+            data = dict(r["data"])
+            new = body.points[r["id"]]
+            if data.get("story_points") == new:
+                continue
+            old = data.get("story_points")
+            data["story_points"] = new
+            c.execute("UPDATE stories SET data=%s WHERE id=%s", (json.dumps(data), r["id"]))
+            history.record(c, pid, "story", r["id"], history.item_key("story", r["seq"]), "estimated", who, data.get("title", ""),
+                           {"story_points": {"from": old, "to": new}})
+            updated += 1
+    return {"updated": updated}
+
+
 @router.delete("/api/projects/{pid}/stories/{sid}", status_code=204)
 def delete_story(pid: str, sid: str, request: Request):
     _delete_item("stories", pid, sid, history.actor(request))

@@ -545,3 +545,53 @@ def answer_question(question: str, passages: List[Dict[str, Any]], profile: Dict
     usage["in"] += u["in"]
     usage["out"] += u["out"]
     return text.strip()
+
+
+# ---- relative estimation --------------------------------------------------
+
+ESTIMATE_SYSTEM = (
+    "You are an experienced agile team estimating user stories in relative story points (1, 2, 3, 5, 8, 13). "
+    "Consider complexity, uncertainty, integrations, compliance and data work; 13 means the story should be split. "
+    "Reply with ONLY a JSON array: [{\"key\": story key, \"points\": 1|2|3|5|8|13, \"rationale\": short reason}]."
+)
+
+
+def mock_estimate(story: Dict[str, Any]) -> Tuple[int, str]:
+    size = len(story.get("acceptance_criteria") or []) + 2 * len(story.get("variant_criteria") or [])
+    size += 2 * len(story.get("compliance_tags") or []) + 3 * len(story.get("open_questions") or [])
+    size += 2 if re.search(r"\b(integrat|interface|api|edi|sync|migrat)", (story.get("title", "") + story.get("narrative", "")).lower()) else 0
+    points = next(p for p, limit in ((1, 1), (2, 3), (3, 5), (5, 8), (8, 12), (13, 10 ** 6)) if size <= limit)
+    parts = ["%d acceptance criteria" % len(story.get("acceptance_criteria") or [])]
+    if story.get("variant_criteria"):
+        parts.append("%d product variants" % len(story["variant_criteria"]))
+    if story.get("compliance_tags"):
+        parts.append("compliance: " + ", ".join(story["compliance_tags"]))
+    if story.get("open_questions"):
+        parts.append("open questions add uncertainty")
+    return points, "; ".join(parts)
+
+
+def estimate_stories(stories: List[Dict[str, Any]], profile: Dict[str, Any], opts: Dict[str, Any],
+                     usage: Usage) -> List[Dict[str, Any]]:
+    if profile["kind"] == "mock":
+        out = []
+        for s in stories:
+            pts, why = mock_estimate(s)
+            out.append({"key": s["key"], "points": pts, "rationale": why})
+        return out
+    by_key = {s["key"]: s for s in stories}
+    out: List[Dict[str, Any]] = []
+    for i in range(0, len(stories), 30):
+        batch = stories[i:i + 30]
+        lines = "\n\n".join("%s: %s\n%s\nAcceptance criteria: %d; variants: %d; compliance: %s" % (
+            s["key"], s["title"], s.get("narrative", ""), len(s.get("acceptance_criteria") or []),
+            len(s.get("variant_criteria") or []), ", ".join(s.get("compliance_tags") or []) or "none") for s in batch)
+        for r in _ask(profile, opts, ESTIMATE_SYSTEM, "Stories:\n\n" + lines, usage):
+            if isinstance(r, dict) and r.get("key") in by_key:
+                try:
+                    pts = int(r.get("points"))
+                except (TypeError, ValueError):
+                    continue
+                if pts in POINTS:
+                    out.append({"key": r["key"], "points": pts, "rationale": str(r.get("rationale") or "")[:300]})
+    return out

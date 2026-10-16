@@ -25,7 +25,8 @@ IDs → human review → epics, features and stories → requirements traceabili
    acceptance criteria, product-class variants and compliance tags. Each story is scored
    against INVEST and a Definition of Ready, and is shown on a story map or a list.
    **Refine with AI** proposes an improved version of a story that fixes its issues; you
-   review a before/after comparison before applying it. Long AI runs can be cancelled.
+   review a before/after comparison before applying it. **Estimate with AI** proposes relative
+   story points with a rationale for each unestimated story. Long AI runs can be cancelled.
 4. **Traceability**: a requirement-to-story matrix with coverage, gaps and orphan stories.
 5. **Baselines**: freeze numbered, read-only snapshots of the backlog (for example a release
    sign-off), export them exactly as they were, and compare them with later versions.

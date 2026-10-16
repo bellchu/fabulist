@@ -151,3 +151,11 @@ def test_answer_question_via_llm_uses_numbered_passages(monkeypatch):
     out = pipeline.answer_question("How long for returns?", passages, OPENAI, OPTS, {"in": 0, "out": 0})
     prompt = fake.calls[0]["json"]["messages"][1]["content"]
     assert out == "Customers have 30 days [1]." and "[1] (r.md)" in prompt and "ops@example.com" not in prompt
+
+
+def test_estimate_via_llm_filters_invalid(monkeypatch):
+    reply = json.dumps([{"key": "US-001", "points": 5, "rationale": "integration"}, {"key": "US-001", "points": 4},
+                        {"key": "US-999", "points": 3}, {"key": "US-002", "points": "x"}])
+    monkeypatch.setattr(llm.httpx, "post", Fake([chat(reply)]))
+    stories = [{"key": "US-001", "title": "A", "acceptance_criteria": []}, {"key": "US-002", "title": "B", "acceptance_criteria": []}]
+    assert pipeline.estimate_stories(stories, OPENAI, OPTS, {"in": 0, "out": 0}) == [{"key": "US-001", "points": 5, "rationale": "integration"}]

@@ -323,3 +323,21 @@ def test_baselines_snapshot_compare_and_export(client):
     assert x.status_code == 200 and "base-v1-json" in x.headers["content-disposition"]
     assert [s["title"] for s in x.json()["stories"]] == ["Export invoices"], "baseline keeps the frozen version"
     assert client.get("/api/projects/%s/history?limit=1" % pid).json()[0]["action"] == "baselined"
+
+
+def test_estimate_and_apply_points(client):
+    pid = client.post("/api/projects", json={"name": "Est", "platform": "generic"}).json()["id"]
+    small = client.post("/api/projects/%s/stories" % pid, json={"title": "Show order status", "acceptance_criteria": ["Given an order, then its status shows."]}).json()
+    big = client.post("/api/projects/%s/stories" % pid, json={"title": "Integrate EDI 850 orders", "acceptance_criteria": ["a", "b", "c", "d"],
+                                                              "compliance_tags": ["DSCSA"], "variant_criteria": [{"scope": "Biologics", "criteria": "cold chain"}]}).json()
+    client.post("/api/projects/%s/stories" % pid, json={"title": "Already sized", "story_points": 2})
+    props = client.post("/api/projects/%s/stories/estimate" % pid, json={}).json()["proposals"]
+    assert {p["key"] for p in props} == {small["key"], big["key"]}, "only unestimated stories by default"
+    by = {p["key"]: p for p in props}
+    assert by[small["key"]]["points"] < by[big["key"]]["points"] and "acceptance criteria" in by[big["key"]]["rationale"]
+    assert client.get("/api/projects/%s/stories" % pid).json()[0].get("story_points") is None, "estimate must not save"
+    r = client.post("/api/projects/%s/stories/points" % pid, json={"points": {p["id"]: p["points"] for p in props}}).json()
+    assert r == {"updated": 2}
+    assert client.post("/api/projects/%s/stories/points" % pid, json={"points": {small["id"]: 4}}).status_code == 400
+    assert client.get("/api/projects/%s/history?limit=1" % pid).json()[0]["action"] == "estimated"
+    assert len(client.post("/api/projects/%s/stories/estimate" % pid, json={"scope": "all"}).json()["proposals"]) == 3
