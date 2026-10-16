@@ -356,11 +356,12 @@ function integrationDialog(data, it) {
     jira: ["https://your-site.atlassian.net", "Project key, e.g. OTC", "Creates an Epic per story-map epic and Stories under it (parent link). Needs permission to create issues in the project."],
     azure: ["https://dev.azure.com/your-organization", "Project name, e.g. Order to Cash", "Creates Epic and User Story work items with acceptance criteria, priority, story points and a parent link. Use a PAT with Work Items (read & write)."],
     github: ["https://api.github.com", "owner/repository", "Creates an issue per epic (label 'epic') and per story with an acceptance-criteria checklist. Use a fine-grained token with Issues: read & write."],
+    confluence: ["https://your-site.atlassian.net/wiki", "Space key, e.g. OTC", "Publishes the backlog (stories, acceptance criteria, traceability) as one page per project; later publishes add a new page version. Cloud: Atlassian email + API token; Data Center: personal access token."],
     webhook: ["https://hooks.example.com/fabulist", "Optional label sent with each delivery", "POSTs the backlog as JSON (event backlog.pushed). If a secret is set, requests carry X-Fabulist-Signature: sha256=HMAC of the body."],
   };
   const sync = () => {
     const [url, tgt, hint] = HINTS[kind.value] || HINTS.jira;
-    userField.classList.toggle("hidden", kind.value !== "jira");
+    userField.classList.toggle("hidden", kind.value !== "jira" && kind.value !== "confluence");
     baseUrl.placeholder = url; target.placeholder = tgt; hints.textContent = hint;
     if (kind.value === "github" && !baseUrl.value) baseUrl.value = "https://api.github.com";
   };

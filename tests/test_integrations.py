@@ -160,3 +160,35 @@ def test_webhook_delivery_is_signed(client, monkeypatch):
     payload = json.loads(body)
     assert payload["event"] == "backlog.pushed" and len(payload["stories"]) == len(stories) and payload["project"]["name"] == "Push"
     assert headers["X-Fabulist-Signature"] == "sha256=" + hmac.new(b"s3cret", body, hashlib.sha256).hexdigest()
+
+
+
+def test_confluence_publish_creates_then_versions_page(client, monkeypatch):
+    calls = []
+    state = {"version": 1}
+
+    def fake(method, url, headers=None, json=None, timeout=None):
+        calls.append((method, url, json))
+        req = httpx.Request(method, url)
+        if url.endswith("/rest/api/space?limit=1"):
+            return httpx.Response(200, json={"results": [{"key": "OTC"}], "size": 1}, request=req)
+        if method == "GET" and "expand=version" in url:
+            return httpx.Response(200, json={"id": "777", "version": {"number": state["version"]}}, request=req)
+        if method in ("POST", "PUT"):
+            state["version"] += method == "PUT"
+            return httpx.Response(200, json={"id": "777", "_links": {"webui": "/spaces/OTC/pages/777"}}, request=req)
+        return httpx.Response(404, json={}, request=req)
+    monkeypatch.setattr(integrations.httpx, "request", fake)
+    conn = client.post("/api/admin/integrations", json={"kind": "confluence", "name": "Wiki", "base_url": "https://acme.atlassian.net/wiki",
+                                                         "username": "ana@example.com", "target": "OTC", "token": "t"}).json()
+    assert client.post("/api/admin/integrations/%s/test" % conn["id"]).json()["message"] == "Connected: 1 space(s) visible"
+    pid, stories = _project_with_stories(client)
+    r = client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"]}).json()
+    assert r["created"] == 1 and r["items"][0]["url"] == "https://acme.atlassian.net/wiki/spaces/OTC/pages/777"
+    post = next(c for c in calls if c[0] == "POST")
+    body = post[2]["body"]["storage"]["value"]
+    assert post[2]["space"] == {"key": "OTC"} and "<h2>Traceability</h2>" in body and "<script" not in body
+    r2 = client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"]}).json()
+    assert r2["updated"] == 1 and r2["created"] == 0
+    put = next(c for c in calls if c[0] == "PUT")
+    assert put[2]["version"] == {"number": 2} and put[2]["id"] == "777"

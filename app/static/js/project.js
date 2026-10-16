@@ -588,7 +588,12 @@ function storyMap(rows) {
       toast(story.key + " moved to " + c.feature, "ok"); rerender();
     }),
   });
-  return h("div", { class: "map" }, [...cols.values()].map((c) =>
+  // Columns follow the BRD's section order (via requirements), so moving a card never reshuffles them.
+  const sectionOrder = new Map();
+  (ctx.reqs || []).forEach((r, i) => { const k = r.epic + "\u0000" + r.section; if (!sectionOrder.has(k)) sectionOrder.set(k, i); });
+  const colOrder = (c) => (sectionOrder.has(c.epic + "\u0000" + c.feature) ? sectionOrder.get(c.epic + "\u0000" + c.feature) : 1e6);
+  const ordered = [...cols.values()].sort((a, b) => colOrder(a) - colOrder(b) || a.epic.localeCompare(b.epic) || a.feature.localeCompare(b.feature));
+  return h("div", { class: "map" }, ordered.map((c) =>
     h("div", Object.assign({ class: "map-col", "aria-label": c.epic + " / " + c.feature }, dropTarget(c)),
       h("div", { class: "map-col-head" }, h("div", { class: "grow" }, h("div", { class: "map-feature", style: { padding: 0 } }, c.epic), h("h3", {}, c.feature)), badge(String(c.items.length))),
       c.items.sort((a, b) => order[a.priority] - order[b.priority]).map((s) => h("div", { class: "story-card " + s.status, tabindex: "0", role: "button", onclick: () => storyDrawer(s),
@@ -834,7 +839,7 @@ async function pushCard() {
   const { integrations } = await api.get("/api/integrations");
   const card = h("div", { class: "card", style: { marginTop: "16px" } },
     h("div", { class: "card-head" }, h("div", { class: "grow" }, h("h3", {}, "Push to issue tracker"),
-      h("div", { class: "muted small" }, "Creates epics and stories in Jira or Azure DevOps. Pushing again updates the same issues."))));
+      h("div", { class: "muted small" }, "Jira, Azure DevOps or GitHub issues, a Confluence page, or a webhook. Pushing again updates the same items."))));
   if (!integrations.length) {
     card.append(h("div", { class: "card-body muted small" }, "No tracker connected. An administrator can add Jira or Azure DevOps under ",
       h("a", { href: "#/admin/integrations" }, "Admin → Integrations"), "."));

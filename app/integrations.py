@@ -16,7 +16,7 @@ from . import db, settings
 
 router = APIRouter()
 KINDS = {"jira": "Jira (Cloud or Data Center)", "azure": "Azure DevOps Boards", "github": "GitHub Issues",
-         "webhook": "Webhook (JSON POST)"}
+         "confluence": "Confluence page (Cloud or Data Center)", "webhook": "Webhook (JSON POST)"}
 _URL = re.compile(r"^https://[A-Za-z0-9.-]+(:\d{1,5})?(/[\w.~%@+-]+)*/?$")
 
 
@@ -237,7 +237,50 @@ class Webhook:
         return {"created": len(stories), "updated": 0, "failed": [], "items": []}
 
 
-TRACKERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {"jira": Jira, "azure": Azure, "github": GitHub, "webhook": Webhook}
+class Confluence:
+    """Publishes the backlog as one page per project in a space; later publishes add a new page version."""
+
+    def __init__(self, conn: Dict[str, Any], token: str):
+        self.base = conn["base_url"].rstrip("/")  # Cloud: https://<site>.atlassian.net/wiki
+        auth = ("%s:%s" % (conn["username"], token)) if conn["username"] else None
+        self.headers = {"Authorization": "Basic " + base64.b64encode(auth.encode()).decode()} if auth else {"Authorization": "Bearer " + token}
+
+    def test(self) -> str:
+        data = _request("GET", self.base + "/rest/api/space?limit=1", self.headers)
+        return "Connected: %d space(s) visible" % int(data.get("size", len(data.get("results", []))))
+
+    def publish(self, space: str, title: str, body: str, page_id: Optional[str]) -> Tuple[str, str, bool]:
+        content = {"type": "page", "title": title[:255], "space": {"key": space},
+                   "body": {"storage": {"value": body, "representation": "storage"}}}
+        if page_id:
+            current = _request("GET", "%s/rest/api/content/%s?expand=version" % (self.base, page_id), self.headers)
+            content.update(id=page_id, version={"number": int(current["version"]["number"]) + 1})
+            data = _request("PUT", "%s/rest/api/content/%s" % (self.base, page_id), self.headers, content)
+            created = False
+        else:
+            data = _request("POST", self.base + "/rest/api/content", self.headers, content)
+            created = True
+        link = self.base + ((data.get("_links") or {}).get("webui") or "/pages/viewpage.action?pageId=%s" % data["id"])
+        return str(data["id"]), link, created
+
+
+def publish_page(project_id: str, conn: Dict[str, Any], space: str, title: str, body: str) -> Dict[str, Any]:
+    client = client_for(conn)
+    row = db.one("SELECT external_key FROM external_links WHERE integration_id=%s AND target=%s AND item_type='page' AND item_ref=%s",
+                 (conn["id"], space, project_id))
+    try:
+        page_id, url, created = client.publish(space, title, body, row["external_key"] if row else None)
+    except TrackerError as exc:
+        return {"created": 0, "updated": 0, "failed": [{"item": "Page: " + title, "error": str(exc)}], "items": []}
+    db.execute("INSERT INTO external_links (id, project_id, integration_id, target, item_type, item_ref, external_key, external_url, updated) "
+               "VALUES (%s,%s,%s,%s,'page',%s,%s,%s,%s) ON CONFLICT (integration_id, target, item_type, item_ref) "
+               "DO UPDATE SET external_key=EXCLUDED.external_key, external_url=EXCLUDED.external_url, updated=EXCLUDED.updated",
+               (db.new_id(), project_id, conn["id"], space, project_id, page_id, url, db.now()))
+    return {"created": int(created), "updated": int(not created), "failed": [], "items": [{"page": title, "url": url}]}
+
+
+TRACKERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {"jira": Jira, "azure": Azure, "github": GitHub,
+                                                            "confluence": Confluence, "webhook": Webhook}
 
 
 def client_for(conn: Dict[str, Any]) -> Any:

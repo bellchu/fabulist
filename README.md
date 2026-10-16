@@ -36,7 +36,7 @@ IDs → human review → epics, features and stories → requirements traceabili
    with who, when and field-level changes.
 8. **Export**: a stakeholder HTML report (preview in the browser, print to PDF), Excel (stories, requirements, RTM sheets), Jira CSV, Azure DevOps CSV,
    Markdown, CSV, JSON and Gherkin `.feature` test scenarios (tagged with story, requirement and
-   compliance IDs for end-to-end traceability), or push directly to **Jira**, **Azure DevOps** or **GitHub Issues**,
+   compliance IDs for end-to-end traceability), or push directly to **Jira**, **Azure DevOps** or **GitHub Issues**, publish a **Confluence** page,
    or to any system through a signed JSON **webhook**. Tracker pushes are
    idempotent: epics and stories are linked to their issues, so pushing again updates them
    instead of creating duplicates.
@@ -55,7 +55,7 @@ IDs → human review → epics, features and stories → requirements traceabili
   acceptance criteria. Supports CSV import (merge or replace) and export; see
   `samples/product-taxonomy-extension.csv`.
 - **Integrations**: Jira (Cloud with email and API token, or Data Center with a PAT), Azure
-  DevOps (organization URL and PAT), GitHub Issues (fine-grained token) and webhooks (optional
+  DevOps (organization URL and PAT), GitHub Issues (fine-grained token), Confluence (space key; one versioned page per project) and webhooks (optional
   HMAC secret), each with a connection test and a default target.
 - **Users & roles**: named accounts (scrypt-hashed passwords) with admin, analyst or viewer
   roles enforced on the server. The deployment's bootstrap account is a break-glass admin.

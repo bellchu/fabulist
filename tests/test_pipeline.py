@@ -193,3 +193,8 @@ def test_gherkin_steps_and_feature_zip():
     text = z.read("features/e-f.feature").decode()
     assert "Feature: E / F" in text and "@US-001 @REQ-001 @DEA" in text and "    When I cancel it" in text
     assert "Then audit entry is written" in text and 'Given the product is in class "Controlled substances"' in text
+
+
+def test_confluence_storage_escapes_content():
+    body = exporters.confluence_storage([_story(title="<b>x</b> & y")], [REQ, dict(REQ, key="REQ-002")], "Demo")
+    assert "&lt;b&gt;x&lt;/b&gt; &amp; y" in body and "<strong>Gap</strong>" in body and "50%" in body

@@ -649,7 +649,13 @@ def push_to_tracker(pid: str, body: PushIn, request: Request):
     if len(stories) > 500:
         raise HTTPException(400, "Push at most 500 stories at a time")
     try:
-        result = integrations.push(pid, conn, target, stories)
+        if conn["kind"] == "confluence":
+            project = _project(pid)
+            reqs = [r for r in _requirements(pid) if r["status"] == "approved" or (body.scope == "all" and r["status"] == "draft")]
+            result = integrations.publish_page(pid, conn, target, project["name"] + " backlog",
+                                               exporters.confluence_storage(stories, reqs, project["name"]))
+        else:
+            result = integrations.push(pid, conn, target, stories)
     except (integrations.TrackerError, settings.SettingsError) as exc:
         raise HTTPException(400, str(exc))
     for outcome in ("created", "updated"):
