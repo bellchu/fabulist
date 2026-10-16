@@ -22,6 +22,9 @@ spec:
             - name: pip-audit
               image: IMAGE
               imagePullPolicy: IfNotPresent
+              env:
+                - name: HOME  # the app user has no home directory; pip-audit needs a writable cache
+                  value: /tmp
               command: ["/bin/sh", "-c"]
               # Audit into a throwaway target dir so the app's environment is only read, never changed.
               args:
