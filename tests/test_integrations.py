@@ -114,3 +114,49 @@ def test_push_requires_target_token_and_stories(client, monkeypatch):
     assert client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"]}).status_code == 400  # no target
     assert client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"], "target": "FAB"}).status_code == 400  # no stories
     assert client.post("/api/admin/integrations/%s/test" % conn["id"]).json()["ok"] is False  # no token
+
+
+def test_github_push_and_update(client, monkeypatch):
+    calls = []
+
+    def fake(method, url, headers=None, json=None, timeout=None):
+        calls.append((method, url, json))
+        req = httpx.Request(method, url)
+        if url.endswith("/user"):
+            return httpx.Response(200, json={"login": "octo"}, request=req)
+        n = int(url.rsplit("/", 1)[1]) if method == "PATCH" else len(calls)
+        return httpx.Response(201, json={"number": n, "html_url": "https://github.com/acme/brds/issues/%d" % n}, request=req)
+    monkeypatch.setattr(integrations.httpx, "request", fake)
+    conn = client.post("/api/admin/integrations", json={"kind": "github", "name": "GH", "base_url": "https://api.github.com",
+                                                         "target": "acme/brds", "token": "ghp_x"}).json()
+    assert client.post("/api/admin/integrations/%s/test" % conn["id"]).json()["message"] == "Signed in as octo"
+    pid, stories = _project_with_stories(client)
+    r = client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"]}).json()
+    assert r["created"] == 1 + len(stories) and not r["failed"]
+    story_call = next(c for c in calls if c[0] == "POST" and c[2]["title"] != "Epic: Orders")
+    assert "- [ ] Given" in story_call[2]["body"] and "Epic: #" in story_call[2]["body"]
+    r2 = client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"]}).json()
+    assert r2["updated"] == 1 + len(stories)
+    bad = client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"], "target": "not a repo"}).json()
+    assert len(bad["failed"]) == 1 + len(stories) and "owner/repository" in bad["failed"][0]["error"]
+
+
+def test_webhook_delivery_is_signed(client, monkeypatch):
+    import hashlib
+    import hmac
+    sent = []
+
+    def fake_post(url, content=None, headers=None, timeout=None):
+        sent.append((url, content, headers))
+        return httpx.Response(204, request=httpx.Request("POST", url))
+    monkeypatch.setattr(integrations.httpx, "post", fake_post)
+    conn = client.post("/api/admin/integrations", json={"kind": "webhook", "name": "Hook", "base_url": "https://hooks.example.com/fabulist",
+                                                         "token": "s3cret"}).json()
+    assert client.post("/api/admin/integrations/%s/test" % conn["id"]).json() == {"ok": True, "message": "Ping delivered"}
+    pid, stories = _project_with_stories(client)
+    r = client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"]}).json()
+    assert r["created"] == len(stories)
+    url, body, headers = sent[-1]
+    payload = json.loads(body)
+    assert payload["event"] == "backlog.pushed" and len(payload["stories"]) == len(stories) and payload["project"]["name"] == "Push"
+    assert headers["X-Fabulist-Signature"] == "sha256=" + hmac.new(b"s3cret", body, hashlib.sha256).hexdigest()

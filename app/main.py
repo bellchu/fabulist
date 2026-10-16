@@ -666,7 +666,7 @@ class PushIn(BaseModel):
 def push_to_tracker(pid: str, body: PushIn, request: Request):
     _project(pid)
     conn = integrations.get(body.integration_id)
-    target = (body.target or conn["target"]).strip()
+    target = (body.target or conn["target"]).strip() or ("default" if conn["kind"] == "webhook" else "")
     if not target:
         raise HTTPException(400, "Choose the target project (Jira project key or Azure DevOps project)")
     stories = [s for s in _stories(pid) if s["status"] == "approved" or (body.scope == "all" and s["status"] == "draft")]

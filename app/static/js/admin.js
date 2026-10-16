@@ -307,21 +307,24 @@ function integrationDialog(data, it) {
   const token = h("input", { type: "password", autocomplete: "new-password", placeholder: it.has_token ? "Saved (" + it.key_hint + "). Leave blank to keep." : "" });
   const userField = field("Account email", username, "Jira Cloud: your Atlassian email (with an API token). Data Center: leave blank and use a personal access token.");
   const hints = h("div", { class: "callout small" });
+  const HINTS = {
+    jira: ["https://your-site.atlassian.net", "Project key, e.g. OTC", "Creates an Epic per story-map epic and Stories under it (parent link). Needs permission to create issues in the project."],
+    azure: ["https://dev.azure.com/your-organization", "Project name, e.g. Order to Cash", "Creates Epic and User Story work items with acceptance criteria, priority, story points and a parent link. Use a PAT with Work Items (read & write)."],
+    github: ["https://api.github.com", "owner/repository", "Creates an issue per epic (label 'epic') and per story with an acceptance-criteria checklist. Use a fine-grained token with Issues: read & write."],
+    webhook: ["https://hooks.example.com/fabulist", "Optional label sent with each delivery", "POSTs the backlog as JSON (event backlog.pushed). If a secret is set, requests carry X-Fabulist-Signature: sha256=HMAC of the body."],
+  };
   const sync = () => {
-    const jira = kind.value === "jira";
-    userField.classList.toggle("hidden", !jira);
-    baseUrl.placeholder = jira ? "https://your-site.atlassian.net" : "https://dev.azure.com/your-organization";
-    target.placeholder = jira ? "Project key, e.g. OTC" : "Project name, e.g. Order to Cash";
-    hints.textContent = jira
-      ? "Creates an Epic per story-map epic and Stories under it (parent link). Needs permission to create issues in the project."
-      : "Creates Epic and User Story work items with acceptance criteria, priority, story points and a parent link. Use a PAT with Work Items (read & write).";
+    const [url, tgt, hint] = HINTS[kind.value] || HINTS.jira;
+    userField.classList.toggle("hidden", kind.value !== "jira");
+    baseUrl.placeholder = url; target.placeholder = tgt; hints.textContent = hint;
+    if (kind.value === "github" && !baseUrl.value) baseUrl.value = "https://api.github.com";
   };
   kind.addEventListener("change", sync);
   sync();
   modal({
     title: isNew ? "Add integration" : "Edit " + it.name, wide: true,
     body: h("div", { class: "stack" }, hints, h("div", { class: "form-grid" }, field("Type", kind), field("Display name", name)),
-      field("Base URL", baseUrl), userField, h("div", { class: "form-grid" }, field("Default target project", target), field("API token", token, "Stored encrypted; never shown again."))),
+      field("Base URL", baseUrl), userField, h("div", { class: "form-grid" }, field("Default target project", target), field("API token / secret", token, "Stored encrypted; never shown again. Optional for webhooks (used as the signing secret)."))),
     actions: [{ label: isNew ? "Add integration" : "Save", kind: "btn-primary", onClick: async () => {
       const body = { kind: kind.value, name: name.value, base_url: baseUrl.value, username: username.value, target: target.value, token: token.value };
       if (isNew) await api.post("/api/admin/integrations", body);

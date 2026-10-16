@@ -27,7 +27,8 @@ IDs → human review → epics, features and stories → requirements traceabili
 5. **Audit trail**: every manual edit, review decision, deletion, sync and AI run is recorded
    with who, when and field-level changes.
 6. **Export**: Excel (stories, requirements, RTM sheets), Jira CSV, Azure DevOps CSV,
-   Markdown, CSV and JSON, or push directly to **Jira** or **Azure DevOps**. Pushes are
+   Markdown, CSV and JSON, or push directly to **Jira**, **Azure DevOps** or **GitHub Issues**,
+   or to any system through a signed JSON **webhook**. Tracker pushes are
    idempotent: epics and stories are linked to their issues, so pushing again updates them
    instead of creating duplicates.
 
@@ -43,8 +44,9 @@ IDs → human review → epics, features and stories → requirements traceabili
   serialized, ...) and detection keywords, plus attribute rules that become product-variant
   acceptance criteria. Supports CSV import (merge or replace) and export; see
   `samples/product-taxonomy-extension.csv`.
-- **Integrations**: Jira (Cloud with email and API token, or Data Center with a PAT) and Azure
-  DevOps (organization URL and PAT), with a connection test and a default target project.
+- **Integrations**: Jira (Cloud with email and API token, or Data Center with a PAT), Azure
+  DevOps (organization URL and PAT), GitHub Issues (fine-grained token) and webhooks (optional
+  HMAC secret), each with a connection test and a default target.
 - **Users & roles**: named accounts (scrypt-hashed passwords) with admin, analyst or viewer
   roles enforced on the server. The deployment's bootstrap account is a break-glass admin.
 - **Overview / Activity**: usage, token counts, failure rate and a log of every run.

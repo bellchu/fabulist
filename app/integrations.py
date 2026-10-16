@@ -1,6 +1,9 @@
 """Push stories to issue trackers (Jira, Azure DevOps). Idempotent via external_links."""
 import base64
+import hashlib
+import hmac
 import html
+import json
 import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -12,7 +15,8 @@ from fastapi import APIRouter, Body, HTTPException
 from . import db, settings
 
 router = APIRouter()
-KINDS = {"jira": "Jira (Cloud or Data Center)", "azure": "Azure DevOps Boards"}
+KINDS = {"jira": "Jira (Cloud or Data Center)", "azure": "Azure DevOps Boards", "github": "GitHub Issues",
+         "webhook": "Webhook (JSON POST)"}
 _URL = re.compile(r"^https://[A-Za-z0-9.-]+(:\d{1,5})?(/[\w.~%@+-]+)*/?$")
 
 
@@ -157,12 +161,88 @@ class Azure:
         return self._save(target, "User Story", ops, existing)
 
 
-TRACKERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {"jira": Jira, "azure": Azure}
+class GitHub:
+    """Epics become issues labelled 'epic'; stories reference their epic issue in the body."""
+
+    def __init__(self, conn: Dict[str, Any], token: str):
+        self.base = (conn["base_url"] or "https://api.github.com").rstrip("/")
+        self.headers = {"Authorization": "Bearer " + token, "X-GitHub-Api-Version": "2022-11-28"}
+
+    def test(self) -> str:
+        me = _request("GET", self.base + "/user", self.headers)
+        return "Signed in as %s" % me.get("login", "user")
+
+    def _repo(self, target: str) -> str:
+        if not re.match(r"^[\w.-]+/[\w.-]+$", target):
+            raise TrackerError("GitHub target must be owner/repository")
+        return "%s/repos/%s/issues" % (self.base, target)
+
+    def _save(self, target: str, payload: Dict[str, Any], existing: Optional[str]) -> Tuple[str, str]:
+        if existing:
+            data = _request("PATCH", "%s/%s" % (self._repo(target), existing.lstrip("#")), self.headers, payload)
+        else:
+            data = _request("POST", self._repo(target), self.headers, payload)
+        return "#%d" % data["number"], data["html_url"]
+
+    def upsert_epic(self, target: str, name: str, existing: Optional[str]) -> Tuple[str, str]:
+        return self._save(target, {"title": "Epic: " + name[:240], "labels": ["epic", "fabulist"]}, existing)
+
+    def upsert_story(self, target: str, s: Dict[str, Any], epic_key: Optional[str], existing: Optional[str]) -> Tuple[str, str]:
+        body = [s["narrative"], "", "### Acceptance criteria"] + ["- [ ] " + a for a in s["acceptance_criteria"]]
+        if s.get("variant_criteria"):
+            body += ["", "### Product variants"] + ["- **%s**: %s" % (v["scope"], v["criteria"]) for v in s["variant_criteria"]]
+        if s.get("open_questions"):
+            body += ["", "### Open questions"] + ["- " + q for q in s["open_questions"]]
+        body += ["", "Epic: %s · Requirements: %s · Fabulist %s" % (epic_key or "-", ", ".join(s.get("requirement_ids") or []) or "none", s["key"])]
+        return self._save(target, {"title": s["title"][:250], "body": "\n".join(body), "labels": _labels(s)}, existing)
+
+
+class Webhook:
+    """Delivers the whole backlog as one signed JSON POST (X-Fabulist-Signature: sha256=<hmac>)."""
+
+    def __init__(self, conn: Dict[str, Any], token: str):
+        self.url, self.secret = conn["base_url"], token
+
+    def _post(self, payload: Dict[str, Any]) -> None:
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        headers = {"Content-Type": "application/json", "User-Agent": "Fabulist-Webhook"}
+        if self.secret:
+            headers["X-Fabulist-Signature"] = "sha256=" + hmac.new(self.secret.encode(), body, hashlib.sha256).hexdigest()
+        last = "unknown error"
+        for attempt in range(3):
+            try:
+                resp = httpx.post(self.url, content=body, headers=headers, timeout=30)
+            except httpx.HTTPError as exc:
+                last = "%s contacting webhook" % type(exc).__name__
+            else:
+                if resp.status_code < 400:
+                    return
+                if resp.status_code != 429 and resp.status_code < 500:
+                    raise TrackerError("webhook returned HTTP %d" % resp.status_code)
+                last = "webhook returned HTTP %d" % resp.status_code
+            if attempt < 2:
+                time.sleep(1.5 * (2 ** attempt))
+        raise TrackerError(last)
+
+    def test(self) -> str:
+        self._post({"event": "ping", "sent_at": db.now()})
+        return "Ping delivered"
+
+    def deliver(self, project_id: str, target: str, stories: List[Dict[str, Any]]) -> Dict[str, Any]:
+        project = db.one("SELECT id, name, platform FROM projects WHERE id=%s", (project_id,)) or {}
+        fields = ("key", "epic", "feature", "title", "persona", "narrative", "acceptance_criteria", "priority", "story_points",
+                  "requirement_ids", "labels", "product_scope", "variant_criteria", "compliance_tags", "open_questions", "status")
+        self._post({"event": "backlog.pushed", "sent_at": db.now(), "target": target, "project": project,
+                    "stories": [{k: s.get(k) for k in fields} for s in stories]})
+        return {"created": len(stories), "updated": 0, "failed": [], "items": []}
+
+
+TRACKERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {"jira": Jira, "azure": Azure, "github": GitHub, "webhook": Webhook}
 
 
 def client_for(conn: Dict[str, Any]) -> Any:
     token = settings.decrypt_secret(conn["token_enc"]) if conn["token_enc"] else ""
-    if not token:
+    if not token and conn["kind"] != "webhook":  # a webhook secret is optional
         raise TrackerError("No API token saved for this integration")
     return TRACKERS[conn["kind"]](conn, token)
 
@@ -170,6 +250,8 @@ def client_for(conn: Dict[str, Any]) -> Any:
 def push(project_id: str, conn: Dict[str, Any], target: str, stories: List[Dict[str, Any]],
          progress: Callable[[str], None] = lambda m: None) -> Dict[str, Any]:
     tracker = client_for(conn)
+    if hasattr(tracker, "deliver"):
+        return tracker.deliver(project_id, target, stories)
     links = {(r["item_type"], r["item_ref"]): r["external_key"] for r in db.rows(
         "SELECT item_type, item_ref, external_key FROM external_links WHERE integration_id=%s AND target=%s AND project_id=%s",
         (conn["id"], target, project_id))}
