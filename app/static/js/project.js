@@ -277,7 +277,7 @@ async function viewSources(body) {
 
   const pasteName = h("input", { type: "text", value: "pasted-brd.md" });
   const pasteText = h("textarea", { rows: 6, placeholder: "Paste BRD text. Markdown headings (#, ##) become epics and features." });
-  const q = h("input", { type: "search", placeholder: "e.g. cold chain returns" });
+  const q = h("input", { type: "search", placeholder: "Ask a question, e.g. What is the return window for med-surg supplies?" });
   const results = h("div", { class: "stack", style: { marginTop: "12px" } });
   const search = guard(async () => {
     if (!q.value.trim()) return;
@@ -287,7 +287,21 @@ async function viewSources(body) {
         h("div", { class: "small", style: { marginTop: "4px" } }, x.text.slice(0, 320) + (x.text.length > 320 ? "…" : "")))))
       : [h("p", { class: "muted" }, "No matching passages.")]));
   });
-  q.addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+  const passage = (x, n) => h("div", { class: "callout" },
+    h("div", { class: "grow" }, h("div", { class: "row small" }, n ? h("b", {}, "[" + n + "]") : null, h("b", {}, x.filename),
+      h("span", { class: "muted right" }, "match " + Math.round(x.score * 100) + "%")),
+      h("div", { class: "small", style: { marginTop: "4px" } }, x.text.slice(0, 320) + (x.text.length > 320 ? "…" : ""))));
+  const ask = guard(async () => {
+    if (q.value.trim().length < 3) return;
+    results.replaceChildren(h("div", { class: "muted" }, "Reading the BRDs…"));
+    const r = await api.post(base() + "/ask", { question: q.value });
+    results.replaceChildren(
+      h("div", { class: "callout info" }, icon("sparkles"), h("div", { class: "grow" }, h("div", { class: "small muted" }, "Answer · " + r.provider),
+        h("div", { style: { whiteSpace: "pre-wrap", marginTop: "4px" } }, r.answer))),
+      r.citations.length ? h("div", { class: "section-title" }, "Sources") : null,
+      ...r.citations.map((c) => passage(c, c.n)));
+  });
+  q.addEventListener("keydown", (e) => { if (e.key === "Enter") ask(); });
 
   mount(body, 
     h("div", { class: "grid grid-2", style: { marginBottom: "16px" } },
@@ -319,8 +333,10 @@ async function viewSources(body) {
               await api.del(base() + "/documents/" + d.id); rerender();
             }) }, "Remove")))))))
         : empty({ iconName: "file", title: "No BRDs yet", text: "Upload or paste at least one business requirements document." })),
-    h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Search BRDs"), h("span", { class: "muted small" }, "Semantic search over indexed passages")),
-      h("div", { class: "card-body" }, h("div", { class: "row" }, q, h("button", { class: "btn", onclick: search }, icon("search"), "Search")), results)));
+    h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Ask the BRDs"),
+      h("span", { class: "muted small" }, "Answers come only from retrieved BRD passages, with numbered citations")),
+      h("div", { class: "card-body" }, h("div", { class: "row" }, q, h("button", { class: "btn btn-primary", onclick: ask }, icon("sparkles"), "Ask"),
+        h("button", { class: "btn", onclick: search }, icon("search"), "Find passages")), results)));
 }
 
 function historySection(itemId) {

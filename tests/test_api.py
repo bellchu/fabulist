@@ -287,3 +287,13 @@ def test_provider_model_list_endpoint(client, monkeypatch):
     assert calls[-1] == {"Authorization": "Bearer sk-saved"}, "blank key falls back to the saved key"
     assert client.post("/api/admin/providers/models", json={"kind": "mock", "base_url": "x"}).status_code == 400
     assert client.post("/api/admin/providers/models", json={"kind": "openai", "base_url": ""}).status_code == 400
+
+
+def test_ask_brds_with_citations(client):
+    pid = client.post("/api/projects", json={"name": "Ask", "platform": "generic"}).json()["id"]
+    assert "No indexed" in client.post("/api/projects/%s/ask" % pid, json={"question": "What about returns?"}).json()["answer"]
+    client.post("/api/projects/%s/documents/text" % pid, json={"name": "returns.md", "text":
+        "# Returns\nCustomers may return non-expired med-surg supplies within 30 days.\n\nRecalled lots must be quarantined within 4 hours."})
+    r = client.post("/api/projects/%s/ask" % pid, json={"question": "How many days do customers have to return supplies?"}).json()
+    assert "30 days" in r["answer"] and "[1]" in r["answer"] and r["citations"][0]["filename"] == "returns.md"
+    assert client.post("/api/projects/%s/ask" % pid, json={"question": "x"}).status_code == 422

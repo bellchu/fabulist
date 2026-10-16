@@ -192,6 +192,30 @@ def search_documents(pid: str, body: SearchIn):
     return embeddings.search(pid, body.query, body.k)
 
 
+class AskIn(BaseModel):
+    question: str = Field(min_length=3, max_length=1000)
+    provider_id: Optional[str] = None
+
+
+@router.post("/api/projects/{pid}/ask")
+def ask_brds(pid: str, body: AskIn):
+    """Answer a question from the project's BRDs using retrieved passages, with citations."""
+    _project(pid)
+    passages = embeddings.search(pid, body.question, 6)
+    profile = settings.get_provider(body.provider_id) if body.provider_id else settings.default_provider()
+    usage = {"in": 0, "out": 0}
+    try:
+        answer = pipeline.answer_question(body.question, passages, profile, settings.get_settings(), usage)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(502, "Could not answer: %s" % exc)
+    finally:
+        metrics.inc("fabulist_llm_tokens_total", usage["in"], direction="in")
+        metrics.inc("fabulist_llm_tokens_total", usage["out"], direction="out")
+    return {"answer": answer, "provider": profile["name"],
+            "citations": [{"n": n, "filename": p["filename"], "text": p["text"][:600], "score": round(float(p["score"]), 3)}
+                          for n, p in enumerate(passages, 1)]}
+
+
 # ---- runs ----------------------------------------------------------------
 
 class RunCancelled(Exception):

@@ -13,7 +13,8 @@ IDs → human review → epics, features and stories → requirements traceabili
 1. **Sources**: upload PDF, Word, Excel, CSV, Markdown or text BRDs, paste text, or connect a Git repository
    (HTTPS, optional read-only token, path filters). Repository sync records the commit SHA and
    adds, updates or removes documents as files change. Passages are embedded into
-   Postgres/pgvector for semantic search and retrieval-augmented generation.
+   Postgres/pgvector for semantic search and retrieval-augmented generation. **Ask the BRDs**
+   answers questions from retrieved passages only, with numbered citations.
 2. **Requirements**: the AI engine extracts atomic requirements (business, functional,
    non-functional, constraint, rule), keeping BRD IDs and source references. Each one is
    checked against ISO/IEC/IEEE 29148 quality characteristics: ambiguous terms, TBDs, weak

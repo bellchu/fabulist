@@ -142,3 +142,12 @@ def test_list_models_openai_and_anthropic(monkeypatch):
     with pytest.raises(llm.LLMError, match="invalid key"):
         llm.list_models("openai", "https://bad.example/v1", "k")
     assert llm.list_models("mock", "", "") == []
+
+
+def test_answer_question_via_llm_uses_numbered_passages(monkeypatch):
+    fake = Fake([chat("Customers have 30 days [1].")])
+    monkeypatch.setattr(llm.httpx, "post", fake)
+    passages = [{"filename": "r.md", "text": "Returns within 30 days. Contact ops@example.com."}]
+    out = pipeline.answer_question("How long for returns?", passages, OPENAI, OPTS, {"in": 0, "out": 0})
+    prompt = fake.calls[0]["json"]["messages"][1]["content"]
+    assert out == "Customers have 30 days [1]." and "[1] (r.md)" in prompt and "ops@example.com" not in prompt

@@ -498,3 +498,50 @@ def refine_requirement(req: Dict[str, Any], issues: List[Dict[str, str]], platfo
     if not out:
         raise ValueError("The AI provider returned no usable requirement")
     return out
+
+
+# ---- question answering over BRDs (RAG) ----------------------------------
+
+ASK_SYSTEM = (
+    "You answer questions about business requirements documents. Use ONLY the numbered passages provided. "
+    "Cite every claim with the passage number in square brackets, e.g. [2]. If the passages do not contain the "
+    "answer, say that the BRDs do not cover it and suggest what to ask the business. Be concise."
+)
+
+
+def _sentences(text: str) -> List[str]:
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", text) if len(s.strip()) > 20]
+
+
+def mock_answer(question: str, passages: List[Dict[str, Any]]) -> str:
+    """Offline: quote the sentences that best overlap the question, with citations."""
+    q = set(re.findall(r"[a-z0-9]{3,}", question.lower()))
+    scored = []
+    for n, p in enumerate(passages, 1):
+        for sent in _sentences(p["text"]):
+            overlap = len(q & set(re.findall(r"[a-z0-9]{3,}", sent.lower())))
+            if overlap:
+                scored.append((overlap, n, sent))
+    if not scored:
+        return "The BRDs don't appear to cover this. Consider confirming it with the business owner."
+    scored.sort(key=lambda x: -x[0])
+    best = scored[0][0]
+    # Keep only sentences nearly as relevant as the best match, so the answer stays on topic.
+    keep = [x for x in scored if x[0] >= max(2, best * 0.7)] or scored[:1]
+    return " ".join("%s [%d]" % (sent.rstrip("."), n) + "." for _, n, sent in keep[:3])
+
+
+def answer_question(question: str, passages: List[Dict[str, Any]], profile: Dict[str, Any], opts: Dict[str, Any],
+                    usage: Usage) -> str:
+    if not passages:
+        return "No indexed BRD passages yet. Add documents on the Sources tab first."
+    if profile["kind"] == "mock":
+        return mock_answer(question, passages)
+    context = "\n\n".join("[%d] (%s)\n%s" % (n, p["filename"], p["text"][:1500]) for n, p in enumerate(passages, 1))
+    prompt = "Passages:\n%s\n\nQuestion: %s" % (context, question)
+    if opts.get("redact_pii", True):
+        prompt = llm.redact(prompt)
+    text, u = llm.complete(profile, ASK_SYSTEM, prompt, dict(opts, max_output_tokens=min(int(opts.get("max_output_tokens", 1500)), 1500)))
+    usage["in"] += u["in"]
+    usage["out"] += u["out"]
+    return text.strip()
