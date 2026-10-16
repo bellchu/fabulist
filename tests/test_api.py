@@ -143,6 +143,7 @@ def test_change_history_is_recorded(client, monkeypatch):
 
 def test_repository_sync_lifecycle(client, tmp_path, monkeypatch):
     from app import repos
+    monkeypatch.setattr(repos, "_resolve", lambda host: ["140.82.112.3"])
     work = tmp_path / "work"
     (work / "brd").mkdir(parents=True)
     (work / "brd" / "orders.md").write_text("# Orders\nThe system shall allow buyers to place orders online.")

@@ -6,6 +6,24 @@ import pytest
 from app import repos
 
 
+@pytest.fixture(autouse=True)
+def public_dns(monkeypatch):
+    monkeypatch.setattr(repos, "_resolve", lambda host: ["140.82.112.3"])
+
+
+def test_private_hosts_are_refused(monkeypatch):
+    from app import config
+    for host in ("https://localhost/x.git", "https://git.fabulist.svc/x.git", "https://kubernetes.default.svc.cluster.local/x.git"):
+        with pytest.raises(repos.RepoError, match="internal"):
+            repos.validate(host, "", "*")
+    for addr in ("10.1.2.3", "127.0.0.1", "169.254.169.254", "192.168.1.5", "::1"):
+        monkeypatch.setattr(repos, "_resolve", lambda host, a=addr: [a])
+        with pytest.raises(repos.RepoError, match="private"):
+            repos.validate("https://git.corp.example/x.git", "", "*")
+    monkeypatch.setattr(config, "ALLOW_PRIVATE_REPO_HOSTS", True)
+    repos.validate("https://git.corp.example/x.git", "", "*")
+
+
 def test_validate_accepts_https_only():
     repos.validate("https://github.com/org/brds.git", "main", "docs/*.md")
     for url in ("http://github.com/org/x.git", "file:///etc", "git@github.com:org/x.git", "ssh://host/x", "https://host", "https://h/x y"):

@@ -20,6 +20,15 @@ STATUSES = {"draft", "approved", "excluded"}
 STORY_STATUSES = {"draft", "approved", "rejected"}
 STAGES = {"requirements", "stories"}
 CSRF_HEADER = "fabulist"
+SECURITY_HEADERS = {
+    # All scripts and styles are served from /static; inline style properties are set via CSSOM only.
+    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+                               "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+}
 
 
 @asynccontextmanager
@@ -70,9 +79,21 @@ async def auth_and_guards(request: Request, call_next):
         return await call_next(request)
     if users.auth_enabled() and path != "/healthz":
         creds = users.parse_basic(request.headers.get("authorization", ""))
+        # Throttle per username and per client address (Cloudflare/Traefik forward the real IP).
+        client_ip = (request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+                     or (request.client.host if request.client else ""))
+        keys = ["ip:" + client_ip] + (["user:" + creds[0]] if creds else [])
+        if any(users.throttled(k) for k in keys):
+            return JSONResponse({"detail": "Too many failed sign-in attempts; try again in a few minutes"}, status_code=429,
+                                headers={"Retry-After": str(int(users.FAIL_WINDOW))})
         role = await run_in_threadpool(users.authenticate, *creds) if creds else None
         if not role:
+            if creds:
+                for k in keys:
+                    users.record_failure(k)
+                log.warning("failed sign-in", extra={"fields": {"user": creds[0][:80], "ip": client_ip}})
             return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="Fabulist"'})
+        users.clear_failures("user:" + creds[0])
         request.state.user, request.state.role = creds[0], role
         if path.startswith("/api/") and not users.allowed(role, request.method, path):
             return JSONResponse({"detail": "Your role (%s) does not allow this action" % role}, status_code=403)
@@ -85,6 +106,7 @@ async def auth_and_guards(request: Request, call_next):
     if path.startswith("/static/"):
         # Revalidate via ETag so a deploy is picked up without a hard refresh.
         response.headers["Cache-Control"] = "no-cache"
+    response.headers.update(SECURITY_HEADERS)
     return response
 
 

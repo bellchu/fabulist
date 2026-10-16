@@ -11,7 +11,7 @@ import re
 import secrets
 import threading
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from fastapi import APIRouter, Body, HTTPException, Request
@@ -67,6 +67,36 @@ def authenticate(username: str, password: str) -> Optional[str]:
             _cache.clear()
         _cache[key] = (now, role)
     return role
+
+
+# ---- brute-force throttling ------------------------------------------------
+
+FAIL_WINDOW = 300.0
+FAIL_LIMIT = 10
+_failures: Dict[str, List[float]] = {}
+
+
+def throttled(key: str) -> bool:
+    now = time.monotonic()
+    with _cache_lock:
+        recent = [t for t in _failures.get(key, []) if now - t < FAIL_WINDOW]
+        if recent:
+            _failures[key] = recent
+        else:
+            _failures.pop(key, None)
+        return len(recent) >= FAIL_LIMIT
+
+
+def record_failure(key: str) -> None:
+    with _cache_lock:
+        if len(_failures) > 10000:
+            _failures.clear()
+        _failures.setdefault(key, []).append(time.monotonic())
+
+
+def clear_failures(key: str) -> None:
+    with _cache_lock:
+        _failures.pop(key, None)
 
 
 def forget(username: str) -> None:

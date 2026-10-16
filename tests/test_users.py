@@ -65,3 +65,20 @@ def test_user_admin_lifecycle(secured):
     assert c.get("/api/projects", auth=("ana", "new-password-123")).status_code == 200
     assert c.delete("/api/admin/users/%s" % ana["id"], auth=ROOT).status_code == 204
     assert c.get("/api/projects", auth=("ana", "new-password-123")).status_code == 401
+
+
+def test_failed_logins_are_throttled(secured, monkeypatch):
+    monkeypatch.setattr(users, "FAIL_LIMIT", 3)
+    users._failures.clear()
+    for _ in range(3):
+        assert secured.get("/api/projects", auth=("ana", "wrong-password!!")).status_code == 401
+    r = secured.get("/api/projects", auth=creds("ana"))
+    assert r.status_code == 429 and r.headers["Retry-After"]
+    users._failures.clear()
+    assert secured.get("/api/projects", auth=creds("ana")).status_code == 200
+
+
+def test_security_headers(client):
+    r = client.get("/")
+    assert "frame-ancestors 'none'" in r.headers["Content-Security-Policy"] and r.headers["X-Content-Type-Options"] == "nosniff"
+    assert client.get("/api/meta").headers["X-Frame-Options"] == "DENY"

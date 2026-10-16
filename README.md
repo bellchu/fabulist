@@ -61,6 +61,8 @@ IDs → human review → epics, features and stories → requirements traceabili
 | `EMBED_DIM` | pgvector column size; must match the embeddings model | `256` |
 | `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | optional provider seeded on first start | - |
 | `MAX_UPLOAD_MB`, `CHUNK_CHARS`, `MAX_CHUNKS_PER_RUN`, `RAG_TOP_K` | limits and defaults | 10, 6000, 200, 3 |
+| `METRICS_TOKEN` | bearer token for `/metrics` (disabled when unset) | - |
+| `ALLOW_PRIVATE_REPO_HOSTS` | allow repository URLs on private networks (internal Git) | `false` |
 
 Everything else is managed in the admin dashboard.
 
@@ -92,6 +94,18 @@ kubectl -n fabulist exec -i postgres-0 -- pg_restore -U fabulist -d fabulist --c
 
 The script generates the database password, the Basic-auth password and the encryption key
 in-cluster on first deploy. They are never stored in the repository.
+
+## Security
+
+- HTTP Basic sign-in with named users and roles. Repeated failed sign-ins are throttled per
+  user and per client address.
+- Mutating API calls require an `X-Requested-With` header (CSRF), and responses carry a strict
+  Content-Security-Policy, `X-Frame-Options: DENY`, `nosniff` and `no-referrer`.
+- API keys and tokens are encrypted at rest and never returned to the browser.
+- Repository URLs must be HTTPS and must not resolve to private or cluster addresses (SSRF
+  guard). Git runs with file and ssh protocols disabled, and tokens are passed via the
+  environment, not process arguments.
+- Personal identifiers are masked before text is sent to external AI providers (configurable).
 
 ## Operations
 

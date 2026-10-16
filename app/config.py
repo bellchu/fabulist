@@ -43,3 +43,7 @@ BASIC_PASSWORD = os.environ.get("APP_BASIC_PASSWORD", "")
 
 # Bearer token Prometheus uses to scrape /metrics; the endpoint is disabled when unset.
 METRICS_TOKEN = os.environ.get("METRICS_TOKEN", "")
+
+# Repository URLs that resolve to private/internal addresses are refused unless this is set
+# (e.g. for an internal Git server). Guards against server-side request forgery.
+ALLOW_PRIVATE_REPO_HOSTS = os.environ.get("ALLOW_PRIVATE_REPO_HOSTS", "").lower() in ("1", "true", "yes")

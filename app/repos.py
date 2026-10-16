@@ -2,12 +2,15 @@
 import base64
 import fnmatch
 import hashlib
+import ipaddress
 import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import tempfile
+from urllib.parse import urlsplit
 from typing import Any, Dict, List, Tuple
 
 from fastapi import APIRouter, Body, HTTPException, Request
@@ -26,6 +29,26 @@ class RepoError(ValueError):
     pass
 
 
+def _resolve(host: str) -> List[str]:
+    try:
+        return sorted({info[4][0] for info in socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)})
+    except socket.gaierror:
+        raise RepoError("Cannot resolve repository host %s" % host)
+
+
+def check_public_host(url: str) -> None:
+    """Refuse hosts that are internal to the cluster or private networks (SSRF guard)."""
+    if config.ALLOW_PRIVATE_REPO_HOSTS:
+        return
+    host = (urlsplit(url).hostname or "").lower()
+    if host == "localhost" or host.endswith((".svc", ".cluster.local", ".internal", ".local", ".localhost")):
+        raise RepoError("Repository host %s is internal; ask an administrator to allow private hosts" % host)
+    for addr in _resolve(host):
+        ip = ipaddress.ip_address(addr)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            raise RepoError("Repository host %s resolves to a private address; ask an administrator to allow private hosts" % host)
+
+
 def validate(url: str, branch: str, path_glob: str) -> None:
     if not _URL.match(url):
         raise RepoError("Repository URL must be an https:// Git URL, e.g. https://github.com/org/brds.git")
@@ -33,6 +56,7 @@ def validate(url: str, branch: str, path_glob: str) -> None:
         raise RepoError("Invalid branch name")
     if len(path_glob) > 300 or any(p.strip().startswith("/") for p in path_glob.split(",")):
         raise RepoError("Path filter must be relative, e.g. docs/brd/*.md")
+    check_public_host(url)
 
 
 def _git_env(token: str) -> Dict[str, str]:
@@ -118,6 +142,7 @@ def sync(repo: Dict[str, Any], who: str) -> Dict[str, Any]:
     tmp = tempfile.mkdtemp(prefix="fabulist-repo-")
     try:
         try:
+            check_public_host(repo["url"])  # DNS may have changed since the repository was added
             sha = fetch(repo["url"], repo["branch"], token, os.path.join(tmp, "src"))
             found, skipped = collect(os.path.join(tmp, "src"), repo["path_glob"])
         except RepoError as exc:
