@@ -10,7 +10,7 @@ serialized, kits, devices...).
 The app follows common business-analysis practice: BRD → atomic requirements with stable
 IDs → human review → epics, features and stories → requirements traceability matrix (RTM).
 
-1. **Sources**: upload PDF / DOCX / MD / TXT BRDs, paste text, or connect a Git repository
+1. **Sources**: upload PDF, Word, Excel, CSV, Markdown or text BRDs, paste text, or connect a Git repository
    (HTTPS, optional read-only token, path filters). Repository sync records the commit SHA and
    adds, updates or removes documents as files change. Passages are embedded into
    Postgres/pgvector for semantic search and retrieval-augmented generation.

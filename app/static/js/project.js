@@ -209,7 +209,7 @@ function repoDialog() {
   const token = h("input", { type: "password", autocomplete: "new-password", placeholder: "Only for private repositories" });
   modal({
     title: "Connect BRD repository", wide: true,
-    description: "Fabulist shallow-clones the repository over HTTPS on each sync and imports matching PDF, DOCX, Markdown and text files.",
+    description: "Fabulist shallow-clones the repository over HTTPS on each sync and imports matching PDF, Word, Excel, CSV, Markdown and text files.",
     body: h("div", { class: "stack" }, field("Repository URL", url, "HTTPS clone URL (GitHub, GitLab, Bitbucket, Azure Repos…)."),
       h("div", { class: "form-grid" }, field("Branch", branch), field("Path filter", glob, "Comma-separated glob patterns relative to the repo root.")),
       field("Access token", token, "Read-only token. Stored encrypted; never shown again.")),
@@ -250,7 +250,7 @@ function reposCard(repoList) {
 
 async function viewSources(body) {
   const [docs, repoList] = await Promise.all([api.get(base() + "/documents"), api.get(base() + "/repos")]);
-  const fileInput = h("input", { type: "file", multiple: true, accept: ".pdf,.docx,.md,.markdown,.txt", class: "hidden" });
+  const fileInput = h("input", { type: "file", multiple: true, accept: ".pdf,.docx,.xlsx,.csv,.md,.markdown,.txt", class: "hidden" });
   const uploadFiles = guard(async (files) => {
     for (const f of files) {
       const fd = new FormData(); fd.append("file", f);
@@ -263,7 +263,7 @@ async function viewSources(body) {
   const drop = h("div", { class: "dropzone", tabindex: "0", role: "button", onclick: () => fileInput.click(),
     onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") fileInput.click(); } },
     icon("upload"), h("div", { style: { fontWeight: 600, marginTop: "6px" } }, "Drop BRD files here or click to browse"),
-    h("div", { class: "small" }, "PDF, Word (.docx), Markdown or text · up to 10 MB each"));
+    h("div", { class: "small" }, "PDF, Word, Excel, CSV, Markdown or text · up to 10 MB each"));
   drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
   drop.addEventListener("dragleave", () => drop.classList.remove("over"));
   drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); uploadFiles([...e.dataTransfer.files]); });

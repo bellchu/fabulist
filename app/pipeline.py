@@ -238,8 +238,11 @@ def _platform_context(platform: str) -> str:
 def mock_requirements(section: Dict[str, str]) -> List[Dict[str, Any]]:
     """Offline heuristic: one requirement per requirement-like sentence."""
     out = []
-    body = re.sub(r"\s+", " ", section["text"])
-    for sent in re.split(r"(?<=[.!?;])\s+|\s[•\-\*]\s", body):
+    # Wrapped lines (common in PDFs) are joined, but a line starting with a requirement ID or a
+    # bullet always begins a new item (spreadsheet rows, numbered lists).
+    marked = re.sub(r"\n(?=\s*(?:[•\-\*]\s|\(?[A-Z]{1,5}[-_ ]?\d{1,4}\b))", "\x1e", section["text"])
+    body = re.sub(r"[ \t\r\n]+", " ", marked)
+    for sent in re.split(r"(?<=[.!?;])\s+|\s[•\-\*]\s|\s*\x1e\s*", body):
         sent = sent.strip(" -•*\t")
         if len(sent) < 25 or not _REQ.search(sent):
             continue

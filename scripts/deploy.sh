@@ -11,6 +11,7 @@ cd "$(dirname "$0")/.."
 : "${FABULIST_HOST:?set FABULIST_HOST}"
 : "${DEPLOY_SSH:?set DEPLOY_SSH}"
 REGISTRY="${REGISTRY:-localhost:32000}"
+docker info >/dev/null 2>&1 || { echo "Docker daemon is not running; start it and retry." >&2; exit 1; }
 TAG="$(date +%Y%m%d%H%M%S)"
 IMAGE="${REGISTRY}/fabulist:${TAG}"
 NS=fabulist
