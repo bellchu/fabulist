@@ -88,8 +88,8 @@ def create_project(body: ProjectIn):
 
 
 @router.get("/api/projects")
-def list_projects():
-    return db.rows(PROJECT_COUNTS + " ORDER BY p.created DESC")
+def list_projects(archived: bool = False):
+    return db.rows(PROJECT_COUNTS + " WHERE p.archived IS %s NULL ORDER BY p.created DESC" % ("NOT" if archived else ""))
 
 
 @router.get("/api/projects/{pid}")
@@ -124,9 +124,34 @@ def update_project(pid: str, body: ProjectPatch):
     return _project(pid)
 
 
+def _set_archived(pid: str, request: Request, archive: bool) -> Dict[str, Any]:
+    project = _project(pid)
+    if bool(project["archived"]) == archive:
+        raise HTTPException(409, "Project is already %s" % ("archived" if archive else "active"))
+    with db.conn() as c:
+        c.execute("UPDATE projects SET archived=%s WHERE id=%s", (db.now() if archive else None, pid))
+        history.record(c, pid, "project", pid, "", "archived" if archive else "restored", history.actor(request), project["name"])
+    return {"id": pid, "archived": archive}
+
+
+@router.post("/api/projects/{pid}/archive")
+def archive_project(pid: str, request: Request):
+    return _set_archived(pid, request, True)
+
+
+@router.post("/api/projects/{pid}/restore")
+def restore_project(pid: str, request: Request):
+    return _set_archived(pid, request, False)
+
+
 @router.delete("/api/projects/{pid}", status_code=204)
-def delete_project(pid: str):
-    _project(pid)
+def delete_project(pid: str, request: Request):
+    # Deleting cascades to the project's audit trail, so it is a deliberate two-step, admin-only act.
+    project = _project(pid)
+    if getattr(request.state, "role", "admin") != "admin":
+        raise HTTPException(403, "Only administrators can permanently delete a project")
+    if not project["archived"]:
+        raise HTTPException(409, "Archive the project before deleting it permanently")
     db.execute("DELETE FROM projects WHERE id = %s", (pid,))
 
 

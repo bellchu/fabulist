@@ -52,6 +52,7 @@ SCHEMA = [
          item_type TEXT NOT NULL, item_id TEXT NOT NULL, item_key TEXT NOT NULL DEFAULT '',
          action TEXT NOT NULL, actor TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
          changes JSONB NOT NULL DEFAULT '{}', created TEXT NOT NULL)""",
+    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS archived TEXT",
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS actor TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS cancel_requested BOOLEAN NOT NULL DEFAULT FALSE",
     # Monotonic order for entries written within the same second.
