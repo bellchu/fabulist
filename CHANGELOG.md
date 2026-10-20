@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- SSO sessions end after 30 minutes of inactivity (`SESSION_IDLE_MINUTES`, `0` disables); activity slides the idle window but never extends the 8 h absolute lifetime. Existing sessions stay valid until their next request refreshes them.
 - Projects are archived (read-only, restorable, audit trail kept) instead of deleted; permanent deletion is admin-only and requires an archived project. **Behavior change:** `DELETE /api/projects/{id}` now returns 409 for an active project and 403 for non-admins. Additive schema change (`projects.archived`), so rolling back to the previous image is safe.
 - API requests with a body larger than the configured limit are rejected with 413 before parsing.
 - Audit tab: filter the trail by action and user, page through all entries, export CSV.

@@ -168,7 +168,7 @@ def callback(request: Request, code: str = "", state: str = "", error: str = "")
         return _page("Access not granted", "Your account (%s) has not been given access to Fabulist. Ask an administrator." % username, 403)
     log.info("sso sign-in", extra={"fields": {"user": username, "role": role}})
     resp = RedirectResponse(flow.get("next") or "/", status_code=302)
-    resp.set_cookie(SESSION_COOKIE, sign({"u": username, "exp": time.time() + SESSION_TTL}), max_age=SESSION_TTL,
+    resp.set_cookie(SESSION_COOKIE, _session_cookie(username, time.time() + SESSION_TTL, time.time()), max_age=SESSION_TTL,
                     httponly=True, secure=_secure(), samesite="lax", path="/")
     resp.delete_cookie(FLOW_COOKIE, path="/auth")
     return resp
@@ -181,9 +181,34 @@ def logout() -> Response:
     return resp
 
 
+_TOUCH_AFTER = 60  # re-issue the cookie at most once a minute
+
+
+def _session_cookie(username: str, exp: float, seen: float) -> str:
+    return sign({"u": username, "exp": exp, "seen": seen})
+
+
 def session_user(request: Request) -> Optional[Tuple[str, str]]:
     payload = verify(request.cookies.get(SESSION_COOKIE, ""))
     if not payload:
         return None
+    now = time.time()
+    seen = payload.get("seen")  # cookies issued before idle tracking have none: count them as active now
+    if config.SESSION_IDLE_MINUTES > 0 and seen is not None and now - seen > config.SESSION_IDLE_MINUTES * 60:
+        return None
     role = users.role_of(payload.get("u", ""))
-    return (payload["u"], role) if role else None
+    if not role:
+        return None
+    if seen is None or now - seen > _TOUCH_AFTER:
+        request.state.session_refresh = payload
+    return payload["u"], role
+
+
+def refresh_cookie(request: Request, response: Response) -> None:
+    """Slide the idle window: same absolute expiry, new activity time (see main's middleware)."""
+    payload = getattr(request.state, "session_refresh", None)
+    if not payload or response.status_code >= 500:
+        return
+    exp = payload["exp"]
+    response.set_cookie(SESSION_COOKIE, _session_cookie(payload["u"], exp, time.time()), max_age=max(1, int(exp - time.time())),
+                        httponly=True, secure=_secure(), samesite="lax", path="/")

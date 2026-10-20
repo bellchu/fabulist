@@ -110,3 +110,55 @@ def test_next_parameter_cannot_redirect_offsite(client, idp, monkeypatch):
     idp["claims"] = {"iss": ISSUER, "aud": ["fabulist"], "exp": time.time() + 300, "nonce": q["nonce"][0], "email": "c@example.com"}
     r = client.get("/auth/callback", params={"code": "abc", "state": q["state"][0]}, follow_redirects=False)
     assert r.headers["location"] == "/"
+
+
+def _issued(response):
+    from http.cookies import SimpleCookie
+    jar = SimpleCookie()
+    jar.load(response.headers["set-cookie"])
+    return sso.verify(jar[sso.SESSION_COOKIE].value)
+
+
+def _use(client, token):
+    client.cookies.clear()  # a refreshed cookie from an earlier request must not shadow this one
+    client.cookies.set(sso.SESSION_COOKIE, token)
+
+
+def _session_cookie(monkeypatch, seen_ago, left=3600):
+    from app import config, db
+    monkeypatch.setattr(config, "OIDC_AUTO_PROVISION_ROLE", "analyst")
+    db.execute("INSERT INTO users (id, username, role, password_hash, created) VALUES ('u1','ana@example.com','analyst','x','now') ON CONFLICT DO NOTHING")
+    users._roles.clear()
+    now = time.time()
+    return sso.sign({"u": "ana@example.com", "exp": now + left, "seen": now - seen_ago})
+
+
+def test_idle_sessions_expire_and_active_ones_slide(client, idp, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "SESSION_IDLE_MINUTES", 30)
+    # idle for longer than the limit: signed out even though the absolute lifetime remains
+    _use(client, _session_cookie(monkeypatch, seen_ago=31 * 60))
+    assert client.get("/api/me").status_code == 401
+    # recently active: accepted, and the cookie is re-issued with a fresh activity time
+    _use(client, _session_cookie(monkeypatch, seen_ago=10 * 60))
+    r = client.get("/api/me")
+    assert r.status_code == 200 and sso.SESSION_COOKIE in r.headers["set-cookie"]
+    refreshed = _issued(r)
+    assert time.time() - refreshed["seen"] < 5
+    # just refreshed: no new cookie on every request
+    _use(client, _session_cookie(monkeypatch, seen_ago=5))
+    assert "set-cookie" not in client.get("/api/me").headers
+    # the absolute lifetime is never extended by activity
+    _use(client, _session_cookie(monkeypatch, seen_ago=10 * 60, left=120))
+    assert _issued(client.get("/api/me"))["exp"] < time.time() + 130
+
+
+def test_idle_timeout_can_be_disabled_and_legacy_cookies_still_work(client, idp, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "SESSION_IDLE_MINUTES", 0)
+    _use(client, _session_cookie(monkeypatch, seen_ago=5 * 3600))
+    assert client.get("/api/me").status_code == 200
+    monkeypatch.setattr(config, "SESSION_IDLE_MINUTES", 30)
+    legacy = sso.sign({"u": "ana@example.com", "exp": time.time() + 3600})  # issued before idle tracking existed
+    _use(client, legacy)
+    assert client.get("/api/me").status_code == 200

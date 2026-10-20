@@ -1,5 +1,5 @@
 // App shell, routing and the projects home view.
-import { h, mount, icon, api, guard, modal, field, requireValue, select, empty, badge, timeAgo, meter } from "./core.js";
+import { h, mount, icon, api, guard, modal, field, requireValue, select, empty, badge, timeAgo, meter, setUnauthorizedHandler } from "./core.js";
 import { renderProject } from "./project.js";
 import { renderAdmin } from "./admin.js";
 
@@ -161,6 +161,14 @@ export function newProjectDialog() {
     } }],
   });
 }
+
+// With SSO, an expired or idle session means signing in again and coming back to the same page.
+let signingIn = false;
+setUnauthorizedHandler(() => {
+  if (signingIn || !state.me || !state.me.sso) return;
+  signingIn = true;
+  location.assign("/auth/login?next=" + encodeURIComponent(location.pathname + location.hash));
+});
 
 window.addEventListener("hashchange", route);
 route();

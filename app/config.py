@@ -64,3 +64,4 @@ OIDC_SCOPES = os.environ.get("OIDC_SCOPES", "openid email profile")
 OIDC_USERNAME_CLAIM = os.environ.get("OIDC_USERNAME_CLAIM", "email")
 # Role for SSO users not yet in Fabulist's user list; empty = only pre-registered users may sign in.
 OIDC_AUTO_PROVISION_ROLE = os.environ.get("OIDC_AUTO_PROVISION_ROLE", "")
+SESSION_IDLE_MINUTES = _int("SESSION_IDLE_MINUTES", 30)  # sign out after this much inactivity; 0 disables
