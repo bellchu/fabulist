@@ -89,6 +89,7 @@ Requires Python 3.12 (the production runtime) or Docker.
 scripts/dev-db.sh &              # port-forward the cluster Postgres to localhost:5433
 scripts/dev-server.sh            # app on :8765 against a separate fabulist_test database
 scripts/test.sh                  # lint + tests in a Python 3.12 container
+scripts/ci.sh                    # full local gate: lint, tests, JS check, dependency audit, image build (Docker only)
 ```
 
 Check dependencies for known vulnerabilities before releases:
