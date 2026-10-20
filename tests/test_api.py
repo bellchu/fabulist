@@ -395,3 +395,11 @@ def test_meta_reports_build_version(client, monkeypatch):
     assert client.get("/api/meta").json()["version"] == config.VERSION
     monkeypatch.setattr(config, "VERSION", "abc1234")
     assert client.get("/api/meta").json()["version"] == "abc1234"
+
+
+def test_api_responses_are_not_cacheable_and_hsts_follows_https(client):
+    r = client.get("/api/projects")
+    assert r.headers["cache-control"] == "no-store" and "strict-transport-security" not in r.headers
+    r = client.get("/api/projects", headers={"X-Forwarded-Proto": "https"})
+    assert r.headers["strict-transport-security"].startswith("max-age=")
+    assert client.get("/static/app.css").headers["cache-control"] == "no-cache"

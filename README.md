@@ -126,7 +126,7 @@ in-cluster on first deploy. They are never stored in the repository.
 - HTTP Basic sign-in with named users and roles remains available for API clients and as
   break-glass access. Repeated failed sign-ins are throttled per user and per client address.
 - Mutating API calls require an `X-Requested-With` header (CSRF), and responses carry a strict
-  Content-Security-Policy, `X-Frame-Options: DENY`, `nosniff` and `no-referrer`.
+  Content-Security-Policy, `X-Frame-Options: DENY`, `nosniff` and `no-referrer`. API responses are `Cache-Control: no-store`, and HSTS is sent when the request arrived over HTTPS (`X-Forwarded-Proto`).
 - API keys and tokens are encrypted at rest and never returned to the browser.
 - Repository URLs must be HTTPS and must not resolve to private or cluster addresses (SSRF
   guard). Git runs with file and ssh protocols disabled, and tokens are passed via the

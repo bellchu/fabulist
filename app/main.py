@@ -118,6 +118,10 @@ async def auth_and_guards(request: Request, call_next):
     if path.startswith("/static/"):
         # Revalidate via ETag so a deploy is picked up without a hard refresh.
         response.headers["Cache-Control"] = "no-cache"
+    elif path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")  # backlog data and exports must not sit in shared caches
+    if request.headers.get("x-forwarded-proto") == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     for k, v in SECURITY_HEADERS.items():
         response.headers.setdefault(k, v)  # a route may set a stricter/different policy (e.g. the HTML report)
     return response
