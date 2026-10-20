@@ -14,6 +14,8 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+# Git revision baked into the image at build time (see Dockerfile / scripts/deploy.sh).
+VERSION = os.environ.get("APP_VERSION", "dev")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 MAX_UPLOAD_BYTES = _int("MAX_UPLOAD_MB", 10) * 1024 * 1024
 MAX_DOC_CHARS = _int("MAX_DOC_CHARS", 2_000_000)

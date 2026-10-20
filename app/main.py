@@ -170,6 +170,7 @@ def healthz() -> Dict[str, str]:
 @app.get("/api/meta")
 def meta() -> Dict[str, Any]:
     return {
+        "version": config.VERSION,
         "platforms": {k: v["label"] for k, v in PLATFORMS.items()},
         "formats": [{"id": k, "ext": v[1], "label": v[2], "description": v[3]} for k, v in exporters.EXPORTERS.items()],
         "requirement_types": pipeline.REQ_TYPES,

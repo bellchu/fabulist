@@ -388,3 +388,10 @@ def test_audit_trail_csv_export_is_complete_oldest_first_and_formula_safe(client
     assert "statement" in rows[1]["Changes"]
     assert not any(c.startswith("=") for x in rows for c in x.values())
     assert client.get("/api/projects/nope/history.csv").status_code == 404
+
+
+def test_meta_reports_build_version(client, monkeypatch):
+    from app import config
+    assert client.get("/api/meta").json()["version"] == config.VERSION
+    monkeypatch.setattr(config, "VERSION", "abc1234")
+    assert client.get("/api/meta").json()["version"] == "abc1234"

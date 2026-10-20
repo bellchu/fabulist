@@ -45,7 +45,7 @@ kubectl apply -f deploy/k8s/postgres.yaml
 kubectl -n "$NS" rollout status statefulset/postgres --timeout=240s
 kubectl apply -f deploy/k8s/backup.yaml
 
-docker buildx build --platform linux/amd64 -t "$IMAGE" --load .
+docker buildx build --platform linux/amd64 --build-arg APP_VERSION="$(git rev-parse --short HEAD)" -t "$IMAGE" --load .
 docker save "$IMAGE" | ssh "$DEPLOY_SSH" "sudo microk8s ctr image import -"
 
 sed -e "s|IMAGE|${IMAGE}|" -e "s|FABULIST_HOST|${FABULIST_HOST}|" deploy/k8s/app.yaml | kubectl apply -f -
