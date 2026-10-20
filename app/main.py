@@ -69,6 +69,13 @@ access_log = logging.getLogger("fabulist.access")
 async def auth_and_guards(request: Request, call_next):
     request.state.user, request.state.role = "anonymous", "admin"
     path = request.url.path
+    if path.startswith("/api/"):
+        try:
+            declared = int(request.headers.get("content-length") or 0)
+        except ValueError:
+            return JSONResponse({"detail": "Invalid Content-Length"}, status_code=400)
+        if declared > config.max_body_bytes():
+            return JSONResponse({"detail": "Request body too large"}, status_code=413)
     if path == "/metrics":
         # Scraped by Prometheus with a bearer token; never behind user Basic auth.
         token = request.headers.get("authorization", "")
