@@ -6,7 +6,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
-from fastapi import FastAPI, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -38,7 +38,22 @@ async def lifespan(_app: FastAPI):
     db.close()
 
 
-app = FastAPI(title="Fabulist", lifespan=lifespan)
+# Read-only POSTs and the archive toggles stay available on an archived project.
+_ARCHIVE_EXEMPT = ("/search", "/ask", "/archive", "/restore")
+
+
+def archived_is_read_only(request: Request) -> None:
+    pid = request.path_params.get("pid")
+    if not pid or request.method in ("GET", "HEAD", "OPTIONS") or request.url.path.endswith(_ARCHIVE_EXEMPT):
+        return
+    if request.method == "DELETE" and request.url.path == "/api/projects/" + pid:
+        return  # permanent deletion has its own rules
+    row = db.one("SELECT archived FROM projects WHERE id=%s", (pid,))
+    if row and row["archived"]:
+        raise HTTPException(409, "This project is archived and read-only. Restore it to make changes.")
+
+
+app = FastAPI(title="Fabulist", lifespan=lifespan, dependencies=[Depends(archived_is_read_only)])
 app.include_router(admin.router)
 app.include_router(repos.router)
 app.include_router(integrations.router)

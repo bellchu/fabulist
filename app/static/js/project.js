@@ -23,7 +23,7 @@ export async function renderProject(content, pid, tab) {
   ctx = { pid, project, tab };
   setCrumbs({ href: "#/", label: "Projects" }, project.name);
   const body = h("div");
-  mount(content, header(project), stepper(project), tabBar(project, tab), body);
+  mount(content, header(project), archivedBanner(project), stepper(project), tabBar(project, tab), body);
   const view = { overview: viewOverview, sources: viewSources, requirements: viewRequirements, stories: viewStories, trace: viewTrace, audit: viewAudit, export: viewExport }[tab] || viewOverview;
   await view(body);
   revealCurrentStep(content);  // after the view: measuring a half-built (short) page resets its scroll
@@ -43,6 +43,17 @@ function header(p) {
       kv("Target platform", state.meta.platforms[p.platform] || p.platform),
       kv("BRDs", String(p.documents)), kv("Requirements", String(p.requirements)), kv("Stories", String(p.stories)),
       kv("Coverage", p.coverage + "%"), kv("Description", p.description || "–")));
+}
+
+function archivedBanner(p) {
+  if (!p.archived) return null;
+  return h("div", { class: "callout warn", role: "status", style: { marginBottom: "12px" } },
+    h("div", { class: "grow" }, h("b", {}, "This project is archived and read-only."), " Its audit trail is kept. Restore it to make changes."),
+    h("button", { class: "btn btn-sm", onclick: guard(async () => { await api.post(base() + "/restore", {}); toast("Project restored", "ok"); rerender(); }) }, "Restore"),
+    state.me.role === "admin" ? h("button", { class: "btn btn-sm btn-danger", onclick: guard(async () => {
+      if (!(await confirmBox("Permanently delete '" + p.name + "', including its audit trail? This cannot be undone.", { danger: true, okLabel: "Delete permanently" }))) return;
+      await api.del(base()); location.hash = "#/"; toast("Project deleted");
+    }) }, "Delete permanently") : null);
 }
 
 // On narrow screens the stepper scrolls sideways with a hidden scrollbar; centre the current
@@ -84,14 +95,14 @@ function editProjectDialog() {
   const name = h("input", { type: "text", value: p.name, maxlength: "120" });
   const platform = select(Object.entries(state.meta.platforms), p.platform);
   const desc = h("textarea", { rows: 3, value: p.description });
-  modal({
+  const close = modal({
     title: "Project settings",
     body: h("div", { class: "stack" }, field("Name", name), field("Target platform", platform), field("Description", desc),
-      h("div", { class: "callout warn small" }, h("div", { class: "grow" }, "Deleting a project removes its BRDs, requirements and stories."),
-        h("button", { class: "btn btn-sm btn-danger", onclick: guard(async () => {
-          if (!(await confirmBox("Delete '" + p.name + "' and everything in it?", { danger: true, okLabel: "Delete project" }))) return;
-          await api.del(base()); location.hash = "#/"; toast("Project deleted");
-        }) }, "Delete project"))),
+      p.archived ? null : h("div", { class: "callout warn small" }, h("div", { class: "grow" }, "Archiving hides the project and makes it read-only. Its audit trail is kept and an administrator can delete it later."),
+        h("button", { class: "btn btn-sm", onclick: guard(async () => {
+          if (!(await confirmBox("Archive '" + p.name + "'? It becomes read-only and leaves the project list.", { okLabel: "Archive project" }))) return;
+          await api.post(base() + "/archive", {}); close(); location.hash = "#/"; toast("Project archived");
+        }) }, "Archive project"))),
     actions: [{ label: "Save", kind: "btn-primary", onClick: async () => {
       await api.patch(base(), { name: name.value, platform: platform.value, description: desc.value });
       toast("Project updated", "ok"); rerender();

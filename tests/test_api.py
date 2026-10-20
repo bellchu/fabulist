@@ -64,6 +64,8 @@ def test_full_workflow(client):
     assert client.post("/api/projects/%s/runs" % pid, json={"stage": "requirements"}).status_code == 202
     _wait(client, pid)
     assert client.get("/api/projects/%s/stories" % pid).json() == []
+    assert client.delete("/api/projects/%s" % pid).status_code == 409  # active projects are archived first
+    assert client.post("/api/projects/%s/archive" % pid).status_code == 200
     assert client.delete("/api/projects/%s" % pid).status_code == 204
 
 
@@ -433,3 +435,39 @@ def test_oversized_request_bodies_are_rejected_before_parsing(client, monkeypatc
     assert big.status_code == 413 and "too large" in big.json()["detail"].lower()
     assert client.post("/api/projects/%s/documents/text" % pid, json={"name": "ok", "text": "small"}).status_code == 201
     assert client.post("/api/projects", content=b"{}", headers={"Content-Type": "application/json", "Content-Length": "abc"}).status_code == 400
+
+
+def test_archive_restore_and_guarded_permanent_delete(client, monkeypatch):
+    from app import config
+    pid = client.post("/api/projects", json={"name": "Retire me", "platform": "generic"}).json()["id"]
+    r = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall export invoices to CSV."}).json()
+    names = lambda **q: [p["name"] for p in client.get("/api/projects", params=q).json()]
+    assert client.delete("/api/projects/%s" % pid).status_code == 409  # must be archived first
+
+    assert client.post("/api/projects/%s/archive" % pid).status_code == 200
+    assert "Retire me" not in names() and "Retire me" in names(archived="true")
+    assert client.get("/api/projects/%s" % pid).json()["archived"]
+    # read-only while archived: edits and runs are refused, reads and read-only POSTs still work
+    assert client.patch("/api/projects/%s" % pid, json={"name": "x"}).status_code == 409
+    assert client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall do something else."}).status_code == 409
+    assert client.patch("/api/projects/%s/requirements/%s" % (pid, r["id"]), json={"status": "approved"}).status_code == 409
+    assert client.get("/api/projects/%s/requirements" % pid).status_code == 200
+    assert client.post("/api/projects/%s/search" % pid, json={"query": "export invoices"}).status_code == 200
+    assert client.post("/api/projects/%s/archive" % pid).status_code == 409  # already archived
+
+    assert client.post("/api/projects/%s/restore" % pid).status_code == 200
+    assert "Retire me" in names()
+    assert client.patch("/api/projects/%s/requirements/%s" % (pid, r["id"]), json={"status": "approved"}).status_code == 200
+    actions = [e["action"] for e in client.get("/api/projects/%s/history" % pid).json()]
+    assert {"archived", "restored"} <= set(actions)
+
+    # only admins delete permanently, and only archived projects
+    monkeypatch.setattr(config, "BASIC_USER", "root")
+    monkeypatch.setattr(config, "BASIC_PASSWORD", "root-password-123")
+    root = ("root", "root-password-123")
+    client.post("/api/admin/users", json={"username": "analyst1", "role": "analyst", "password": "analyst-password-1"}, auth=root)
+    analyst = ("analyst1", "analyst-password-1")
+    assert client.post("/api/projects/%s/archive" % pid, auth=analyst).status_code == 200
+    assert client.delete("/api/projects/%s" % pid, auth=analyst).status_code == 403
+    assert client.delete("/api/projects/%s" % pid, auth=root).status_code == 204
+    assert client.get("/api/projects/%s" % pid, auth=root).status_code == 404

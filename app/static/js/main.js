@@ -107,21 +107,32 @@ async function route() {
   }
 }
 
-function renderHome(content) {
+let archivedList = null;  // null: showing active projects
+
+function renderHome(content, keepView = false) {
   setCrumbs("Projects");
+  if (!keepView) archivedList = null;
+  const list = archivedList || state.projects;
+  const toggle = h("button", { class: "btn", onclick: guard(async () => {
+    archivedList = archivedList ? null : await api.get("/api/projects?archived=true");
+    renderHome(content, true);
+  }) }, archivedList ? "Back to projects" : "Archived");
   const head = h("div", { class: "page-head" },
     h("span", { class: "object-icon project" }, icon("folder")),
-    h("div", { class: "grow" }, h("div", { class: "object-label" }, "Projects"), h("h1", {}, "All projects"),
-      h("p", { class: "sub" }, state.projects.length + (state.projects.length === 1 ? " item" : " items") + " · Each project turns BRDs into reviewed requirements and a traceable backlog.")),
-    h("button", { class: "btn btn-primary", onclick: newProjectDialog }, "New"));
-  if (!state.projects.length) {
-    mount(content, head, h("div", { class: "card" }, empty({
-      iconName: "folder", title: "No projects yet",
-      text: "Create a project for a business application (e.g. CRM order capture), then upload its BRDs.",
-      action: h("button", { class: "btn btn-primary", onclick: newProjectDialog }, icon("plus"), "Create project") })));
+    h("div", { class: "grow" }, h("div", { class: "object-label" }, archivedList ? "Archived projects" : "Projects"), h("h1", {}, archivedList ? "Archived" : "All projects"),
+      h("p", { class: "sub" }, list.length + (list.length === 1 ? " item" : " items") + (archivedList
+        ? " · Read-only. Open a project to restore it." : " · Each project turns BRDs into reviewed requirements and a traceable backlog."))),
+    h("div", { class: "row" }, toggle, h("button", { class: "btn btn-primary", onclick: newProjectDialog }, "New")));
+  if (!list.length) {
+    mount(content, head, h("div", { class: "card" }, archivedList
+      ? empty({ iconName: "folder", title: "No archived projects", text: "Archived projects are kept read-only, with their audit trail, until an administrator deletes them." })
+      : empty({
+        iconName: "folder", title: "No projects yet",
+        text: "Create a project for a business application (e.g. CRM order capture), then upload its BRDs.",
+        action: h("button", { class: "btn btn-primary", onclick: newProjectDialog }, icon("plus"), "Create project") })));
     return;
   }
-  const cards = state.projects.map((p) => {
+  const cards = list.map((p) => {
     const pct = p.requirements ? Math.round((100 * p.requirements_approved) / p.requirements) : 0;
     return h("a", { class: "card project-card", href: "#/p/" + p.id },
       h("div", { class: "row" }, h("h3", { class: "grow" }, p.name), badge(state.meta.platforms[p.platform] || p.platform, "accent")),

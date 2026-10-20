@@ -32,6 +32,9 @@ IDs → human review → epics, features and stories → requirements traceabili
    product classes it names (for example, a cold-chain requirement with no cold-chain criteria).
 5. **Baselines**: freeze numbered, read-only snapshots of the backlog (for example a release
    sign-off), export them exactly as they were, and compare them with later versions.
+   Projects are **archived** rather than deleted: an archived project leaves the list, becomes read-only
+   (reads, search and Ask still work) and keeps its audit trail. Only an administrator can delete an
+   archived project permanently.
 6. **Review discussions**: comment threads on requirements and stories, with resolve/reopen and
    open-discussion badges. Viewers (business reviewers) can comment without edit rights.
 7. **Audit trail**: every manual edit, review decision, deletion, sync and AI run is recorded
