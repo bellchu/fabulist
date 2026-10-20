@@ -153,6 +153,10 @@ in-cluster on first deploy. They are never stored in the repository.
 | FabulistDependencyAudit | `kubectl -n fabulist logs job/<latest fabulist-dep-audit job>` lists packages and fixed versions; upgrade `requirements.txt`, run `scripts/test.sh`, redeploy. |
 | FabulistBackupMissing | `kubectl -n fabulist get jobs` and the `fabulist-backup` job logs; make sure the backups volume has space. |
 
+## Contributing
+
+See `CONTRIBUTING.md` for the branch, test and release workflow, `SECURITY.md` for reporting vulnerabilities and `CHANGELOG.md` for notable changes.
+
 ## License
 
 MIT
