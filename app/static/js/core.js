@@ -63,6 +63,10 @@ export function icon(name) {
 
 // ---- API ----------------------------------------------------------------
 
+// Set by main.js: called when the server says the session is gone (e.g. SSO idle timeout).
+let onUnauthorized = null;
+export const setUnauthorizedHandler = (fn) => { onUnauthorized = fn; };
+
 async function request(method, path, body, isForm) {
   const opts = { method, headers: { "X-Requested-With": "fabulist" } };
   if (body !== undefined) {
@@ -71,6 +75,7 @@ async function request(method, path, body, isForm) {
   }
   const r = await fetch(path, opts);
   if (!r.ok) {
+    if (r.status === 401 && onUnauthorized) onUnauthorized();
     let msg = r.status + " " + r.statusText;
     try {
       const j = await r.json();

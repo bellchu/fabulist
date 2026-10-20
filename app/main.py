@@ -137,6 +137,7 @@ async def auth_and_guards(request: Request, call_next):
         # cross-origin without a CORS preflight (which we never allow), so require it.
         return JSONResponse({"detail": "Missing X-Requested-With header"}, status_code=403)
     response = await call_next(request)
+    sso.refresh_cookie(request, response)
     if path.startswith("/static/"):
         # Revalidate via ETag so a deploy is picked up without a hard refresh.
         response.headers["Cache-Control"] = "no-cache"
