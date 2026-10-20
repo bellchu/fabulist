@@ -20,6 +20,11 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 MAX_UPLOAD_BYTES = _int("MAX_UPLOAD_MB", 10) * 1024 * 1024
 MAX_DOC_CHARS = _int("MAX_DOC_CHARS", 2_000_000)
 
+
+def max_body_bytes() -> int:
+    """Largest accepted API request body: an upload, or pasted text (up to 4 bytes per character), plus form overhead."""
+    return max(MAX_UPLOAD_BYTES, MAX_DOC_CHARS * 4) + 1024 * 1024
+
 # Defaults for admin-tunable generation settings.
 CHUNK_CHARS = _int("CHUNK_CHARS", 6000)
 MAX_CHUNKS_PER_RUN = _int("MAX_CHUNKS_PER_RUN", 200)

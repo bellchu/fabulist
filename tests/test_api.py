@@ -420,3 +420,16 @@ def test_history_filters_and_cursor_paging(client):
     f = client.get(base + "/filters").json()
     assert f == {"actors": ["anonymous"], "actions": ["created"]}
     assert client.get("/api/projects/nope/history/filters").status_code == 404
+
+
+def test_oversized_request_bodies_are_rejected_before_parsing(client, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "MAX_UPLOAD_BYTES", 1000)
+    monkeypatch.setattr(config, "MAX_DOC_CHARS", 100)
+    limit = config.max_body_bytes()
+    assert limit < 2 * 1024 * 1024
+    pid = client.post("/api/projects", json={"name": "Limits", "platform": "generic"}).json()["id"]
+    big = client.post("/api/projects/%s/documents/text" % pid, content=b"x" * (limit + 1), headers={"Content-Type": "application/json"})
+    assert big.status_code == 413 and "too large" in big.json()["detail"].lower()
+    assert client.post("/api/projects/%s/documents/text" % pid, json={"name": "ok", "text": "small"}).status_code == 201
+    assert client.post("/api/projects", content=b"{}", headers={"Content-Type": "application/json", "Content-Length": "abc"}).status_code == 400
