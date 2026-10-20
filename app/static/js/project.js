@@ -1,7 +1,7 @@
 // Project workspace: Overview, Sources, Requirements, Stories, Traceability, Export.
 import {
   h, mount, icon, api, guard, toast, modal, confirmBox, drawer, badge, statusTone, typeTone, scorePill, meter, issueIcon,
-  issueList, empty, timeAgo, fmt, duration, field, select, linesInput, readLines, tagsInput, segmented, download, historyList,
+  issueList, empty, timeAgo, fmt, duration, field, requireValue, select, linesInput, readLines, tagsInput, segmented, download, historyList,
 } from "./core.js";
 import { state, setCrumbs } from "./main.js";
 
@@ -26,6 +26,7 @@ export async function renderProject(content, pid, tab) {
   mount(content, header(project), stepper(project), tabBar(project, tab), body);
   const view = { overview: viewOverview, sources: viewSources, requirements: viewRequirements, stories: viewStories, trace: viewTrace, export: viewExport }[tab] || viewOverview;
   await view(body);
+  revealCurrentStep(content);  // after the view: measuring a half-built (short) page resets its scroll
   schedulePoll();
 }
 
@@ -42,6 +43,15 @@ function header(p) {
       kv("Target platform", state.meta.platforms[p.platform] || p.platform),
       kv("BRDs", String(p.documents)), kv("Requirements", String(p.requirements)), kv("Stories", String(p.stories)),
       kv("Coverage", p.coverage + "%"), kv("Description", p.description || "–")));
+}
+
+// On narrow screens the stepper scrolls sideways with a hidden scrollbar; centre the current
+// step so users can see where they are. Not scrollIntoView, which can also scroll the page.
+function revealCurrentStep(root) {
+  const strip = root.querySelector(".stepper"), cur = strip && strip.querySelector(".current");
+  if (!cur) return;
+  const s = strip.getBoundingClientRect(), c = cur.getBoundingClientRect();
+  strip.scrollLeft += c.left - s.left - (s.width - c.width) / 2;
 }
 
 function stepper(p) {
@@ -63,8 +73,9 @@ function stepper(p) {
 
 function tabBar(p, active) {
   const counts = { sources: p.documents, requirements: p.requirements, stories: p.stories };
-  return h("div", { class: "tabs", role: "tablist" }, TABS.map(([id, label]) =>
-    h("a", { class: "tab" + (id === active ? " active" : ""), href: "#/p/" + p.id + "/" + id, role: "tab", "aria-selected": String(id === active) },
+  // Page links, not ARIA tabs: there are no tab panels or arrow-key switching.
+  return h("nav", { class: "tabs", "aria-label": "Project sections" }, TABS.map(([id, label]) =>
+    h("a", { class: "tab" + (id === active ? " active" : ""), href: "#/p/" + p.id + "/" + id, "aria-current": id === active ? "page" : null },
       label, counts[id] !== undefined ? h("span", { class: "count" }, counts[id]) : null)));
 }
 
@@ -270,8 +281,8 @@ async function viewSources(body) {
   drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); uploadFiles([...e.dataTransfer.files]); });
 
   const pasteName = h("input", { type: "text", value: "pasted-brd.md" });
-  const pasteText = h("textarea", { rows: 6, placeholder: "Paste BRD text. Markdown headings (#, ##) become epics and features." });
-  const q = h("input", { type: "search", placeholder: "Ask a question, e.g. What is the return window for med-surg supplies?" });
+  const pasteText = h("textarea", { rows: 6, placeholder: "Paste BRD text. Markdown headings (#, ##) become epics and features.", "aria-label": "BRD text" });
+  const q = h("input", { type: "search", placeholder: "Ask a question, e.g. What is the return window for med-surg supplies?", "aria-label": "Question about the BRDs" });
   const results = h("div", { class: "stack", style: { marginTop: "12px" } });
   const search = guard(async () => {
     if (!q.value.trim()) return;
@@ -303,7 +314,7 @@ async function viewSources(body) {
       h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Paste text")),
         h("div", { class: "card-body stack" }, field("Document name", pasteName), pasteText,
           h("div", {}, h("button", { class: "btn", onclick: guard(async () => {
-            if (!pasteText.value.trim()) throw new Error("Paste some text first");
+            requireValue(pasteText, "Paste some text first");
             await api.post(base() + "/documents/text", { name: pasteName.value, text: pasteText.value });
             toast("Document added", "ok"); rerender();
           }) }, icon("plus"), "Add document"))))),
@@ -388,7 +399,7 @@ async function viewRequirements(body) {
   const selected = new Set();
   const tableBox = h("div");
   const bulk = h("div");
-  const q = h("input", { type: "search", class: "search", placeholder: "Search requirements", value: filters.reqQ });
+  const q = h("input", { type: "search", class: "search", placeholder: "Search requirements", "aria-label": "Search requirements", value: filters.reqQ });
   const type = select([["", "All types"], ...state.meta.requirement_types.map((t) => [t, t])], filters.reqType, { "aria-label": "Type" });
   const status = select([["", "All statuses"], ["draft", "Draft"], ["approved", "Approved"], ["excluded", "Excluded"]], filters.reqStatus, { "aria-label": "Status" });
   const flagged = h("input", { type: "checkbox", checked: filters.reqFlagged });
@@ -415,7 +426,7 @@ async function viewRequirements(body) {
       h("tbody", {}, rows.length ? rows.map((r) => h("tr", { class: "clickable" + (selected.has(r.id) ? " selected" : ""), onclick: () => reqDrawer(r) },
         h("td", { onclick: (e) => e.stopPropagation() }, h("input", { type: "checkbox", "aria-label": "Select " + r.key, checked: selected.has(r.id),
           onchange: (e) => { e.target.checked ? selected.add(r.id) : selected.delete(r.id); renderTable(); renderBulk(); } })),
-        h("td", { class: "mono nowrap" }, r.key),
+        h("td", { class: "mono nowrap" }, rowOpener(r.key)),
         h("td", {}, badge(r.type, typeTone[r.type])),
         h("td", { class: "statement" }, r.statement,
           r.issues.length ? h("div", { class: "issues" }, r.issues.map((i) => h("span", { class: "chip", title: i.message }, issueIcon(i.severity), i.code))) : null),
@@ -519,7 +530,7 @@ async function viewStories(body) {
     return;
   }
   const box = h("div");
-  const q = h("input", { type: "search", class: "search", placeholder: "Search stories", value: filters.storyQ });
+  const q = h("input", { type: "search", class: "search", placeholder: "Search stories", "aria-label": "Search stories", value: filters.storyQ });
   const status = select([["", "All statuses"], ["draft", "Draft"], ["approved", "Approved"], ["rejected", "Rejected"]], filters.storyStatus, { "aria-label": "Status" });
   const ready = select([["", "Any readiness"], ["ready", "Ready"], ["not-ready", "Needs work"]], filters.storyReady, { "aria-label": "Readiness" });
   const visible = () => stories.filter((s) =>
@@ -598,7 +609,7 @@ function storyMap(rows) {
       h("div", { class: "map-col-head" }, h("div", { class: "grow" }, h("div", { class: "map-feature", style: { padding: 0 } }, c.epic), h("h3", {}, c.feature)), badge(String(c.items.length))),
       c.items.sort((a, b) => order[a.priority] - order[b.priority]).map((s) => h("div", { class: "story-card " + s.status, tabindex: "0", role: "button", onclick: () => storyDrawer(s),
         draggable: "true", ondragstart: (e) => { e.dataTransfer.setData("text/fabulist-story", s.id); e.dataTransfer.effectAllowed = "move"; },
-        onkeydown: (e) => { if (e.key === "Enter") storyDrawer(s); } },
+        onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); storyDrawer(s); } } },
         h("div", { class: "row" }, h("span", { class: "dot " + s.priority, title: s.priority + " priority" }), h("span", { class: "k" }, s.key),
           h("span", { class: "right" }, s.status !== "draft" ? badge(s.status, statusTone[s.status]) : null)),
         h("div", { class: "t" }, s.title),
@@ -609,11 +620,17 @@ function storyMap(rows) {
           scorePill(s.quality_score)))))));
 }
 
+// Keyboard access to a clickable table row: the button's click (also fired by Enter/Space)
+// bubbles to the row's onclick, so it needs no handler of its own unless the row has none.
+function rowOpener(key, onclick) {
+  return h("button", { type: "button", class: "row-open", "aria-label": "Open " + key, onclick }, key);
+}
+
 function storyTable(rows) {
   return h("div", { class: "card table-wrap" }, h("table", { class: "table" },
     h("thead", {}, h("tr", {}, ["ID", "Story", "Epic / feature", "Priority", "Pts", "Requirements", "Quality", "Status"].map((x) => h("th", {}, x)))),
     h("tbody", {}, rows.map((s) => h("tr", { class: "clickable", onclick: () => storyDrawer(s) },
-      h("td", { class: "mono nowrap" }, s.key),
+      h("td", { class: "mono nowrap" }, rowOpener(s.key)),
       h("td", {}, h("b", {}, s.title), h("div", { class: "small muted" }, s.persona)),
       h("td", { class: "small" }, s.epic, h("div", { class: "muted" }, s.feature)),
       h("td", { class: "nowrap" }, h("span", { class: "row" }, h("span", { class: "dot " + s.priority }), s.priority)),
@@ -728,6 +745,7 @@ async function viewTrace(body) {
     return;
   }
   const byId = Object.fromEntries(stories.map((s) => [s.id, s]));
+  const reqByKey = Object.fromEntries(reqs.map((r) => [r.key, r]));
   const box = h("div");
   const gapsOnly = h("input", { type: "checkbox", checked: filters.traceGaps });
   const render = () => {
@@ -735,7 +753,7 @@ async function viewTrace(body) {
     box.replaceChildren(h("div", { class: "card table-wrap" }, h("table", { class: "table" },
       h("thead", {}, h("tr", {}, ["Requirement", "Type", "Statement", "Covered by", "Coverage"].map((x) => h("th", {}, x)))),
       h("tbody", {}, rows.map((r) => h("tr", {},
-        h("td", { class: "mono nowrap" }, r.key), h("td", {}, badge(r.type, typeTone[r.type])),
+        h("td", { class: "mono nowrap" }, rowOpener(r.key, () => reqDrawer(reqByKey[r.key]))), h("td", {}, badge(r.type, typeTone[r.type])),
         h("td", { class: "statement" }, r.statement, h("div", { class: "small muted" }, r.section)),
         h("td", {}, h("div", { class: "row wrap" }, r.stories.map((s) => h("button", { class: "chip", style: { cursor: "pointer" }, title: s.title, onclick: () => storyDrawer(byId[s.id]) }, s.key)))),
         h("td", {}, r.stories.length ? badge("Covered", "green") : badge("Gap", "red"))))))));
@@ -759,7 +777,8 @@ async function viewTrace(body) {
             h("td", {}, String(p.requirements)),
             h("td", { style: { minWidth: "140px" } }, p.covered + " of " + p.requirements + " (" + pct + "%)", meter(pct)),
             h("td", {}, p.gaps.length ? h("div", { class: "row wrap" }, p.gaps.map((g) =>
-              h("span", { class: "chip", title: g.statement + " (" + g.reason + ")" }, issueIcon("warning"), g.key))) : badge("Covered", "green")));
+              h("button", { class: "chip", style: { cursor: "pointer" }, title: g.statement + " (" + g.reason + ")", "aria-label": g.key + ": " + g.reason,
+                onclick: () => reqDrawer(reqByKey[g.key]) }, issueIcon("warning"), g.key))) : badge("Covered", "green")));
         }))))) : null,
     t.orphans.length ? h("div", { class: "callout warn", style: { marginBottom: "16px" } }, icon("alert"),
       h("div", {}, h("b", {}, "Stories not linked to any requirement: "),
@@ -811,7 +830,7 @@ async function baselinesCard() {
       body: h("div", { class: "stack" }, field("Name", name), field("Contents", segmented([["approved", "Approved items only"], ["all", "Approved + draft"]], scope, (v) => (scope = v))),
         field("Note", note)),
       actions: [{ label: "Create baseline", kind: "btn-primary", onClick: async () => {
-        if (!name.value.trim()) throw new Error("Name is required");
+        requireValue(name, "Name is required");
         const r = await api.post(base() + "/baselines", { name: name.value, note: note.value, scope });
         toast("Baseline v" + r.version + " created", "ok"); rerender();
       } }],
