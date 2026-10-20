@@ -2,10 +2,9 @@
 
 ## Reporting a vulnerability
 
-Please do not open a public issue. Use GitHub's private vulnerability reporting
-(repository **Security** tab → **Report a vulnerability**) and include the affected version
-(`version` in `/api/meta`), reproduction steps and impact. Expect an acknowledgement within a
-few working days.
+Please do not open a public issue. Contact the maintainer, [@bellchu](https://github.com/bellchu),
+privately through GitHub and include the affected version (`version` in `/api/meta`),
+reproduction steps and impact. Expect an acknowledgement within a few working days.
 
 ## Scope and design
 
