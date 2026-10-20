@@ -35,3 +35,21 @@ def test_csv_import_merge_replace_and_export(client):
     assert "line 2" in client.post("/api/admin/taxonomy/import", json={"csv": "name,attributes\nX,BAD!\n"}).json()["detail"]
     exported = client.get("/api/admin/taxonomy.csv").text
     assert exported.splitlines()[0] == "name,attributes,keywords,description" and "Ophthalmic devices,udi_tracked; sterile" in exported
+
+
+def test_invalidate_during_a_load_is_not_overwritten_by_the_stale_result(client, monkeypatch):
+    from app import db
+    taxonomy.invalidate()
+    real_rows, raced = db.rows, []
+
+    def racing_rows(sql, *args, **kwargs):
+        out = real_rows(sql, *args, **kwargs)
+        if "FROM product_classes" in sql and not raced:
+            raced.append(1)  # a writer commits and invalidates after this reader's SELECT
+            client.post("/api/admin/taxonomy/classes", json={"name": "Raced class", "keywords": "raced"})
+        return out
+
+    monkeypatch.setattr(db, "rows", racing_rows)
+    taxonomy.classes()
+    monkeypatch.setattr(db, "rows", real_rows)
+    assert "Raced class" in [c["name"] for c in taxonomy.classes()]
