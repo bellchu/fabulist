@@ -6,7 +6,7 @@ import {
 import { state, setCrumbs } from "./main.js";
 
 const TABS = [["overview", "Overview"], ["sources", "Sources"], ["requirements", "Requirements"],
-  ["stories", "Stories"], ["trace", "Traceability"], ["export", "Export"]];
+  ["stories", "Stories"], ["trace", "Traceability"], ["audit", "Audit"], ["export", "Export"]];
 const TYPE_COLORS = { business: "#5867e8", functional: "#0176d3", "non-functional": "#dd7a01", constraint: "#ba0517", rule: "#06a59a" };
 
 // Filters survive re-renders within the session.
@@ -24,7 +24,7 @@ export async function renderProject(content, pid, tab) {
   setCrumbs({ href: "#/", label: "Projects" }, project.name);
   const body = h("div");
   mount(content, header(project), stepper(project), tabBar(project, tab), body);
-  const view = { overview: viewOverview, sources: viewSources, requirements: viewRequirements, stories: viewStories, trace: viewTrace, export: viewExport }[tab] || viewOverview;
+  const view = { overview: viewOverview, sources: viewSources, requirements: viewRequirements, stories: viewStories, trace: viewTrace, audit: viewAudit, export: viewExport }[tab] || viewOverview;
   await view(body);
   revealCurrentStep(content);  // after the view: measuring a half-built (short) page resets its scroll
   schedulePoll();
@@ -737,6 +737,39 @@ async function refineDialog(story, closeDrawer) {
 }
 
 // ---- traceability -------------------------------------------------------
+
+const AUDIT_PAGE = 50;
+
+async function viewAudit(body) {
+  const facets = await api.get(base() + "/history/filters");
+  const actionSel = select([["", "All actions"], ...facets.actions.map((a) => [a, a])], "", { "aria-label": "Filter by action", style: { width: "auto", minWidth: "180px" } });
+  const actorSel = select([["", "All users"], ...facets.actors.map((a) => [a, a])], "", { "aria-label": "Filter by user", style: { width: "auto", minWidth: "180px" } });
+  const list = h("div", { class: "card-body" });
+  const more = h("button", { class: "btn", style: { margin: "0 16px 16px" } }, "Load more");
+  const status = h("span", { class: "muted small" });
+  let rows = [];
+  const load = async (reset) => {
+    if (reset) rows = [];
+    const q = new URLSearchParams({ limit: AUDIT_PAGE });
+    if (actionSel.value) q.set("action", actionSel.value);
+    if (actorSel.value) q.set("actor", actorSel.value);
+    if (rows.length) q.set("before", rows[rows.length - 1].n);
+    const page = await api.get(base() + "/history?" + q);
+    rows = rows.concat(page);
+    list.replaceChildren(historyList(rows, { showItem: true, group: false }));
+    const last = page.length < AUDIT_PAGE;
+    more.style.display = last ? "none" : "";  // `hidden` loses to .btn's display rule
+    status.textContent = rows.length + " entr" + (rows.length === 1 ? "y" : "ies") + (last ? "" : " shown");
+  };
+  more.onclick = guard(() => load(false));
+  actionSel.onchange = actorSel.onchange = guard(() => load(true));
+  mount(body, h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("h3", {}, "Audit trail"), status,
+      h("button", { class: "btn btn-sm right", onclick: () => download(base() + "/history.csv") }, icon("download"), "Export CSV")),
+    h("div", { class: "row wrap", style: { padding: "12px 16px 0" } }, actionSel, actorSel),
+    list, more));
+  await load(true);
+}
 
 async function viewTrace(body) {
   const [t, stories, reqs] = await Promise.all([api.get(base() + "/traceability"), api.get(base() + "/stories"), api.get(base() + "/requirements")]);

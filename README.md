@@ -35,7 +35,7 @@ IDs → human review → epics, features and stories → requirements traceabili
 6. **Review discussions**: comment threads on requirements and stories, with resolve/reopen and
    open-discussion badges. Viewers (business reviewers) can comment without edit rights.
 7. **Audit trail**: every manual edit, review decision, deletion, sync and AI run is recorded
-   with who, when and field-level changes. The complete trail exports as CSV (oldest first) from the project overview.
+   with who, when and field-level changes. The project's **Audit** tab lets reviewers filter by action and user and page through the whole trail; it also exports as CSV (oldest first).
 8. **Export**: a stakeholder HTML report (preview in the browser, print to PDF), Excel (stories, requirements, RTM sheets), Jira CSV, Azure DevOps CSV,
    Markdown, CSV, JSON and Gherkin `.feature` test scenarios (tagged with story, requirement and
    compliance IDs for end-to-end traceability), or push directly to **Jira**, **Azure DevOps** or **GitHub Issues**, publish a **Confluence** page,
