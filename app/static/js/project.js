@@ -192,7 +192,7 @@ async function viewOverview(body) {
       stat("Coverage", p.coverage + "%", "Requirements linked to stories", p.coverage),
       stat("Requirement quality", p.requirement_quality || "–", "ISO 29148 checks", p.requirement_quality),
       stat("Story quality", p.story_quality || "–", "INVEST + Gherkin checks", p.story_quality)),
-    h("div", { class: "grid grid-2" },
+    h("div", { class: "grid grid-2", style: { alignItems: "start" } },
       h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Requirement mix")),
         h("div", { class: "card-body" }, total ? [
           h("div", { class: "typebar" }, Object.entries(p.requirement_types).filter(([, n]) => n).map(([t, n]) =>
