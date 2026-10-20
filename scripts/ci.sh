@@ -7,7 +7,8 @@ name="fabulist-ci-pg-$$"
 trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
 docker run -d --rm --name "$name" -e POSTGRES_USER=fabulist -e POSTGRES_PASSWORD=fabulist \
   -e POSTGRES_DB=fabulist_test pgvector/pgvector:pg16 >/dev/null
-until docker exec "$name" pg_isready -q -U fabulist -d fabulist_test; do sleep 1; done
+# TCP, not the socket: the image's temporary init server answers on the socket only, then restarts.
+until docker exec "$name" pg_isready -q -h 127.0.0.1 -U fabulist -d fabulist_test; do sleep 1; done
 echo "== lint + tests"
 docker run --rm --link "$name:db" -v "$PWD:/src" -w /src -v fabulist-pip-cache:/root/.cache/pip \
   -e TEST_DATABASE_URL=postgresql://fabulist:fabulist@db:5432/fabulist_test python:3.12-slim sh -c \
