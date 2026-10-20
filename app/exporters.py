@@ -61,6 +61,14 @@ def _rtm_rows(stories: List[Item], reqs: List[Item]) -> List[List[str]]:
 RTM_HEADER = ["requirement", "type", "statement", "source", "story_keys", "story_titles", "coverage"]
 
 
+HISTORY_HEADER = ["When (UTC)", "Item", "Type", "Action", "Actor", "Summary", "Changes"]
+
+
+def history_csv(entries: List[Dict[str, Any]]) -> Output:
+    return _csv(HISTORY_HEADER, [[e["created"], e["item_key"], e["item_type"], e["action"], e["actor"], e["summary"],
+                                  json.dumps(e["changes"], ensure_ascii=False, sort_keys=True)] for e in entries])
+
+
 def stories_csv(stories: List[Item], reqs: List[Item]) -> Output:
     return _csv(STORY_COLUMNS, [[_cell(s, c) for c in STORY_COLUMNS] for s in stories])
 

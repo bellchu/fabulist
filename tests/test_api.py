@@ -372,3 +372,19 @@ def test_product_class_coverage(client):
     assert bio["requirements"] == 2 and bio["covered"] == 1
     assert bio["gaps"] == [{"key": ret["key"], "statement": ret["statement"], "reason": "linked stories do not address this product class"}]
     assert prods["Implants and devices"]["gaps"][0]["reason"] == "no linked story"
+
+
+def test_audit_trail_csv_export_is_complete_oldest_first_and_formula_safe(client):
+    import csv, io
+    pid = client.post("/api/projects", json={"name": "Audit Export", "platform": "generic"}).json()["id"]
+    r = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall export invoices to CSV."}).json()
+    client.patch("/api/projects/%s/requirements/%s" % (pid, r["id"]), json={"statement": "=HYPERLINK(\"x\") The system shall export invoices."})
+    resp = client.get("/api/projects/%s/history.csv" % pid)
+    assert resp.status_code == 200 and resp.headers["content-type"].startswith("text/csv")
+    assert 'filename="audit-export-audit-trail.csv"' in resp.headers["content-disposition"]
+    rows = list(csv.DictReader(io.StringIO(resp.text)))
+    assert [x["Action"] for x in rows] == ["created", "edited"]
+    assert rows[1]["Item"] == "REQ-001" and rows[1]["Actor"] == "anonymous"
+    assert "statement" in rows[1]["Changes"]
+    assert not any(c.startswith("=") for x in rows for c in x.values())
+    assert client.get("/api/projects/nope/history.csv").status_code == 404
