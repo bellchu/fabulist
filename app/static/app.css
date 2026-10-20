@@ -38,7 +38,7 @@ h1 { font-size: 18px; line-height: 1.25; } h2 { font-size: 16px; } h3 { font-siz
 p { margin: 0; }
 .muted { color: var(--text-3); } .small { font-size: 12px; } .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .nowrap { white-space: nowrap; } .grow { flex: 1; } .right { margin-left: auto; }
-.row { display: flex; align-items: center; gap: 8px; } .row.wrap { flex-wrap: wrap; } .stack { display: flex; flex-direction: column; gap: 12px; }
+.row { display: flex; align-items: center; gap: 8px; } .row.wrap { flex-wrap: wrap; } .row.wrap > .grow { flex: 1 1 240px; } .stack { display: flex; flex-direction: column; gap: 12px; }
 .hidden { display: none !important; }
 
 /* ---- shell: global header + navigation bar ---- */
