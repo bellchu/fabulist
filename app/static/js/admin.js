@@ -312,11 +312,11 @@ async function viewIntegrations(content) {
   const data = await api.get("/api/integrations");
   const list = h("div", { class: "card" });
   mount(content,
-    head("Integrations", "Issue trackers that stories can be pushed to. Re-pushing updates the same issues instead of creating duplicates.",
+    head("Integrations", "Trackers, wiki pages and webhooks that the backlog can be pushed to. Re-pushing updates the same issues instead of creating duplicates.",
       h("button", { class: "btn btn-primary", onclick: () => integrationDialog(data, null) }, icon("plus"), "Add integration")),
     list);
   if (!data.integrations.length) {
-    list.append(empty({ iconName: "link", title: "No integrations yet", text: "Connect Jira or Azure DevOps to push approved stories directly." }));
+    list.append(empty({ iconName: "link", title: "No integrations yet", text: "Connect Jira, Azure DevOps or GitHub Issues to push approved stories, Confluence to publish the backlog, or a webhook for any other system." }));
     return;
   }
   list.append(...data.integrations.map((it) => {
