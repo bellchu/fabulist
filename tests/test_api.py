@@ -403,3 +403,20 @@ def test_api_responses_are_not_cacheable_and_hsts_follows_https(client):
     r = client.get("/api/projects", headers={"X-Forwarded-Proto": "https"})
     assert r.headers["strict-transport-security"].startswith("max-age=")
     assert client.get("/static/app.css").headers["cache-control"] == "no-cache"
+
+
+def test_history_filters_and_cursor_paging(client):
+    pid = client.post("/api/projects", json={"name": "Audit View", "platform": "generic"}).json()["id"]
+    for i in range(5):
+        client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall export report %d to CSV." % i})
+    base = "/api/projects/%s/history" % pid
+    page1 = client.get(base, params={"limit": 2}).json()
+    assert len(page1) == 2 and page1[0]["n"] > page1[1]["n"]
+    page2 = client.get(base, params={"limit": 2, "before": page1[-1]["n"]}).json()
+    assert len(page2) == 2 and page2[0]["n"] < page1[-1]["n"]
+    assert client.get(base, params={"action": "created"}).json().__len__() == 5
+    assert client.get(base, params={"action": "deleted"}).json() == []
+    assert client.get(base, params={"actor": "nobody"}).json() == []
+    f = client.get(base + "/filters").json()
+    assert f == {"actors": ["anonymous"], "actions": ["created"]}
+    assert client.get("/api/projects/nope/history/filters").status_code == 404

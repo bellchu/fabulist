@@ -35,11 +35,22 @@ def record(c: Any, project_id: str, item_type: str, item_id: str, key: str, acti
               (db.new_id(), project_id, item_type, item_id, key, action, who, summary[:300], json.dumps(changes or {}), db.now()))
 
 
-def entries(project_id: str, item_id: str = "", limit: int = 100) -> List[Dict[str, Any]]:
-    if item_id:
-        return db.rows("SELECT * FROM history WHERE project_id=%s AND item_id=%s ORDER BY n DESC LIMIT %s",
-                       (project_id, item_id, limit))
-    return db.rows("SELECT * FROM history WHERE project_id=%s ORDER BY n DESC LIMIT %s", (project_id, limit))
+def entries(project_id: str, item_id: str = "", limit: int = 100, actor: str = "", action: str = "", before: int = 0) -> List[Dict[str, Any]]:
+    """Newest first. `before` is the `n` of the last row of the previous page (cursor paging)."""
+    where, args = ["project_id=%s"], [project_id]
+    for clause, value in (("item_id=%s", item_id), ("actor=%s", actor), ("action=%s", action)):
+        if value:
+            where.append(clause)
+            args.append(value)
+    if before > 0:
+        where.append("n<%s")
+        args.append(before)
+    return db.rows("SELECT * FROM history WHERE %s ORDER BY n DESC LIMIT %%s" % " AND ".join(where), tuple(args) + (limit,))
+
+
+def filter_values(project_id: str) -> Dict[str, List[str]]:
+    return {"actors": [r["v"] for r in db.rows("SELECT DISTINCT actor AS v FROM history WHERE project_id=%s ORDER BY v", (project_id,))],
+            "actions": [r["v"] for r in db.rows("SELECT DISTINCT action AS v FROM history WHERE project_id=%s ORDER BY v", (project_id,))]}
 
 
 def all_entries(project_id: str) -> List[Dict[str, Any]]:

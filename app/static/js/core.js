@@ -331,9 +331,9 @@ function groupBulk(entries) {
   return groups.map((g) => g.items.length < 3 ? g.items : [{ ...g.items[0], item_key: g.items.length + " items (" + g.items[g.items.length - 1].item_key + " – " + g.items[0].item_key + ")", summary: "" }]).flat();
 }
 
-export function historyList(entries, { showItem = false } = {}) {
+export function historyList(entries, { showItem = false, group = showItem } = {}) {
   if (!entries.length) return h("p", { class: "muted small" }, "No changes recorded yet.");
-  return h("div", { class: "stack", style: { gap: "10px" } }, (showItem ? groupBulk(entries) : entries).map((e) => {
+  return h("div", { class: "stack", style: { gap: "10px" } }, (group ? groupBulk(entries) : entries).map((e) => {
     const fields = Object.entries(e.changes || {});
     return h("div", { class: "row", style: { alignItems: "flex-start" } },
       h("span", { class: "dot", style: { marginTop: "7px", background: e.action === "deleted" ? "var(--red)" : e.action === "created" ? "var(--green)" : "var(--accent)" } }),
