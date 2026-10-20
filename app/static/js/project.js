@@ -209,7 +209,7 @@ async function viewOverview(body) {
           : h("div", { class: "card-body muted" }, "No runs yet."))),
     h("div", { class: "card", style: { marginTop: "16px" } }, h("div", { class: "card-head" }, h("h3", {}, "Recent changes"),
       h("span", { class: "muted small" }, "Audit trail of manual edits and reviews"),
-      h("button", { class: "btn btn-sm", title: "Download the complete audit trail as CSV", onclick: () => download(base() + "/history.csv") }, icon("download"), "Export trail")),
+      h("button", { class: "btn btn-sm right", title: "Download the complete audit trail as CSV", onclick: () => download(base() + "/history.csv") }, icon("download"), "Export trail")),
       h("div", { class: "card-body" }, historyList(changes, { showItem: true }))));
 }
 
