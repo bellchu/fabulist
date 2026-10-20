@@ -137,6 +137,7 @@ in-cluster on first deploy. They are never stored in the repository.
 
 - **Logs**: one JSON line per request (`method`, `route`, `status`, `ms`, `user`) and per error,
   ready for Loki or any log pipeline.
+- **Version**: the image carries its git revision (`APP_VERSION`, set by `scripts/deploy.sh`), reported as `version` by the authenticated `/api/meta`.
 - **Metrics**: `/metrics` in Prometheus format, enabled by `METRICS_TOKEN` (bearer auth). It
   covers request rate, status and latency per route, AI runs by stage and outcome, LLM tokens,
   tracker pushes, and inventory gauges. `deploy/k8s/monitoring.yaml` adds a ServiceMonitor,
