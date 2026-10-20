@@ -30,7 +30,7 @@ function shell(route) {
     h("div", { class: "user-chip" },
       state.me.role === "viewer" ? badge("Read-only", "amber") : null,
       isAdmin ? h("a", { class: "btn btn-ghost icon-btn", href: "#/admin/overview", title: "Setup", "aria-label": "Setup" }, icon("settings")) : null,
-      h("span", { class: "muted small" }, state.me.username + " · " + state.me.role),
+      h("span", { class: "muted small", title: state.me.username === "anonymous" ? "Authentication is not configured on this deployment" : "" }, state.me.username === "anonymous" ? "Sign-in disabled" : state.me.username + " · " + state.me.role),
       h("span", { class: "avatar", title: state.me.username }, (state.me.username || "?").slice(0, 2))));
   const nav = h("nav", { class: "context-bar", "aria-label": "Main" },
     h("a", { class: "waffle", href: "#/", title: "App launcher", "aria-label": "Home" }, h("span", {}, Array.from({ length: 9 }, () => h("i")))),
