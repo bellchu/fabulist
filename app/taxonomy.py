@@ -70,7 +70,7 @@ DEFAULT_ATTRIBUTE_AC: Dict[str, str] = {
 
 # ---- live taxonomy (admin-managed, cached) ---------------------------------
 
-_cache: Dict[str, Any] = {"at": 0.0, "classes": None, "rules": None}
+_cache: Dict[str, Any] = {"at": 0.0, "classes": None, "rules": None, "gen": 0}
 _lock = threading.Lock()
 _TTL = 30.0
 
@@ -78,6 +78,7 @@ _TTL = 30.0
 def invalidate() -> None:
     with _lock:
         _cache["at"] = 0.0
+        _cache["gen"] += 1
 
 
 def _load() -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
@@ -88,10 +89,13 @@ def _load() -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     with _lock:
         if _cache["classes"] is not None and time.monotonic() - _cache["at"] < _TTL:
             return _cache["classes"], _cache["rules"]
+        gen = _cache["gen"]
     classes = db.rows("SELECT id, name, attributes, keywords, description FROM product_classes ORDER BY name")
     rules = {r["attribute"]: r["criteria"] for r in db.rows("SELECT attribute, criteria FROM attribute_rules")}
     with _lock:
-        _cache.update(at=time.monotonic(), classes=classes, rules=rules)
+        # An invalidate() that ran while we were reading means this result may predate the write: don't cache it.
+        if _cache["gen"] == gen:
+            _cache.update(at=time.monotonic(), classes=classes, rules=rules)
     return classes, rules
 
 
