@@ -40,3 +40,8 @@ def entries(project_id: str, item_id: str = "", limit: int = 100) -> List[Dict[s
         return db.rows("SELECT * FROM history WHERE project_id=%s AND item_id=%s ORDER BY n DESC LIMIT %s",
                        (project_id, item_id, limit))
     return db.rows("SELECT * FROM history WHERE project_id=%s ORDER BY n DESC LIMIT %s", (project_id, limit))
+
+
+def all_entries(project_id: str) -> List[Dict[str, Any]]:
+    """The complete trail, oldest first (for audit evidence exports)."""
+    return db.rows("SELECT * FROM history WHERE project_id=%s ORDER BY n", (project_id,))

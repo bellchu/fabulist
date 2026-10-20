@@ -611,6 +611,14 @@ def project_history(pid: str, item_id: str = "", limit: int = 100):
     return history.entries(pid, item_id, max(1, min(limit, 500)))
 
 
+@router.get("/api/projects/{pid}/history.csv")
+def history_export(pid: str):
+    project = _project(pid)
+    slug = re.sub(r"[^a-z0-9]+", "-", project["name"].lower()).strip("-") or "project"
+    payload, mime = exporters.history_csv(history.all_entries(pid))
+    return Response(payload, media_type=mime, headers={"Content-Disposition": 'attachment; filename="%s-audit-trail.csv"' % slug})
+
+
 # ---- traceability & export -----------------------------------------------
 
 @router.get("/api/projects/{pid}/traceability")
