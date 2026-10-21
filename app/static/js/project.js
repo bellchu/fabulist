@@ -1,7 +1,7 @@
 // Project workspace: Overview, Sources, Requirements, Stories, Traceability, Export.
 import {
   h, mount, icon, api, guard, toast, modal, confirmBox, drawer, badge, statusTone, typeTone, scorePill, meter, issueIcon,
-  issueList, empty, timeAgo, fmt, duration, field, requireValue, select, linesInput, readLines, tagsInput, segmented, download, historyList,
+  issueList, empty, timeAgo, fmt, duration, debounce, field, requireValue, select, linesInput, readLines, tagsInput, segmented, download, historyList,
 } from "./core.js";
 import { state, setCrumbs } from "./main.js";
 
@@ -458,7 +458,7 @@ async function viewRequirements(body) {
         h("td", {}, h("div", { class: "row", style: { flexWrap: "wrap" } }, badge(r.status, statusTone[r.status]), talkBadge(talk[r.id])))))
         : h("tr", {}, h("td", { colspan: "7", class: "muted", style: { textAlign: "center", padding: "28px" } }, "No requirements match the filters."))))));
   };
-  q.addEventListener("input", () => { filters.reqQ = q.value; renderTable(); });
+  q.addEventListener("input", debounce(() => { filters.reqQ = q.value; renderTable(); }));
   type.addEventListener("change", () => { filters.reqType = type.value; renderTable(); });
   status.addEventListener("change", () => { filters.reqStatus = status.value; renderTable(); });
   flagged.addEventListener("change", () => { filters.reqFlagged = flagged.checked; renderTable(); });
@@ -561,7 +561,7 @@ async function viewStories(body) {
     (!filters.storyStatus || s.status === filters.storyStatus) &&
     (!filters.storyReady || (filters.storyReady === "ready") === s.ready));
   const render = () => { const rows = visible(); box.replaceChildren(filters.storyView === "map" ? storyMap(rows) : storyTable(rows)); };
-  q.addEventListener("input", () => { filters.storyQ = q.value; render(); });
+  q.addEventListener("input", debounce(() => { filters.storyQ = q.value; render(); }));
   status.addEventListener("change", () => { filters.storyStatus = status.value; render(); });
   ready.addEventListener("change", () => { filters.storyReady = ready.value; render(); });
   const points = stories.filter((s) => s.status !== "rejected").reduce((a, s) => a + (s.story_points || 0), 0);
