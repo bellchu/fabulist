@@ -266,17 +266,38 @@ class Confluence:
         data = _request("GET", self.base + "/rest/api/space?limit=1", self.headers)
         return "Connected: %d space(s) visible" % int(data.get("size", len(data.get("results", []))))
 
+    def _update(self, page_id: str, content: Dict[str, Any]) -> Dict[str, Any]:
+        """PUT the next version. One 409 (someone saved between our read and write) is retried with the fresh number."""
+        for attempt in (0, 1):
+            current = _request("GET", "%s/rest/api/content/%s?expand=version" % (self.base, page_id), self.headers)
+            content.update(id=page_id, version={"number": int(current["version"]["number"]) + 1})
+            try:
+                return _request("PUT", "%s/rest/api/content/%s" % (self.base, page_id), self.headers, content)
+            except TrackerError as exc:
+                if attempt == 0 and str(exc).startswith("HTTP 409"):
+                    continue
+                raise
+        raise TrackerError("HTTP 409: the page keeps changing; try again in a moment")  # unreachable; keeps the type checker honest
+
     def publish(self, space: str, title: str, body: str, page_id: Optional[str]) -> Tuple[str, str, bool]:
         content = {"type": "page", "title": title[:255], "space": {"key": space},
                    "body": {"storage": {"value": body, "representation": "storage"}}}
+        data = None
         if page_id:
-            current = _request("GET", "%s/rest/api/content/%s?expand=version" % (self.base, page_id), self.headers)
-            content.update(id=page_id, version={"number": int(current["version"]["number"]) + 1})
-            data = _request("PUT", "%s/rest/api/content/%s" % (self.base, page_id), self.headers, content)
-            created = False
-        else:
-            data = _request("POST", self.base + "/rest/api/content", self.headers, content)
-            created = True
+            try:
+                data, created = self._update(page_id, content), False
+            except TrackerError as exc:
+                if not str(exc).startswith("HTTP 404"):
+                    raise
+                # The page was deleted in Confluence: forget it and publish a fresh one rather than failing forever.
+                content.pop("id", None), content.pop("version", None)
+        if data is None:
+            try:
+                data, created = _request("POST", self.base + "/rest/api/content", self.headers, content), True
+            except TrackerError as exc:
+                if "already exists" in str(exc).lower():
+                    raise TrackerError("%s. Rename the project or the existing page, or delete that page so Fabulist can create its own." % str(exc).rstrip(".")) from exc
+                raise
         link = self.base + ((data.get("_links") or {}).get("webui") or "/pages/viewpage.action?pageId=%s" % data["id"])
         return str(data["id"]), link, created
 

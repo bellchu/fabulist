@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Confluence publishing: a page deleted in Confluence is created again on the next publish (it used to fail with 404 forever); one edit conflict (409) is retried with the fresh version; a title collision says to rename the project or the page.
 - `scripts/deploy.sh` refuses to deploy from a branch other than `main`, with uncommitted or untracked changes, or when HEAD is not the latest `origin/main` (the image is built from the working tree).
 - Webhooks: every delivery carries `X-Fabulist-Delivery` (stable across retries) and `X-Fabulist-Timestamp`, and with a secret `X-Fabulist-Signature-V2` signs `timestamp.body`, so receivers can reject replays and deduplicate; the body-only `X-Fabulist-Signature` is unchanged. Receiver recipe in the README.
 - Git sync: the clone is pinned to the address that passed the private-network check and no longer follows HTTP redirects (a public host could previously redirect it to an internal service, or change its DNS answer between check and clone); a clone that grows past `MAX_REPO_MB` (500) is stopped; the clone timeout is `REPO_CLONE_TIMEOUT` (60 s, was 120 s, which exceeded the proxy timeout); a blocked redirect says to use the canonical URL.
