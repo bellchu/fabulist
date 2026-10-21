@@ -35,7 +35,7 @@ def deploy(work, **env):
 
 def test_clean_up_to_date_main_passes_the_guard(checkout):
     r = deploy(checkout)
-    assert "Refusing" not in r.stderr and "Docker daemon is not running" in r.stderr  # got past the guard to the next stage
+    assert "Refusing" not in r.stderr and "Kubernetes API is unreachable" in r.stderr  # got past the guard to the next stage
 
 
 def test_uncommitted_changes_are_refused(checkout):
