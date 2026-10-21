@@ -40,7 +40,12 @@ function newTokenDialog() {
 
 export async function renderAccount(content) {
   setCrumbs("Account");
-  const tokens = state.me.username === "anonymous" ? null : await api.get("/api/me/tokens");
+  let tokens = null;
+  if (state.me.username !== "anonymous") {
+    try { tokens = await api.get("/api/me/tokens"); } catch (e) {
+      if (!/named account/.test(e.message)) throw e;  // the bootstrap admin has no account row: show the explanation below
+    }
+  }
   const head = h("div", { class: "page-head" }, h("span", { class: "object-icon setup" }, icon("settings")),
     h("div", { class: "grow" }, h("div", { class: "object-label" }, "Account"), h("h1", {}, state.me.username),
       h("p", { class: "sub" }, "Role: " + state.me.role + ". API tokens let scripts and integrations act as you without sharing your password.")),
