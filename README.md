@@ -133,6 +133,7 @@ scripts/dev-db.sh &              # port-forward the cluster Postgres to localhos
 scripts/dev-server.sh            # app on :8765 against a separate fabulist_test database
 scripts/test.sh                  # lint + tests in a Python 3.12 container
 scripts/ci-k8s.sh                # the same gate (minus image build) in a temporary cluster namespace; needs only kubectl
+scripts/ui-check-k8s.sh             # browser regression checks (tests/ui) in a temporary cluster namespace
 scripts/ci.sh                    # full local gate: lint, tests, JS check, dependency audit, image build (Docker only)
 ```
 

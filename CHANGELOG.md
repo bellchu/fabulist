@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- `scripts/ui-check-k8s.sh` runs browser regression checks (`tests/ui/*.py`, headless Chromium) against the app in a temporary cluster namespace. The first one covers the review drawers: Approve & next, Prev/Next, shortcuts, unsaved-edit prompt, scroll kept after save, phone-width footer.
 - `scripts/deploy.sh` builds the image on the cluster (Kaniko in a throwaway namespace, pushed to the node registry) instead of on the developer's machine; `DEPLOY_SSH` is no longer needed.
 - `scripts/ci-k8s.sh` runs the quality gate (lint, tests on a throwaway pgvector database, JS check, dependency audit) in a temporary Kubernetes namespace that is always deleted, so no Docker is needed on the developer's machine.
 - Keyboard shortcuts in the requirement and story review drawers: Ctrl/Cmd+Enter saves, Ctrl/Cmd+Shift+Enter approves and opens the next item, Alt+Left/Right steps to the previous/next item (shown as tooltips on the buttons).
