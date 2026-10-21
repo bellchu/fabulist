@@ -1,5 +1,6 @@
 """LLM provider adapters for provider profiles managed in the admin dashboard."""
 import re
+import threading
 import time
 from typing import Any, Dict, List, Tuple
 from urllib.parse import urlsplit
@@ -18,6 +19,27 @@ class _Retryable(Exception):
     pass
 
 
+# A run in a background thread registers a check that raises when the user cancels. It is called before every attempt and
+# while backing off, so Cancel waits for at most the request already in flight, not for all remaining retries.
+_cancel = threading.local()
+
+
+def set_cancel_check(fn: Any) -> None:
+    _cancel.fn = fn
+
+
+def _check_cancelled() -> None:
+    fn = getattr(_cancel, "fn", None)
+    if fn:
+        fn()
+
+
+def _sleep(seconds: float) -> None:
+    for _ in range(max(1, round(seconds / 0.25))):  # slices, so a cancel is noticed within a quarter of a second
+        _check_cancelled()
+        time.sleep(0.25)
+
+
 HINTS = {401: "check the API key and the endpoint URL", 403: "the key may not have access to this model or endpoint",
          404: "check the model name and the endpoint URL"}
 
@@ -32,6 +54,7 @@ def _post(url: str, headers: dict, payload: dict, timeout: float) -> dict:
     host = urlsplit(url).hostname or url
     last = "unknown error"
     for attempt in range(3):
+        _check_cancelled()
         try:
             resp = httpx.post(url, headers=headers, json=payload, timeout=timeout)
             if resp.status_code == 429 and _is_quota(resp):
@@ -48,8 +71,9 @@ def _post(url: str, headers: dict, payload: dict, timeout: float) -> dict:
             last = str(exc)
         except httpx.HTTPError as exc:
             last = "cannot reach %s (%s): check the endpoint URL and network access" % (host, type(exc).__name__)
+        _check_cancelled()  # the attempt that just failed may have been the one the user was waiting on
         if attempt < 2:
-            time.sleep(1.5 * (2 ** attempt))
+            _sleep(1.5 * (2 ** attempt))
     raise LLMError(last)
 
 

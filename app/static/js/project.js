@@ -135,8 +135,11 @@ function runPanel(stage) {
   });
   let statusLine = null;
   if (running) {
+    // A hung AI provider shows up as a run that stops reporting progress: say so, instead of an endless "Running".
+    const idle = Math.floor((Date.now() - new Date(run.updated || run.created)) / 60000);
     statusLine = h("div", { class: "row small", style: { flexBasis: "100%" } }, badge("Running", "blue"),
-      h("span", { class: "muted grow", id: "run-progress" }, run.progress || "Starting…"),
+      h("span", { class: "muted grow", id: "run-progress" }, run.progress || "Starting…",
+        idle >= 3 ? h("span", { style: { color: "var(--amber)", marginLeft: "8px" } }, "No progress for " + idle + " min. The AI provider may not be responding; you can cancel this run.") : null),
       h("button", { class: "btn btn-sm btn-ghost btn-danger", onclick: guard(async () => {
         await api.post(base() + "/runs/" + run.id + "/cancel"); toast("Cancelling after the current AI request…");
       }) }, "Cancel run"));
