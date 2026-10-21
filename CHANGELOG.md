@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Baselines on phones: the table fits, with a one-line contents summary under each name and the Export/Compare actions in reach.
 - Accessibility: dialog and side-panel footer buttons now meet WCAG AA contrast (4.43:1 → above 4.5:1). Axe-core (WCAG 2.0/2.1 A and AA) is clean on 18 screens, keyboard-only use of the token flow verified.
 - Phone layouts: Requirements, Stories (list), Sources, Product taxonomy and Activity tables keep only the essential columns so the content and row actions fit without sideways scrolling; header buttons and attribute rules wrap and stack.
 - Admin: all API tokens listed on Users & roles (owner, expiry, last used) with revoke.
