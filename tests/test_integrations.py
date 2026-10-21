@@ -293,3 +293,78 @@ def test_unsigned_webhook_still_identifies_the_delivery(monkeypatch):
     integrations.Webhook({"base_url": "https://hooks.example.com/x"}, "")._post({"event": "ping"})
     assert "X-Fabulist-Delivery" in sent[0] and "X-Fabulist-Timestamp" in sent[0]
     assert "X-Fabulist-Signature" not in sent[0] and "X-Fabulist-Signature-V2" not in sent[0]
+
+
+class FakeWiki:
+    """A tiny Confluence: pages by id, version numbers, title uniqueness, and injectable failures."""
+
+    def __init__(self):
+        self.pages, self.titles, self.next_id, self.conflicts, self.calls = {}, set(), 100, 0, []
+
+    def __call__(self, method, url, headers=None, json=None, timeout=None):
+        self.calls.append(method)
+        req = httpx.Request(method, url)
+        if method == "GET" and "/rest/api/content/" in url:
+            pid = url.split("/content/")[1].split("?")[0]
+            if pid not in self.pages:
+                return httpx.Response(404, json={"message": "No content found with id : " + pid}, request=req)
+            return httpx.Response(200, json={"id": pid, "version": {"number": self.pages[pid]}}, request=req)
+        if method == "PUT":
+            if self.conflicts:
+                self.conflicts -= 1
+                return httpx.Response(409, json={"message": "Version must be incremented on update"}, request=req)
+            pid = url.rsplit("/", 1)[1]
+            self.pages[pid] = json["version"]["number"]
+            return httpx.Response(200, json={"id": pid, "_links": {"webui": "/spaces/OTC/pages/" + pid}}, request=req)
+        if method == "POST":
+            if json["title"] in self.titles:
+                return httpx.Response(400, json={"message": "A page with this title already exists: A page already exists with the same TITLE in this space: " + json["title"]}, request=req)
+            self.next_id += 1
+            pid = str(self.next_id)
+            self.pages[pid] = 1
+            return httpx.Response(200, json={"id": pid, "_links": {"webui": "/spaces/OTC/pages/" + pid}}, request=req)
+        return httpx.Response(404, json={}, request=req)
+
+
+def _wiki_setup(client, monkeypatch):
+    wiki = FakeWiki()
+    monkeypatch.setattr(integrations.httpx, "request", wiki)
+    conn = client.post("/api/admin/integrations", json={"kind": "confluence", "name": "Wiki", "base_url": "https://acme.atlassian.net/wiki",
+                                                         "username": "ana@example.com", "target": "OTC", "token": "t"}).json()
+    pid, _ = _project_with_stories(client)
+    push = lambda: client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"]}).json()  # noqa: E731
+    return wiki, push
+
+
+def test_confluence_recreates_a_page_that_was_deleted_in_the_wiki(client, monkeypatch):
+    wiki, push = _wiki_setup(client, monkeypatch)
+    first = push()
+    assert first["created"] == 1
+    old_id = next(iter(wiki.pages))
+    wiki.pages.clear()  # someone deleted the page in Confluence
+    again = push()
+    assert again["failed"] == [] and again["created"] == 1, "a deleted page is created again instead of failing forever"
+    new_id = next(iter(wiki.pages))
+    assert new_id != old_id and again["items"][0]["url"].endswith("/pages/" + new_id)
+    third = push()  # and the new page is the one that gets versioned from now on
+    assert third["updated"] == 1 and third["created"] == 0 and wiki.pages[new_id] == 2
+
+
+def test_confluence_retries_once_when_someone_edits_the_page_in_between(client, monkeypatch):
+    wiki, push = _wiki_setup(client, monkeypatch)
+    push()
+    wiki.conflicts = 1
+    r = push()
+    assert r["failed"] == [] and r["updated"] == 1, "one 409 is retried with the fresh version number"
+    wiki.conflicts = 2
+    r = push()
+    assert r["updated"] == 0 and "HTTP 409" in r["failed"][0]["error"], "a persistent conflict is reported, not retried forever"
+
+
+def test_confluence_title_collision_says_what_to_do(client, monkeypatch):
+    wiki, push = _wiki_setup(client, monkeypatch)
+    wiki.titles.add("Push backlog")  # a page with that title already exists in the space
+    r = push()
+    assert r["created"] == 0
+    error = r["failed"][0]["error"]
+    assert "already exists" in error and "Rename" in error
