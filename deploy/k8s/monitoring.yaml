@@ -407,6 +407,138 @@ data:
          "refId": "A"
         }
        ]
+      },
+      {
+       "type": "row",
+       "title": "Reliability and security",
+       "collapsed": false,
+       "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 24,
+        "h": 1
+       },
+       "panels": []
+      },
+      {
+       "type": "stat",
+       "title": "Database",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 0,
+        "y": 29,
+        "w": 4,
+        "h": 8
+       },
+       "fieldConfig": {
+        "defaults": {
+         "mappings": [
+          {
+           "type": "value",
+           "options": {
+            "0": {
+             "text": "UNREACHABLE",
+             "color": "red"
+            },
+            "1": {
+             "text": "Connected",
+             "color": "green"
+            }
+           }
+          }
+         ],
+         "thresholds": {
+          "mode": "absolute",
+          "steps": [
+           {
+            "color": "red",
+            "value": null
+           },
+           {
+            "color": "green",
+            "value": 1
+           }
+          ]
+         }
+        },
+        "overrides": []
+       },
+       "options": {
+        "colorMode": "background",
+        "graphMode": "none"
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "fabulist_database_up",
+         "refId": "A"
+        }
+       ]
+      },
+      {
+       "type": "timeseries",
+       "title": "Failed sign-ins and token attempts (per 10 min)",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 4,
+        "y": 29,
+        "w": 10,
+        "h": 8
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "sum by (kind) (increase(fabulist_auth_failures_total[10m]))",
+         "refId": "A",
+         "legendFormat": "{{kind}}"
+        }
+       ]
+      },
+      {
+       "type": "timeseries",
+       "title": "Edit conflicts (1 h) and database 503s (5 min)",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 14,
+        "y": 29,
+        "w": 10,
+        "h": 8
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "increase(fabulist_edit_conflicts_total[1h])",
+         "refId": "A",
+         "legendFormat": "edit conflicts"
+        },
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "increase(fabulist_database_unavailable_total[5m])",
+         "refId": "B",
+         "legendFormat": "database 503s"
+        }
+       ]
       }
      ],
      "tags": [
