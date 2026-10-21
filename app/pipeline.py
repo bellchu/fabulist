@@ -224,6 +224,14 @@ def _ask(profile: Dict[str, Any], opts: Dict[str, Any], system: str, prompt: str
                              "a smaller section size, or a lower temperature.")
 
 
+def _ask_at(where: str, profile: Dict[str, Any], opts: Dict[str, Any], system: str, prompt: str, usage: Usage) -> List[Any]:
+    """_ask, but a failure says which part of the work it happened in and that the run changed nothing."""
+    try:
+        return _ask(profile, opts, system, prompt, usage)
+    except (llm.LLMError, ValueError) as exc:
+        raise type(exc)("%s: %s. Nothing was saved; existing results were kept." % (where, str(exc).rstrip(".")))
+
+
 def _platform_context(platform: str) -> str:
     profile = PLATFORMS.get(platform, PLATFORMS["generic"])
     classes = "; ".join("%s (%s)" % (c["name"], ", ".join(c["attributes"])) for c in taxonomy.classes())
@@ -269,7 +277,7 @@ def extract_requirements(documents: List[Dict[str, Any]], platform: str, profile
         else:
             prompt = "%s\n\nDocument: %s\nSection: %s > %s\n\nBRD text:\n%s" % (
                 _platform_context(platform), doc["filename"], sec["epic"], sec["heading"], sec["text"])
-            raw = _ask(profile, opts, REQ_SYSTEM, prompt, usage)
+            raw = _ask_at("Section %d of %d (%s)" % (i, len(work), sec["heading"][:60]), profile, opts, REQ_SYSTEM, prompt, usage)
         for r in raw:
             req = normalize_requirement(r, sec, doc["filename"])
             if req and _norm_key(req["statement"]) not in seen:
@@ -370,7 +378,7 @@ def generate_stories(reqs: List[Dict[str, Any]], project_id: str, platform: str,
         context = ("\n\nRelated BRD context (for consistency only):\n" + "\n---\n".join(h["text"][:600] for h in related)) if related else ""
         prompt = "%s%s\n\nEpic: %s\nFeature area: %s\n\nRequirements:\n%s" % (
             _platform_context(platform), context, epic, section, lines)
-        for s in _ask(profile, opts, STORY_SYSTEM, prompt, usage):
+        for s in _ask_at("Story group %d of %d (%s)" % (i, len(batches), section[:60]), profile, opts, STORY_SYSTEM, prompt, usage):
             if isinstance(s, dict):
                 s.setdefault("epic", epic)
                 s.setdefault("feature", section)
