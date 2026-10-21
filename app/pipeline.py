@@ -271,7 +271,7 @@ def extract_requirements(documents: List[Dict[str, Any]], platform: str, profile
         raise ValueError("Documents produce %d sections, above the limit of %d. Raise 'Max sections per run' in Admin > Generation settings or split the documents."
                          % (len(work), opts["max_chunks_per_run"]))
     out: List[Dict[str, Any]] = []
-    seen = set()
+    seen: Dict[str, Dict[str, Any]] = {}
     for i, (doc, sec) in enumerate(work, 1):
         progress("Reading section %d of %d: %s" % (i, len(work), sec["heading"][:60]))
         if profile["kind"] == "mock":
@@ -282,10 +282,23 @@ def extract_requirements(documents: List[Dict[str, Any]], platform: str, profile
             raw = _ask_at("Section %d of %d (%s)" % (i, len(work), sec["heading"][:60]), profile, opts, REQ_SYSTEM, prompt, usage)
         for r in raw:
             req = normalize_requirement(r, sec, doc["filename"])
-            if req and _norm_key(req["statement"]) not in seen:
-                seen.add(_norm_key(req["statement"]))
+            if not req:
+                continue
+            first = seen.get(_norm_key(req["statement"]))
+            if first is None:
+                seen[_norm_key(req["statement"])] = req
                 out.append(req)
+            else:
+                _add_source(first, req)
     return out
+
+
+def _add_source(kept: Dict[str, Any], repeat: Dict[str, Any]) -> None:
+    """The same requirement stated again (in another BRD, or under another BRD id): keep one requirement, but not at the cost
+    of forgetting where else it came from."""
+    also = repeat["source_ref"] + (" (%s)" % repeat["source_id"] if repeat.get("source_id") else "")
+    if "; also " + also not in kept["source_ref"]:
+        kept["source_ref"] = (kept["source_ref"] + "; also " + also)[:300]
 
 
 # ---- stage 2: stories ----------------------------------------------------
