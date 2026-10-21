@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import admin, config, db, exporters, integrations, metrics, pipeline, portability, repos, settings, sso, taxonomy, users, workspace
+from . import admin, config, db, exporters, integrations, llm, metrics, pipeline, portability, repos, settings, sso, taxonomy, users, workspace
 from .profiles import PLATFORMS
 
 log = logging.getLogger("fabulist")
@@ -206,6 +206,13 @@ async def database_unavailable(_request: Request, exc: Exception):
     metrics.inc("fabulist_database_unavailable_total")
     return JSONResponse({"detail": "The database is temporarily unavailable. Please try again in a moment."},
                         status_code=503, headers={"Retry-After": "5"})
+
+
+@app.exception_handler(llm.AIBusy)
+async def ai_busy(_request: Request, _exc: Exception):
+    metrics.inc("fabulist_ai_busy_total")
+    return JSONResponse({"detail": "The AI service is busy with other requests. Try again in a moment."}, status_code=429,
+                        headers={"Retry-After": "5"})
 
 
 @app.exception_handler(settings.SettingsError)

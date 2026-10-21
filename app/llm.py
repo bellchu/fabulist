@@ -2,10 +2,12 @@
 import re
 import threading
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 import httpx
+
+from . import config
 
 
 class LLMError(RuntimeError):
@@ -87,7 +89,46 @@ def _error_text(resp: httpx.Response) -> str:
         return resp.text[:200]
 
 
+class AIBusy(Exception):
+    """Too many AI calls made inside requests are in flight. Not an LLMError/RuntimeError on purpose: endpoints turn those
+    into 502 "failed" answers, while this is a 429 telling the person to retry."""
+
+
+_slots_lock = threading.Lock()
+_slots: Optional[Tuple[int, threading.BoundedSemaphore]] = None
+
+
+def _interactive_slots() -> threading.BoundedSemaphore:
+    global _slots
+    size = max(1, config.MAX_INTERACTIVE_AI_CALLS)
+    with _slots_lock:
+        if _slots is None or _slots[0] != size:
+            _slots = (size, threading.BoundedSemaphore(size))
+        return _slots[1]
+
+
+def _reset_interactive_slots() -> None:
+    global _slots
+    with _slots_lock:
+        _slots = None
+
+
 def complete(profile: Dict[str, Any], system: str, user: str, opts: Dict[str, Any]) -> Tuple[str, Usage]:
+    """One provider call. Calls made inside a web request hold a request thread for as long as the provider takes (40 of them
+    froze the whole app when the provider hung), so only a few may be in flight: the rest are refused at once instead of
+    waiting. Background runs are bounded by their own pool and are never refused here."""
+    if getattr(_cancel, "fn", None):
+        return _complete(profile, system, user, opts)
+    slots = _interactive_slots()
+    if not slots.acquire(blocking=False):
+        raise AIBusy("The AI service is busy with other requests")
+    try:
+        return _complete(profile, system, user, opts)
+    finally:
+        slots.release()
+
+
+def _complete(profile: Dict[str, Any], system: str, user: str, opts: Dict[str, Any]) -> Tuple[str, Usage]:
     kind, model = profile["kind"], profile["model"]
     timeout = float(opts.get("timeout_seconds", 120))
     temperature = float(opts.get("temperature", 0.2))

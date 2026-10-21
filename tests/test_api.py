@@ -753,3 +753,32 @@ def test_a_stuck_run_does_not_hold_a_slot_forever(client, monkeypatch):
     assert client.post("/api/projects/%s/runs" % b, json={"stage": "requirements"}).status_code == 202, "a run with no progress for 15 minutes no longer counts"
     _wait(client, b)
     db.execute("UPDATE runs SET status='failed' WHERE id=%s", (stuck,))  # the fixture waits for 'running' rows at teardown
+
+
+def test_interactive_ai_endpoints_answer_429_when_too_many_are_in_flight_and_the_api_stays_up(client, monkeypatch):
+    import threading
+    import httpx
+    from app import config, llm
+    monkeypatch.setattr(config, "MAX_INTERACTIVE_AI_CALLS", 1)
+    llm._reset_interactive_slots()
+    prov = client.post("/api/admin/providers", json={"name": "Slow", "kind": "openai", "base_url": "https://llm.test/v1", "model": "m", "api_key": "k"}).json()["id"]
+    pid = client.post("/api/projects", json={"name": "Busy", "platform": "generic"}).json()["id"]
+    rid = client.post("/api/projects/%s/requirements" % pid, json={"statement": "Users should be able to do things quickly and easily."}).json()["id"]
+    entered, release = threading.Event(), threading.Event()
+
+    def slow(url, headers=None, json=None, timeout=None):
+        entered.set()
+        release.wait(10)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "[]"}}], "usage": {}}, request=httpx.Request("POST", url))
+    monkeypatch.setattr(llm.httpx, "post", slow)
+    url = "/api/projects/%s/requirements/%s/refine" % (pid, rid)
+    first = threading.Thread(target=lambda: client.post(url, json={"provider_id": prov}))
+    first.start()
+    try:
+        assert entered.wait(5)
+        busy = client.post(url, json={"provider_id": prov})
+        assert busy.status_code == 429 and busy.headers["retry-after"] and "busy" in busy.json()["detail"].lower()
+        assert client.get("/api/projects").status_code == 200, "the API keeps answering"
+    finally:
+        release.set()
+        first.join(10)
