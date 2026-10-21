@@ -2,11 +2,13 @@
 import json
 import logging
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Body, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from . import config, db, embeddings, exporters, history, integrations, llm, metrics, parsing, pipeline, quality, settings
@@ -323,11 +325,40 @@ def _run_stage(run_id: str, pid: str, stage: str, provider_id: str, scope: str, 
                    "WHERE id=%s AND status='running'", (msg[:500], usage["in"], usage["out"], int((time.monotonic() - started) * 1000), run_id))
 
 
+_pool_lock = threading.Lock()
+_pool: Optional[Tuple[int, ThreadPoolExecutor]] = None
+
+
+def _run_pool() -> ThreadPoolExecutor:
+    """AI runs last minutes. Run in the web server's shared worker pool they starve every other request: 40 slow runs
+    (its size) made the whole app, /healthz included, stop answering. They get their own bounded pool instead."""
+    global _pool
+    size = max(1, config.MAX_CONCURRENT_RUNS)
+    with _pool_lock:
+        if _pool is None or _pool[0] != size:
+            if _pool:
+                _pool[1].shutdown(wait=False)  # runs already started keep going
+            _pool = (size, ThreadPoolExecutor(max_workers=size, thread_name_prefix="run"))
+        return _pool[1]
+
+
+def shutdown_runs() -> None:
+    global _pool
+    with _pool_lock:
+        if _pool:
+            _pool[1].shutdown(wait=False, cancel_futures=True)
+        _pool = None  # a later start (tests, reload) creates a fresh pool instead of using a dead one
+
+
+def _stale_cutoff() -> str:
+    return (datetime.now(timezone.utc) - timedelta(minutes=config.STALE_RUN_MINUTES)).isoformat(timespec="milliseconds")
+
+
 def _recover_stuck_runs(pid: str) -> None:
     """A run whose AI provider stopped answering would block its project until a restart. One with no progress for
     STALE_RUN_MINUTES is marked failed (and asked to stop), so a new run can start; if its thread ever wakes up it will
     find it is no longer running and write nothing."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=config.STALE_RUN_MINUTES)).isoformat(timespec="milliseconds")
+    cutoff = _stale_cutoff()
     for r in db.rows("UPDATE runs SET status='failed', cancel_requested=TRUE, progress='', error=%s "
                      "WHERE project_id=%s AND status='running' AND coalesce(updated, created) < %s RETURNING stage",
                      ("Marked as stuck: no progress for %d minutes. The AI provider may have stopped responding; start a new run." % config.STALE_RUN_MINUTES, pid, cutoff)):
@@ -335,7 +366,7 @@ def _recover_stuck_runs(pid: str) -> None:
 
 
 @router.post("/api/projects/{pid}/runs", status_code=202)
-def start_run(pid: str, body: RunIn, tasks: BackgroundTasks, request: Request):
+def start_run(pid: str, body: RunIn, request: Request):
     _project(pid)
     if body.stage not in STAGES:
         raise HTTPException(400, "Unknown stage")
@@ -349,11 +380,16 @@ def start_run(pid: str, body: RunIn, tasks: BackgroundTasks, request: Request):
     _recover_stuck_runs(pid)
     if db.one("SELECT 1 AS x FROM runs WHERE project_id=%s AND status='running'", (pid,)):
         raise HTTPException(409, "A run is already in progress for this project")
+    busy = db.one("SELECT count(*) AS n FROM runs WHERE status='running' AND coalesce(updated, created) >= %s", (_stale_cutoff(),))["n"]
+    if busy >= config.MAX_CONCURRENT_RUNS:  # runs that stopped making progress do not count: they are recovered above
+        metrics.inc("fabulist_runs_total", stage=body.stage, status="rejected")
+        raise HTTPException(429, "%d AI runs are already in progress on this server. Try again in a few minutes." % busy,
+                            headers={"Retry-After": "60"})
     rid = db.new_id()
     db.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, actor, created) "
                "VALUES (%s,%s,'running',%s,%s,%s,%s,%s)",
                (rid, pid, body.stage, profile["name"], profile["model"], history.actor(request), db.now()))
-    tasks.add_task(_execute_run, rid, pid, body.stage, profile["id"], body.scope)
+    _run_pool().submit(_execute_run, rid, pid, body.stage, profile["id"], body.scope)
     return {"id": rid, "status": "running"}
 
 
