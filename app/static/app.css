@@ -260,8 +260,11 @@ table.table { width: 100%; border-collapse: collapse; background: var(--surface)
 @media (max-width: 1100px) { .grid-3 { grid-template-columns: 1fr 1fr; } }
 /* attribute rules: name beside the criterion on wide screens (the mobile override is in the media block below) */
 .form-grid.rule-row { grid-template-columns: 200px 1fr; }
+.show-sm { display: none; }  /* summaries that replace a hidden column on phones */
 @media (max-width: 820px) {
   .form-grid.rule-row { grid-template-columns: 1fr; }
+  .show-sm { display: block; }
+  .fmt-select { width: 130px !important; }  /* the longest option would otherwise set the cell's minimum width */
   .page-head .row { flex-wrap: wrap; }  /* header action buttons wrap instead of overflowing the card */
   .hide-sm { display: none; }  /* secondary table columns, so the row actions stay on screen */
   .table .statement { min-width: 170px; }

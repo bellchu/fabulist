@@ -897,18 +897,19 @@ async function baselinesCard() {
       h("div", { class: "muted small" }, "Versioned sign-off snapshots of the backlog for audit and release planning.")),
       h("button", { class: "btn btn-sm", onclick: create }, icon("plus"), "Create baseline")),
     list.length ? h("div", { class: "table-wrap", style: { marginTop: "8px" } }, h("table", { class: "table" },
-      h("thead", {}, h("tr", {}, ["Version", "Name", "Contents", "Created", ""].map((x) => h("th", {}, x)))),
+      h("thead", {}, h("tr", {}, [["Version", ""], ["Name", ""], ["Contents", "hide-sm"], ["Created", "hide-sm"], ["", ""]].map(([x, c]) => h("th", { class: c }, x)))),
       h("tbody", {}, list.map((b) => {
-        const fmtSel = select(state.meta.formats.map((f) => [f.id, f.label]), "xlsx", { "aria-label": "Format", style: { width: "auto" } });
+        const fmtSel = select(state.meta.formats.map((f) => [f.id, f.label]), "xlsx", { "aria-label": "Format", class: "fmt-select", style: { width: "auto" } });
         return h("tr", {},
           h("td", {}, badge("v" + b.version, "accent")),
-          h("td", {}, h("b", {}, b.name), b.note ? h("div", { class: "muted small" }, b.note) : null),
-          h("td", { class: "small" }, b.requirements + " requirements · " + b.stories + " stories", h("div", { class: "muted" }, b.scope === "approved" ? "Approved only" : "Approved + draft")),
-          h("td", { class: "small" }, timeAgo(b.created), h("div", { class: "muted" }, "by " + (b.actor || "–"))),
-          h("td", { class: "nowrap", style: { textAlign: "right" } },
-            h("span", { class: "row", style: { justifyContent: "flex-end" } }, fmtSel,
+          h("td", {}, h("b", {}, b.name), b.note ? h("div", { class: "muted small" }, b.note) : null,
+            h("div", { class: "muted small show-sm" }, b.requirements + " req · " + b.stories + " stories")),  // the Contents column is hidden on phones
+          h("td", { class: "small hide-sm" }, b.requirements + " requirements · " + b.stories + " stories", h("div", { class: "muted" }, b.scope === "approved" ? "Approved only" : "Approved + draft")),
+          h("td", { class: "small hide-sm" }, timeAgo(b.created), h("div", { class: "muted" }, "by " + (b.actor || "–"))),
+          h("td", { style: { textAlign: "right" } },
+            h("span", { class: "row wrap", style: { justifyContent: "flex-end" } }, fmtSel,
               h("button", { class: "btn btn-sm", onclick: () => download(base() + "/baselines/" + b.id + "/export?format=" + encodeURIComponent(fmtSel.value)) }, icon("download"), "Export"),
-              h("button", { class: "btn btn-sm", onclick: () => compare(b) }, "Compare with current"))));
+              h("button", { class: "btn btn-sm", title: "Compare with the current backlog", "aria-label": "Compare " + b.name + " with the current backlog", onclick: () => compare(b) }, "Compare"))));
       }))))
       : h("div", { class: "card-body muted small" }, "No baselines yet. Create one when the backlog is signed off."));
 }
