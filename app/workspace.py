@@ -946,7 +946,8 @@ def compare_baseline(pid: str, bid: str, to: str = "current"):
     """Differences from a baseline to another baseline (id) or to the current backlog."""
     base = _baseline(pid, bid)
     if to == "current":
-        target, label = _snapshot(pid, "all"), "current backlog"
+        # Same scope as the baseline: against an approved-only sign-off, drafts are not changes.
+        target, label = _snapshot(pid, base["scope"]), "current backlog (%s)" % ("approved only" if base["scope"] == "approved" else "approved and draft")
     else:
         other = _baseline(pid, to)
         target, label = other["snapshot"], "v%d" % other["version"]

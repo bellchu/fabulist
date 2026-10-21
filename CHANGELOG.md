@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Baseline compare now uses the baseline's own scope: an approved-only sign-off is compared with the current *approved* backlog, so drafts added since then no longer show up as changes (a story that left "approved" shows as removed; one newly approved shows as added). An approved-and-draft baseline still compares against approved and draft. The compare label says which (`current backlog (approved only)`).
 - Browser test stability: the token test no longer matches the create dialog's title by mistake (intermittent failure seen in the full suite).
 - Phones: the project header no longer pushes the work off-screen. The counts and description (already shown in the tabs and stepper) are hidden below 820px, so the tabs start at about 290px instead of 600px (measured at 390px wide).
 - The review drawers show the keyboard shortcuts (save, approve & next, previous/next) as a hint line on desktop.
