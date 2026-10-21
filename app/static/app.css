@@ -287,6 +287,10 @@ table.table { width: 100%; border-collapse: collapse; background: var(--surface)
 }
 @keyframes pulse { 50% { opacity: .4; } }
 
+/* ---- keyboard shortcut hint in review drawers ---- */
+.shortcut-hint { flex-basis: 100%; }
+kbd { font: 11px/1 var(--mono, monospace); padding: 2px 5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; background: var(--surface); color: var(--text-2); }
+
 /* ---- print ------------------------------------------------------------------
    Printing or saving a screen as PDF should give the content, on white, in the light palette: no navigation,
    buttons or filters, tables that break cleanly across pages, and nothing clipped. */
