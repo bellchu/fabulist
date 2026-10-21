@@ -20,3 +20,8 @@ def test_print_hides_navigation_and_controls_and_lets_tables_break():
     for selector in (".global-header", ".context-bar", ".tabs", ".path-wrap", ".btn", "select", "input", ".toolbar", ".overlay", ".drawer"):
         assert selector in block.split("display: none")[0], selector + " must be hidden when printing"
     assert "thead { display: table-header-group; }" in block and ".table-wrap { overflow: visible; }" in block and "break-inside: avoid" in block
+
+
+def test_drawer_footer_wraps_so_its_buttons_fit_a_phone():
+    rule = re.search(r"\.drawer-foot \{([^}]*)\}", CSS).group(1)
+    assert "flex-wrap: wrap" in rule
