@@ -186,7 +186,7 @@ async def upload_document(pid: str, file: UploadFile = File(...)):
 @router.post("/api/projects/{pid}/documents/text", status_code=201)
 def add_text_document(pid: str, body: TextDocIn):
     _project(pid)
-    return _add_document(pid, body.name.strip(), body.text[: config.MAX_DOC_CHARS])
+    return _add_document(pid, body.name.strip(), parsing.clip(body.text))
 
 
 @router.get("/api/projects/{pid}/documents")

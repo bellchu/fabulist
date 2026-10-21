@@ -77,6 +77,7 @@ IDs → human review → epics, features and stories → requirements traceabili
 | `EMBED_DIM` | pgvector column size; must match the embeddings model | `256` |
 | `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | optional provider seeded on first start | - |
 | `MAX_UPLOAD_MB`, `CHUNK_CHARS`, `MAX_CHUNKS_PER_RUN`, `RAG_TOP_K` | limits and defaults | 10, 6000, 200, 3 |
+| `MAX_UNZIPPED_MB`, `MAX_PDF_PAGES` | DOCX/XLSX may expand to at most this many MB (decompression-bomb guard; the upload limit counts compressed bytes), and PDFs may have at most this many pages | `200`, `500` |
 | `MAX_DOC_CHARS` | characters kept per pasted/parsed document; API bodies above `max(MAX_UPLOAD_MB, 4 x MAX_DOC_CHARS bytes) + 1 MiB` get `413` | 2000000 |
 | `METRICS_TOKEN` | bearer token for `/metrics` (disabled when unset) | - |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL` | single sign-on (Okta, Entra ID, Google, Keycloak, Salesforce...) | off |
