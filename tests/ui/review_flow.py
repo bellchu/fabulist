@@ -98,6 +98,18 @@ with sync_playwright() as p:
     check(story_first() == "US-120", f"sort: stories sort descending by ID (top is {story_first()})")
     page.get_by_role("button", name="Pts").click()
     check(page.locator("th", has=page.get_by_role("button", name="Pts")).get_attribute("aria-sort") == "ascending", "sort: choosing another column moves the sort to it")
+    # bulk actions on stories: select, confirm (large selection), cancel is a no-op, confirm applies to all
+    page.get_by_role("checkbox", name="Select all").check()
+    check(page.locator("tbody tr.selected").count() == 120 and "120 selected" in page.locator(".bulkbar").inner_text(), "stories bulk: select all marks every row")
+    before_ready = page.locator(".toolbar .right").inner_text()
+    page.locator(".bulkbar").get_by_role("button", name="Reject").click()
+    check(page.get_by_text("Reject 120 stories?").count() == 1, "stories bulk: large selections ask for confirmation")
+    page.get_by_role("button", name="Cancel").click()
+    check(page.locator(".bulkbar").count() == 1 and page.locator("tbody .badge.red").count() == 0, "stories bulk: cancelling changes nothing and keeps the selection")
+    page.locator(".bulkbar").get_by_role("button", name="Approve", exact=True).click()
+    page.get_by_role("button", name="Approve", exact=True).last.click()
+    page.wait_for_function("document.querySelectorAll('tbody .badge.green').length >= 120")
+    check(page.locator(".bulkbar").count() == 0, "stories bulk: confirming approves every selected story and clears the selection")
 
     # bulk actions on a large selection are confirmed first, and cancelling changes nothing
     page.goto(f"{BASE}/#/p/{pid}/requirements")
