@@ -399,6 +399,11 @@ def _label(item: Dict[str, Any]) -> str:
 STALE = "This item was changed by someone else since you opened it. Close it and open it again to see their changes."
 
 
+def _stale() -> HTTPException:
+    metrics.inc("fabulist_edit_conflicts_total")
+    return HTTPException(409, STALE)
+
+
 def _save_item(table: str, pid: str, iid: Optional[str], body: Dict[str, Any], who: str) -> str:
     statuses = STATUSES if table == "requirements" else STORY_STATUSES
     fields = REQ_FIELDS if table == "requirements" else STORY_FIELDS
@@ -416,7 +421,7 @@ def _save_item(table: str, pid: str, iid: Optional[str], body: Dict[str, Any], w
         old_status = status = row["status"]
         seq, rev = row["seq"], row["rev"]
         if expected is not None and expected != rev:
-            raise HTTPException(409, STALE)
+            raise _stale()
     status = body.get("status", status)
     if status not in statuses:
         raise HTTPException(400, "Invalid status")
@@ -437,7 +442,7 @@ def _save_item(table: str, pid: str, iid: Optional[str], body: Dict[str, Any], w
             changes = history.diff(dict(current, status=old_status), dict(item, status=status))
             if c.execute("UPDATE %s SET data=%%s, status=%%s, rev=rev+1 WHERE id=%%s AND rev=%%s" % table,
                          (json.dumps(item), status, iid, rev)).rowcount != 1:
-                raise HTTPException(409, STALE)  # someone saved between our read and this write
+                raise _stale()  # someone saved between our read and this write
             if changes:
                 action = "status changed" if set(changes) == {"status"} else "edited"
                 history.record(c, pid, kind, iid, history.item_key(kind, seq), action, who, _label(item), changes)
@@ -735,6 +740,8 @@ def push_to_tracker(pid: str, body: PushIn, request: Request):
     for outcome in ("created", "updated"):
         metrics.inc("fabulist_tracker_items_total", result[outcome], tracker=conn["kind"], result=outcome)
     metrics.inc("fabulist_tracker_items_total", len(result["failed"]), tracker=conn["kind"], result="failed")
+    if result["remaining"]:
+        metrics.inc("fabulist_tracker_items_total", result["remaining"], tracker=conn["kind"], result="remaining")
     with db.conn() as c:
         history.record(c, pid, "push", conn["id"], target, "pushed to " + conn["kind"], history.actor(request),
                        "%s %s: %d created, %d updated, %d failed%s" % (conn["name"], target, result["created"], result["updated"], len(result["failed"]),

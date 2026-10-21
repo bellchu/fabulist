@@ -39,6 +39,20 @@ spec:
           annotations:
             summary: Fabulist is not reachable by Prometheus
             runbook: "README.md#runbook: check pod status, logs and the database"
+        - alert: FabulistDatabaseUnavailable
+          expr: fabulist_database_up == 0
+          for: 2m
+          labels: {severity: critical, team: fabulist}
+          annotations:
+            summary: Fabulist is running but cannot reach its database (users get 503s)
+            runbook: "README.md#runbook: check postgres-0 and its volume; the app reconnects by itself when the database returns"
+        - alert: FabulistAuthFailureSpike
+          expr: sum(increase(fabulist_auth_failures_total[10m])) > 50
+          for: 5m
+          labels: {severity: warning, team: fabulist}
+          annotations:
+            summary: Many failed sign-ins or API token attempts (possible credential stuffing)
+            runbook: "README.md#runbook: filter the JSON logs for 'failed sign-in', check the source IPs, rotate or disable the targeted account"
         - alert: FabulistHighErrorRate
           expr: sum(rate(fabulist_http_requests_total{status=~"5.."}[10m])) / clamp_min(sum(rate(fabulist_http_requests_total[10m])), 1e-9) > 0.05
           for: 10m

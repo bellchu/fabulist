@@ -535,3 +535,77 @@ def test_other_server_errors_stay_500(client, monkeypatch):
         monkeypatch.setattr(db, "conn", broken)
         assert c.get("/api/projects").status_code == 500
         monkeypatch.setattr(db, "conn", real_conn)  # the fixture's teardown needs the database
+
+
+def _scrape(client):
+    return client.get("/metrics", headers={"Authorization": "Bearer scrape-token"})
+
+
+def test_metrics_keep_working_and_report_the_database_state_during_an_outage(client, monkeypatch):
+    from app import config, db
+    monkeypatch.setattr(config, "METRICS_TOKEN", "scrape-token")
+    client.get("/api/projects")
+    healthy = _scrape(client)
+    assert healthy.status_code == 200 and "fabulist_database_up 1" in healthy.text and "fabulist_projects " in healthy.text
+    real_one = db.one
+
+    def down(*a, **k):
+        raise RuntimeError("connection refused")
+    monkeypatch.setattr(db, "one", down)
+    outage = _scrape(client)  # used to be a 500: the scrape failed and the alert said 'Fabulist is down'
+    assert outage.status_code == 200 and "fabulist_database_up 0" in outage.text
+    assert "fabulist_http_requests_total" in outage.text and "fabulist_projects " not in outage.text
+    monkeypatch.setattr(db, "one", real_one)
+    assert "fabulist_database_up 1" in _scrape(client).text
+
+
+def _counter(text, series):
+    """Value of one exposition line, 0 if it has not been emitted yet (counters are process-wide, so tests compare deltas)."""
+    for line in text.splitlines():
+        if line.startswith(series + " "):
+            return float(line.rsplit(" ", 1)[1])
+    return 0.0
+
+
+def test_database_503s_failed_logins_and_edit_conflicts_are_counted(client, monkeypatch):
+    import psycopg
+    from app import config, db, users
+    monkeypatch.setattr(config, "METRICS_TOKEN", "scrape-token")
+    monkeypatch.setattr(config, "BASIC_USER", "root")
+    monkeypatch.setattr(config, "BASIC_PASSWORD", "root-password-123")
+    users._failures.clear()
+    root = ("root", "root-password-123")
+    series = ['fabulist_auth_failures_total{kind="basic"}', 'fabulist_auth_failures_total{kind="token"}',
+              "fabulist_edit_conflicts_total", "fabulist_database_unavailable_total"]
+    before = {k: _counter(_scrape(client).text, k) for k in series}
+    assert client.get("/api/projects", auth=("root", "wrong")).status_code == 401
+    assert client.get("/api/projects", headers={"Authorization": "Bearer fab_nope"}).status_code == 401
+    pid = client.post("/api/projects", json={"name": "Obs", "platform": "generic"}, auth=root).json()["id"]
+    r = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall export invoices to CSV."}, auth=root).json()
+    client.patch("/api/projects/%s/requirements/%s" % (pid, r["id"]), json={"notes": "x", "rev": 1}, auth=root)
+    assert client.patch("/api/projects/%s/requirements/%s" % (pid, r["id"]), json={"notes": "y", "rev": 1}, auth=root).status_code == 409
+    real_conn = db.conn
+    monkeypatch.setattr(db, "conn", lambda: (_ for _ in ()).throw(psycopg.OperationalError("down")))
+    assert client.get("/api/projects", auth=root).status_code == 503
+    monkeypatch.setattr(db, "conn", real_conn)
+    after = {k: _counter(_scrape(client).text, k) for k in series}
+    assert {k: after[k] - before[k] for k in series} == {k: 1.0 for k in series}
+    users._failures.clear()
+
+
+def test_push_remaining_is_counted(client, monkeypatch):
+    from app import config
+    import httpx
+    from app import integrations
+    monkeypatch.setattr(config, "METRICS_TOKEN", "scrape-token")
+    monkeypatch.setattr(config, "PUSH_BUDGET_SECONDS", 0)
+    monkeypatch.setattr(integrations.httpx, "request", lambda m, u, headers=None, json=None, timeout=None: httpx.Response(
+        201, json={"key": "FAB-1", "id": "1", "number": 1, "html_url": "https://x/1"}, request=httpx.Request(m, u)))
+    conn = client.post("/api/admin/integrations", json={"kind": "jira", "name": "J", "base_url": "https://acme.atlassian.net",
+                                                         "username": "a@b.com", "target": "FAB", "token": "tok-1234"}).json()
+    pid = client.post("/api/projects", json={"name": "P", "platform": "generic"}).json()["id"]
+    client.post("/api/projects/%s/stories" % pid, json={"title": "One", "status": "approved"})
+    client.post("/api/projects/%s/stories" % pid, json={"title": "Two", "status": "approved"})
+    r = client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"], "target": "FAB", "scope": "approved"}).json()
+    assert r["remaining"] == 2
+    assert 'fabulist_tracker_items_total{result="remaining",tracker="jira"} 2' in client.get("/metrics", headers={"Authorization": "Bearer scrape-token"}).text

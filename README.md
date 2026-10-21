@@ -177,7 +177,7 @@ in-cluster on first deploy. They are never stored in the repository.
 - **Version**: the image carries its git revision (`APP_VERSION`, set by `scripts/deploy.sh`), reported as `version` by the authenticated `/api/meta`.
 - **Metrics**: `/metrics` in Prometheus format, enabled by `METRICS_TOKEN` (bearer auth). It
   covers request rate, status and latency per route, AI runs by stage and outcome, LLM tokens,
-  tracker pushes, and inventory gauges. `deploy/k8s/monitoring.yaml` adds a ServiceMonitor,
+  tracker pushes, and inventory gauges. It also reports `fabulist_database_up` (the scrape keeps working during a database outage), failed sign-ins and token attempts by kind, edit conflicts, 503s from an unreachable database, and stories left unpushed by the time limit. `deploy/k8s/monitoring.yaml` adds a ServiceMonitor,
   alert rules and a Grafana dashboard for kube-prometheus-stack.
 
 ### Runbook
@@ -185,6 +185,8 @@ in-cluster on first deploy. They are never stored in the repository.
 | Alert | Check |
 |---|---|
 | FabulistDown | `kubectl -n fabulist get pods`; app logs; `/healthz` returns 503 when Postgres is unreachable (API calls then return a 503 with `Retry-After`), so check `postgres-0` too. The app reconnects by itself when the database returns. |
+| FabulistDatabaseUnavailable | The app is up but `fabulist_database_up` is 0 and users get 503s. `kubectl -n fabulist get pods` and `describe pod postgres-0`; check its volume and logs. No app restart is needed: it reconnects by itself. |
+| FabulistAuthFailureSpike | Filter the JSON logs for `failed sign-in` and look at `ip` and `user`. Repeated failures are throttled per user and per address; disable or rotate the targeted account and block the source at the edge if it persists. |
 | FabulistHighErrorRate | Filter logs for `status >= 500`; look for database errors or provider timeouts. |
 | FabulistAIRunsFailing | Admin → Activity shows each run's error. Use Admin → AI providers → Test to verify the endpoint, key and model. |
 | FabulistDependencyAudit | `kubectl -n fabulist logs job/<latest fabulist-dep-audit job>` lists packages and fixed versions; upgrade `requirements.txt`, run `scripts/test.sh`, redeploy. |
