@@ -10,7 +10,7 @@ const TABS = [["overview", "Overview"], ["sources", "Sources"], ["requirements",
 const TYPE_COLORS = { business: "#5867e8", functional: "#0176d3", "non-functional": "#dd7a01", constraint: "#ba0517", rule: "#06a59a" };
 
 // Filters survive re-renders within the session.
-const filters = { reqQ: "", reqType: "", reqStatus: "", reqFlagged: false, storyQ: "", storyStatus: "", storyView: "map", storyReady: "", traceGaps: false, exportScope: "all" };
+const filters = { reqQ: "", reqType: "", reqStatus: "", reqFlagged: false, reqSort: "", reqDir: 1, storyQ: "", storyStatus: "", storyView: "map", storyReady: "", traceGaps: false, exportScope: "all" };
 let ctx = null;
 let pollTimer = null;
 
@@ -427,6 +427,15 @@ const talkBadge = (n) => (n ? h("span", { class: "chip", title: n + " open discu
 
 const BULK_CONFIRM_AT = 10;  // a bulk change this large is confirmed first: it is one click for hundreds of reviews
 
+const STATUS_RANK = { draft: 0, approved: 1, excluded: 2 };
+const SORTS = {
+  key: (a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }),
+  type: (a, b) => a.type.localeCompare(b.type) || a.key.localeCompare(b.key, undefined, { numeric: true }),
+  section: (a, b) => (a.section || "").localeCompare(b.section || "", undefined, { numeric: true }),
+  quality: (a, b) => a.quality_score - b.quality_score,
+  status: (a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status],
+};
+
 async function viewRequirements(body) {
   const [reqs, talk] = await Promise.all([api.get(base() + "/requirements"), api.get(base() + "/comments")]);
   mount(body, runPanel("requirements"));
@@ -448,6 +457,10 @@ async function viewRequirements(body) {
     (!filters.reqQ || (r.key + " " + r.statement + " " + r.section).toLowerCase().includes(filters.reqQ.toLowerCase())) &&
     (!filters.reqType || r.type === filters.reqType) && (!filters.reqStatus || r.status === filters.reqStatus) &&
     (!filters.reqFlagged || r.issues.some((i) => i.severity !== "info")));
+  const sorted = () => {
+    const rows = visible(), by = SORTS[filters.reqSort];
+    return by ? rows.sort((a, b) => filters.reqDir * by(a, b)) : rows;
+  };
 
   const renderBulk = () => bulk.replaceChildren(...(selected.size ? [h("div", { class: "bulkbar" }, selected.size + " selected",
     h("span", { class: "grow" }),
@@ -458,8 +471,18 @@ async function viewRequirements(body) {
       }) }, l)),
     h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); renderTable(); renderBulk(); } }, "Clear"))] : []));
 
+  const sortHeader = (label, cls, key) => {
+    if (!key) return h("th", { class: cls }, label);
+    const on = filters.reqSort === key;
+    return h("th", { class: cls, "aria-sort": on ? (filters.reqDir > 0 ? "ascending" : "descending") : "none" },
+      h("button", { type: "button", class: "th-sort", onclick: () => {
+        if (!on) { filters.reqSort = key; filters.reqDir = 1; } else if (filters.reqDir > 0) filters.reqDir = -1; else filters.reqSort = "";  // asc, desc, then back to the original order
+        renderTable();
+      } }, label, on ? (filters.reqDir > 0 ? " ▲" : " ▼") : null));
+  };
+
   const renderTable = () => {
-    const rows = visible();
+    const rows = sorted();
     const all = h("input", { type: "checkbox", "aria-label": "Select all", checked: rows.length > 0 && rows.every((r) => selected.has(r.id)),
       onchange: (e) => {
         rows.forEach((r) => (e.target.checked ? selected.add(r.id) : selected.delete(r.id)));
@@ -468,7 +491,7 @@ async function viewRequirements(body) {
         renderBulk();
       } });
     tableBox.replaceChildren(h("div", { class: "card table-wrap" }, h("table", { class: "table" },
-      h("thead", {}, h("tr", {}, h("th", { class: "w-check" }, all), ...[["ID", ""], ["Type", "hide-sm"], ["Requirement", ""], ["Section", "hide-sm"], ["Quality", "hide-sm"], ["Status", ""]].map(([x, c]) => h("th", { class: c }, x)))),
+      h("thead", {}, h("tr", {}, h("th", { class: "w-check" }, all), ...[["ID", "", "key"], ["Type", "hide-sm", "type"], ["Requirement", ""], ["Section", "hide-sm", "section"], ["Quality", "hide-sm", "quality"], ["Status", "", "status"]].map(([x, c, k]) => sortHeader(x, c, k)))),
       h("tbody", {}, rows.length ? rows.map((r) => h("tr", { class: "clickable" + (selected.has(r.id) ? " selected" : ""), onclick: () => reqDrawer(r, nav) },
         h("td", { onclick: (e) => e.stopPropagation() }, h("input", { type: "checkbox", "aria-label": "Select " + r.key, checked: selected.has(r.id),
           onchange: (e) => {
@@ -493,7 +516,7 @@ async function viewRequirements(body) {
     count.textContent = reqs.filter((r) => r.status === "approved").length + " of " + reqs.length + " approved";
     renderTable(); renderBulk();
   };
-  const nav = { rows: visible, refresh, find: (id) => reqs.find((r) => r.id === id) };
+  const nav = { rows: sorted, refresh, find: (id) => reqs.find((r) => r.id === id) };
   q.addEventListener("input", debounce(() => { filters.reqQ = q.value; renderTable(); }));
   type.addEventListener("change", () => { filters.reqType = type.value; renderTable(); });
   status.addEventListener("change", () => { filters.reqStatus = status.value; renderTable(); });
