@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Database outages: API calls and `/healthz` return a retryable 503 (JSON message, `Retry-After`) instead of a plain 500; requests wait at most `DB_POOL_TIMEOUT` (10 s, was 30 s) for a connection; the pool validates connections when handing them out, so a database restart no longer fails the next requests (3 of 15 failed before, 0 after), and TCP keepalives detect a partitioned connection.
 - Concurrent edits: requirements and stories carry a `rev`; saving from a stale editor returns 409 ("changed by someone else") instead of overwriting, and a bulk status change also makes open editors stale. Clients that send no `rev` behave as before. Additive schema change (`rev` columns with default 1), so rolling back is safe.
 - Fix: the product-taxonomy cache ignored invalidation for the first 30 s after a machine boot (a new or edited product class could be missed on a freshly started node).
 - Backups: the documented restore command now uses `--clean --if-exists --exit-on-error` (the old one exited 1 with 67 errors on a fresh database); `scripts/restore-drill.sh` verifies dump and restore end to end.
