@@ -10,6 +10,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 from urllib.parse import urlsplit
 from typing import Any, Dict, List, Tuple
 
@@ -19,7 +20,6 @@ from . import config, db, embeddings, history, parsing, settings
 
 log = logging.getLogger("fabulist.repos")
 router = APIRouter(prefix="/api/projects/{pid}/repos")
-CLONE_TIMEOUT = 120
 MAX_FILES = 200
 _URL = re.compile(r"^https://[A-Za-z0-9.-]+(:\d{1,5})?(/[\w.~%@+-]+)+/?$")
 _BRANCH = re.compile(r"^[\w][\w./-]{0,99}$")
@@ -36,17 +36,21 @@ def _resolve(host: str) -> List[str]:
         raise RepoError("Cannot resolve repository host %s" % host)
 
 
-def check_public_host(url: str) -> None:
-    """Refuse hosts that are internal to the cluster or private networks (SSRF guard)."""
+def check_public_host(url: str) -> List[str]:
+    """Refuse hosts that are internal to the cluster or private networks (SSRF guard).
+
+    Returns the addresses that passed, so the caller can connect to exactly those (empty when the guard is off)."""
     if config.ALLOW_PRIVATE_REPO_HOSTS:
-        return
+        return []
     host = (urlsplit(url).hostname or "").lower()
     if host == "localhost" or host.endswith((".svc", ".cluster.local", ".internal", ".local", ".localhost")):
         raise RepoError("Repository host %s is internal; ask an administrator to allow private hosts" % host)
-    for addr in _resolve(host):
+    addrs = _resolve(host)
+    for addr in addrs:
         ip = ipaddress.ip_address(addr)
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
             raise RepoError("Repository host %s resolves to a private address; ask an administrator to allow private hosts" % host)
+    return addrs
 
 
 def validate(url: str, branch: str, path_glob: str) -> None:
@@ -59,10 +63,14 @@ def validate(url: str, branch: str, path_glob: str) -> None:
     check_public_host(url)
 
 
-def _git_env(token: str) -> Dict[str, str]:
+def _git_env(token: str, pin: str = "") -> Dict[str, str]:
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_ASKPASS="true")
     # Config via environment keeps the token out of the process list (git >= 2.31).
-    cfg = [("protocol.allow", "never"), ("protocol.https.allow", "always"), ("credential.helper", "")]
+    # followRedirects=false: a public host must not be able to bounce the clone to an internal one.
+    cfg = [("protocol.allow", "never"), ("protocol.https.allow", "always"), ("credential.helper", ""),
+           ("http.followRedirects", "false")]
+    if pin:  # connect to the address that passed the private-network check, not to a second DNS answer
+        cfg.append(("http.curloptResolve", pin))
     if token:
         cfg.append(("http.extraHeader", "Authorization: Basic " + base64.b64encode(("x-access-token:" + token).encode()).decode()))
     env["GIT_CONFIG_COUNT"] = str(len(cfg))
@@ -71,19 +79,50 @@ def _git_env(token: str) -> Dict[str, str]:
     return env
 
 
+def _tree_bytes(path: str) -> int:
+    total = 0
+    for dirpath, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(dirpath, name)).st_size
+            except OSError:
+                pass  # vanished while git was writing
+    return total
+
+
 def fetch(url: str, branch: str, token: str, dest: str) -> str:
     """Shallow-clone `url` into `dest`; return the HEAD commit SHA."""
+    pin = ""
+    if urlsplit(url).scheme == "https":
+        # Check and pin from the same DNS answer (not only when the repository was added), IPv4 only: curl's
+        # resolve list is documented for those.
+        v4 = [a for a in check_public_host(url) if ipaddress.ip_address(a).version == 4]
+        if v4:
+            parts = urlsplit(url)
+            pin = "%s:%d:%s" % (parts.hostname, parts.port or 443, ",".join(v4))
     cmd = ["git", "clone", "--depth", "1", "--single-branch", "--no-tags"] + (["--branch", branch] if branch else []) + ["--", url, dest]
-    env = _git_env(token)
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=CLONE_TIMEOUT, env=env)
-    except subprocess.TimeoutExpired:
-        raise RepoError("Cloning timed out after %ds" % CLONE_TIMEOUT)
-    if r.returncode != 0:
-        msg = (r.stderr or "").strip().splitlines()
+    env = _git_env(token, pin)
+    timeout, limit = config.REPO_CLONE_TIMEOUT, config.MAX_REPO_MB * 1024 * 1024
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            _out, err = proc.communicate(timeout=1)
+            break
+        except subprocess.TimeoutExpired:
+            if time.monotonic() > deadline:
+                proc.kill(); proc.communicate()
+                raise RepoError("Cloning timed out after %ds" % timeout)
+            if _tree_bytes(dest) > limit:  # a huge repository would otherwise fill the disk before the timeout
+                proc.kill(); proc.communicate()
+                raise RepoError("The repository is larger than the %d MB limit. Use a path-limited or smaller repository." % config.MAX_REPO_MB)
+    if proc.returncode != 0:
+        msg = (err or "").strip().splitlines()
         detail = next((m for m in reversed(msg) if m.startswith("fatal:")), msg[-1] if msg else "unknown error")
         if token:
             detail = detail.replace(token, "***")
+        if "redirect" in detail.lower() or re.search(r"error: 30[1278]\b", detail):
+            detail += " (redirects are not followed; use the repository's canonical https URL)"
         raise RepoError("git clone failed: " + detail)
     sha = subprocess.run(["git", "-C", dest, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=30, env=env)
     return sha.stdout.strip()

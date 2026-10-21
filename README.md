@@ -78,6 +78,7 @@ IDs → human review → epics, features and stories → requirements traceabili
 | `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | optional provider seeded on first start | - |
 | `MAX_UPLOAD_MB`, `CHUNK_CHARS`, `MAX_CHUNKS_PER_RUN`, `RAG_TOP_K` | limits and defaults | 10, 6000, 200, 3 |
 | `MAX_UNZIPPED_MB`, `MAX_PDF_PAGES` | DOCX/XLSX may expand to at most this many MB (decompression-bomb guard; the upload limit counts compressed bytes), and PDFs may have at most this many pages | `200`, `500` |
+| `REPO_CLONE_TIMEOUT`, `MAX_REPO_MB` | seconds a Git sync may spend cloning (keep under the proxy timeout), and the size a clone may grow to before it is stopped | `60`, `500` |
 | `MAX_DOC_CHARS` | characters kept per pasted/parsed document; API bodies above `max(MAX_UPLOAD_MB, 4 x MAX_DOC_CHARS bytes) + 1 MiB` get `413` | 2000000 |
 | `METRICS_TOKEN` | bearer token for `/metrics` (disabled when unset) | - |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL` | single sign-on (Okta, Entra ID, Google, Keycloak, Salesforce...) | off |
@@ -145,7 +146,7 @@ in-cluster on first deploy. They are never stored in the repository.
   Content-Security-Policy, `X-Frame-Options: DENY`, `nosniff` and `no-referrer`. API responses are `Cache-Control: no-store`, and HSTS is sent when the request arrived over HTTPS (`X-Forwarded-Proto`).
 - API keys and tokens are encrypted at rest and never returned to the browser.
 - Repository URLs must be HTTPS and must not resolve to private or cluster addresses (SSRF
-  guard). Git runs with file and ssh protocols disabled, and tokens are passed via the
+  guard). The clone connects to the address that passed the check (no second DNS lookup) and never follows HTTP redirects, so a public host cannot bounce it to an internal one. Git runs with file and ssh protocols disabled, and tokens are passed via the
   environment, not process arguments.
 - Personal identifiers are masked before text is sent to external AI providers (configurable).
 
