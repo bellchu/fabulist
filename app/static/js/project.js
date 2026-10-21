@@ -579,6 +579,8 @@ async function refineRequirementDialog(r, closeDrawer, nav) {
 
 // ---- stories ------------------------------------------------------------
 
+let storyNav = null;  // list context for the story drawer: set by the Stories tab, never used from other tabs
+
 async function viewStories(body) {
   const [stories, reqs, talk] = await Promise.all([api.get(base() + "/stories"), api.get(base() + "/requirements"), api.get(base() + "/comments")]);
   ctx.reqs = reqs;
@@ -602,11 +604,19 @@ async function viewStories(body) {
   q.addEventListener("input", debounce(() => { filters.storyQ = q.value; render(); }));
   status.addEventListener("change", () => { filters.storyStatus = status.value; render(); });
   ready.addEventListener("change", () => { filters.storyReady = ready.value; render(); });
-  const points = stories.filter((s) => s.status !== "rejected").reduce((a, s) => a + (s.story_points || 0), 0);
+  const count = h("span", { class: "muted small right" });
+  const tally = () => {
+    const points = stories.filter((s) => s.status !== "rejected").reduce((a, s) => a + (s.story_points || 0), 0);
+    count.textContent = stories.filter((s) => s.ready).length + " ready · " + points + " points";
+  };
+  // Reload the data but redraw only the list, so a reviewer keeps their place.
+  const refresh = async () => { stories.splice(0, stories.length, ...(await api.get(base() + "/stories"))); tally(); render(); };
+  storyNav = { rows: visible, refresh, find: (id) => stories.find((x) => x.id === id) };
+  tally();
   mount(body, h("div", { class: "toolbar" },
     segmented([["map", "Story map"], ["list", "List"]], filters.storyView, (v) => { filters.storyView = v; render(); }),
     q, status, ready,
-    h("span", { class: "muted small right" }, stories.filter((s) => s.ready).length + " ready · " + points + " points"),
+    count,
     h("button", { class: "btn", onclick: guard(estimateDialog) }, icon("sparkles"), "Estimate with AI"),
     h("button", { class: "btn", onclick: () => storyDrawer(null) }, icon("plus"), "Add story")), box);
   render();
@@ -701,7 +711,7 @@ function storyTable(rows) {
       h("td", {}, h("div", { class: "row", style: { flexWrap: "wrap" } }, badge(s.status, statusTone[s.status]), talkBadge((ctx.talk || {})[s.id]))))))));
 }
 
-function storyDrawer(s) {
+function storyDrawer(s, nav = storyNav) {
   const isNew = !s;
   s = s || { title: "", persona: "", narrative: "As a , I want , so that .", acceptance_criteria: [], priority: "Medium", story_points: null, status: "draft",
     epic: "", feature: "", requirement_ids: [], labels: [], product_scope: [], compliance_tags: [], variant_criteria: [], open_questions: [], issues: [], quality_score: 0 };
@@ -723,7 +733,12 @@ function storyDrawer(s) {
   const questions = linesInput(s.open_questions, 2, "One question per line");
   const notes = h("textarea", { rows: 2, value: s.notes || "" });
   const linked = reqs.filter((r) => s.requirement_ids.includes(r.key));
-  const save = guard(async () => {
+  const rows = nav && !isNew ? nav.rows() : [];
+  const at = rows.findIndex((x) => x.id === s.id);
+  const [prevId, nextId] = [rows[at - 1]?.id, rows[at + 1]?.id];  // neighbours as the list is now, before a save reorders or filters it
+  let dirty = false;
+  const save = (approveAndNext) => guard(async () => {
+    if (approveAndNext) status = "approved";
     const payload = { title: title.value, persona: persona.value, narrative: narrative.value, acceptance_criteria: readLines(ac),
       priority: priority.value, story_points: points.value ? Number(points.value) : null, status, epic: epic.value, feature: feature.value,
       requirement_ids: links.get(), labels: labels.get(), product_scope: scope.get(), compliance_tags: compliance.get(),
@@ -731,21 +746,29 @@ function storyDrawer(s) {
       open_questions: readLines(questions), notes: notes.value };
     if (isNew) await api.post(base() + "/stories", payload);
     else await api.patch(base() + "/stories/" + s.id, Object.assign(payload, { rev: s.rev }));
-    close(); toast(isNew ? "Story added" : "Saved " + s.key, "ok"); rerender();
+    close(); toast(isNew ? "Story added" : "Saved " + s.key, "ok");
+    if (!nav || isNew) return rerender();
+    await nav.refresh();
+    if (approveAndNext) go(nextId);
+  });
+  const go = (id) => { const n = id && nav.find(id); if (n) storyDrawer(n, nav); };
+  const step = (id) => guard(async () => {
+    if (dirty && !(await confirmBox("Discard your unsaved changes to " + s.key + "?", { okLabel: "Discard" }))) return;
+    close(); go(id);
   });
   const remove = guard(async () => {
     if (!(await confirmBox("Delete " + s.key + "?", { danger: true, okLabel: "Delete" }))) return;
-    await api.del(base() + "/stories/" + s.id); close(); rerender();
+    await api.del(base() + "/stories/" + s.id); close(); nav ? await nav.refresh() : rerender();
   });
   const close = drawer({
     subtitle: isNew ? "New story" : s.key + " · " + s.epic + " › " + s.feature, title: isNew ? "Add story" : s.title,
-    body: h("div", { class: "stack" },
+    body: h("div", { class: "stack", oninput: () => { dirty = true; } },
       (s.external || []).length ? h("div", { class: "row wrap small" }, h("span", { class: "muted" }, "In tracker:"),
         s.external.map((x) => h("a", { class: "chip", href: x.url, target: "_blank", rel: "noopener noreferrer" }, icon("link"), x.key))) : null,
       isNew ? null : h("div", { class: "card card-body" },
         h("div", { class: "row", style: { marginBottom: "10px" } }, h("b", { class: "grow" }, "Quality (INVEST, Definition of Ready)"),
           s.ready ? badge("Ready", "green") : badge("Needs work", "amber"), scorePill(s.quality_score)), issueList(s.issues)),
-      field("Review status", segmented([["draft", "Draft"], ["approved", "Approved"], ["rejected", "Rejected"]], status, (v) => (status = v))),
+      field("Review status", segmented([["draft", "Draft"], ["approved", "Approved"], ["rejected", "Rejected"]], status, (v) => { status = v; dirty = true; })),
       field("Title", title),
       h("div", { class: "form-grid" }, field("Persona", persona), field("Priority", priority), field("Epic", epic), field("Feature", feature)),
       field("Narrative", narrative, "As a <role>, I want <goal>, so that <benefit>."),
@@ -758,8 +781,11 @@ function storyDrawer(s) {
       field("Open questions", questions, "Stories with open questions don't meet the Definition of Ready."), field("Notes", notes),
       isNew ? null : discussionSection(s.id),
       isNew ? null : historySection(s.id)),
-    footer: [h("button", { class: "btn btn-primary", onclick: save }, "Save"),
-      isNew ? null : h("button", { class: "btn", onclick: guard(() => refineDialog(s, close)) }, icon("sparkles"), "Refine with AI"),
+    footer: [h("button", { class: "btn btn-primary", onclick: save(false) }, "Save"),
+      nav && !isNew && nextId ? h("button", { class: "btn", onclick: save(true), title: "Mark approved, save, and open the next story" }, "Approve & next") : null,
+      nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Previous story", disabled: !prevId, onclick: step(prevId) }, "‹ Prev") : null,
+      nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Next story", disabled: !nextId, onclick: step(nextId) }, "Next ›") : null,
+      isNew ? null : h("button", { class: "btn", onclick: guard(() => refineDialog(s, close, nav)) }, icon("sparkles"), "Refine with AI"),
       h("span", { class: "grow" }),
       isNew ? null : h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete")],
   });
@@ -773,7 +799,7 @@ function asText(key, v) {
   return Array.isArray(v) ? v.join("\n") : String(v || "");
 }
 
-async function refineDialog(story, closeDrawer) {
+async function refineDialog(story, closeDrawer, nav) {
   toast("Asking AI for an improved version…");
   const r = await api.post(base() + "/stories/" + story.id + "/refine", {});
   const changed = REFINE_FIELDS.filter(([k]) => asText(k, story[k]) !== asText(k, r.story[k]));
@@ -791,7 +817,7 @@ async function refineDialog(story, closeDrawer) {
       r.issues.length ? h("div", { class: "stack", style: { gap: "6px" } }, h("b", {}, "Remaining issues"), issueList(r.issues)) : null),
     actions: changed.length ? [{ label: "Apply changes", kind: "btn-primary", onClick: async () => {
       await api.patch(base() + "/stories/" + story.id, r.story);
-      closeDrawer(); toast("Applied refinement to " + story.key, "ok"); rerender();
+      closeDrawer(); toast("Applied refinement to " + story.key, "ok"); nav ? await nav.refresh() : rerender();
     } }] : [],
   });
 }
@@ -849,7 +875,7 @@ async function viewTrace(body) {
       h("tbody", {}, rows.map((r) => h("tr", {},
         h("td", { class: "mono nowrap" }, rowOpener(r.key, () => reqDrawer(reqByKey[r.key]))), h("td", {}, badge(r.type, typeTone[r.type])),
         h("td", { class: "statement" }, r.statement, h("div", { class: "small muted" }, r.section)),
-        h("td", {}, h("div", { class: "row wrap" }, r.stories.map((s) => h("button", { class: "chip", style: { cursor: "pointer" }, title: s.title, onclick: () => storyDrawer(byId[s.id]) }, s.key)))),
+        h("td", {}, h("div", { class: "row wrap" }, r.stories.map((s) => h("button", { class: "chip", style: { cursor: "pointer" }, title: s.title, onclick: () => storyDrawer(byId[s.id], null) }, s.key)))),
         h("td", {}, r.stories.length ? badge("Covered", "green") : badge("Gap", "red"))))))));
   };
   gapsOnly.addEventListener("change", () => { filters.traceGaps = gapsOnly.checked; render(); });
@@ -876,7 +902,7 @@ async function viewTrace(body) {
         }))))) : null,
     t.orphans.length ? h("div", { class: "callout warn", style: { marginBottom: "16px" } }, icon("alert"),
       h("div", {}, h("b", {}, "Stories not linked to any requirement: "),
-        h("span", { class: "row wrap", style: { display: "inline-flex" } }, t.orphans.map((o) => h("button", { class: "chip", style: { cursor: "pointer" }, onclick: () => storyDrawer(byId[o.id]) }, o.key + " " + o.title))))) : null,
+        h("span", { class: "row wrap", style: { display: "inline-flex" } }, t.orphans.map((o) => h("button", { class: "chip", style: { cursor: "pointer" }, onclick: () => storyDrawer(byId[o.id], null) }, o.key + " " + o.title))))) : null,
     h("div", { class: "toolbar" }, h("label", { class: "switch small" }, gapsOnly, "Show gaps only"),
       h("a", { class: "btn btn-sm right", href: base() + "/export?format=rtm-csv&scope=all" }, icon("download"), "Download matrix")),
     box);
