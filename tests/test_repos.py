@@ -65,3 +65,75 @@ def test_collect_filters_and_skips(tmp_path, monkeypatch):
     (tmp_path / "other.md").write_text("# Other")
     found, skipped = repos.collect(str(tmp_path), "docs/*")
     assert list(found) == ["docs/a.md"] and any("empty.txt" in s for s in skipped)
+
+
+# ---- clone hardening, exercised with a fake `git` executable on PATH ---------
+
+def _fake_git(tmp_path, monkeypatch, clone_body):
+    """Put a `git` on PATH that records the environment it was started with and runs clone_body for `clone`."""
+    import os
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    script = bin_dir / "git"
+    script.write_text('#!/bin/sh\nif [ "$1" = clone ]; then\n  env | grep ^GIT_CONFIG > "%s"\n  for last; do :; done\n  mkdir -p "$last"\n%s\n'
+                      'else echo %s; fi\n' % (tmp_path / "env.txt", clone_body, "a" * 40))
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
+    return tmp_path / "env.txt"
+
+
+def _config(env_file):
+    lines = dict(l.split("=", 1) for l in env_file.read_text().splitlines())
+    return {lines["GIT_CONFIG_KEY_%d" % i]: lines["GIT_CONFIG_VALUE_%d" % i] for i in range(int(lines["GIT_CONFIG_COUNT"]))}
+
+
+def test_clone_is_pinned_to_the_checked_address_and_never_follows_redirects(tmp_path, monkeypatch):
+    env_file = _fake_git(tmp_path, monkeypatch, "  :")
+    monkeypatch.setattr(repos, "_resolve", lambda host: ["93.184.216.34", "2606:2800:220:1::1"])
+    assert repos.fetch("https://git.example.com/org/brds.git", "", "tok", str(tmp_path / "dest")) == "a" * 40
+    cfg = _config(env_file)
+    # the connection uses the address that passed the private-network check, not a second DNS answer
+    assert cfg["http.curloptResolve"] == "git.example.com:443:93.184.216.34"
+    # a public host cannot bounce the clone to an internal one
+    assert cfg["http.followRedirects"] == "false" and cfg["protocol.allow"] == "never"
+
+
+def test_clone_refuses_a_private_resolution_even_when_it_changes_after_adding_the_repo(tmp_path, monkeypatch):
+    env_file = _fake_git(tmp_path, monkeypatch, "  :")
+    monkeypatch.setattr(repos, "_resolve", lambda host: ["10.0.0.7"])  # DNS now points inside the network
+    with pytest.raises(repos.RepoError, match="private address"):
+        repos.fetch("https://git.example.com/org/brds.git", "", "", str(tmp_path / "dest"))
+    assert not env_file.exists(), "git must not even start"
+
+
+def test_internal_git_hosts_are_not_pinned_when_an_admin_allows_them(tmp_path, monkeypatch):
+    from app import config
+    env_file = _fake_git(tmp_path, monkeypatch, "  :")
+    monkeypatch.setattr(config, "ALLOW_PRIVATE_REPO_HOSTS", True)
+    monkeypatch.setattr(repos, "_resolve", lambda host: ["10.0.0.7"])
+    repos.fetch("https://git.corp.internal/org/brds.git", "", "", str(tmp_path / "dest"))
+    assert "http.curloptResolve" not in _config(env_file)
+
+
+def test_a_clone_that_grows_past_the_size_limit_is_killed(tmp_path, monkeypatch):
+    from app import config
+    # writes 1 MB every 0.3 s for up to 30 s: only the size cap can stop it quickly
+    _fake_git(tmp_path, monkeypatch, '  i=0; while [ $i -lt 100 ]; do dd if=/dev/zero of="$last/f$i" bs=1048576 count=1 2>/dev/null; sleep 0.3; i=$((i+1)); done')
+    monkeypatch.setattr(config, "MAX_REPO_MB", 2)
+    monkeypatch.setattr(repos, "_resolve", lambda host: ["93.184.216.34"])
+    import time
+    started = time.monotonic()
+    with pytest.raises(repos.RepoError, match="larger than the 2 MB limit"):
+        repos.fetch("https://git.example.com/org/huge.git", "", "", str(tmp_path / "dest"))
+    assert time.monotonic() - started < 10
+    time.sleep(1)  # and it stays dead: nothing keeps writing
+    written = len(list((tmp_path / "dest").iterdir()))
+    time.sleep(1)
+    assert len(list((tmp_path / "dest").iterdir())) == written and written < 30
+
+
+def test_a_blocked_redirect_tells_the_user_what_to_do(tmp_path, monkeypatch):
+    _fake_git(tmp_path, monkeypatch, "  echo \"fatal: unable to access 'https://git.example.com/old/name.git/': The requested URL returned error: 301\" >&2; exit 128")
+    monkeypatch.setattr(repos, "_resolve", lambda host: ["93.184.216.34"])
+    with pytest.raises(repos.RepoError, match="canonical https URL"):
+        repos.fetch("https://git.example.com/old/name.git", "", "", str(tmp_path / "dest"))

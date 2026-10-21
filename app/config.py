@@ -21,6 +21,8 @@ MAX_UPLOAD_BYTES = _int("MAX_UPLOAD_MB", 10) * 1024 * 1024
 MAX_DOC_CHARS = _int("MAX_DOC_CHARS", 2_000_000)
 MAX_UNZIPPED_MB = _int("MAX_UNZIPPED_MB", 200)  # DOCX/XLSX are ZIPs: cap what they may expand to (decompression bombs)
 MAX_PDF_PAGES = _int("MAX_PDF_PAGES", 500)
+REPO_CLONE_TIMEOUT = _int("REPO_CLONE_TIMEOUT", 60)  # seconds; keep under the proxy timeout (~100 s)
+MAX_REPO_MB = _int("MAX_REPO_MB", 500)  # a clone that grows past this is killed
 
 
 def max_body_bytes() -> int:
