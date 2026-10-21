@@ -1,5 +1,5 @@
 // App shell, routing and the projects home view.
-import { h, mount, icon, api, guard, modal, field, requireValue, select, empty, badge, timeAgo, meter, setUnauthorizedHandler, markScrollRegions } from "./core.js";
+import { h, mount, icon, api, guard, toast, modal, field, requireValue, select, empty, badge, timeAgo, meter, setUnauthorizedHandler, markScrollRegions } from "./core.js";
 import { renderProject } from "./project.js";
 import { renderAdmin } from "./admin.js";
 import { renderAccount } from "./account.js";
@@ -129,7 +129,7 @@ function renderHome(content, keepView = false) {
     h("div", { class: "grow" }, h("div", { class: "object-label" }, archivedList ? "Archived projects" : "Projects"), h("h1", {}, archivedList ? "Archived" : "All projects"),
       h("p", { class: "sub" }, list.length + (list.length === 1 ? " item" : " items") + (archivedList
         ? " · Read-only. Open a project to restore it." : " · Each project turns BRDs into reviewed requirements and a traceable backlog."))),
-    h("div", { class: "row" }, toggle, h("button", { class: "btn btn-primary", onclick: newProjectDialog }, "New")));
+    h("div", { class: "row" }, toggle, state.me.role === "viewer" ? null : importButton(), h("button", { class: "btn btn-primary", onclick: newProjectDialog }, "New")));
   if (!list.length) {
     mount(content, head, h("div", { class: "card" }, archivedList
       ? empty({ iconName: "folder", title: "No archived projects", text: "Archived projects are kept read-only, with their audit trail, until an administrator deletes them." })
@@ -175,6 +175,22 @@ function renderHome(content, keepView = false) {
   [q, platform, sort].forEach((el) => el.addEventListener(el === q ? "input" : "change", draw));
   mount(content, head, h("div", { class: "row wrap", style: { marginBottom: "12px" } }, q, platform, sort, count), grid);
   draw();
+}
+
+// Restores a project from a full archive (Project settings > Download archive) as a new project.
+function importButton() {
+  const file = h("input", { type: "file", accept: "application/json,.json", hidden: true, "aria-label": "Project archive file" });
+  file.addEventListener("change", guard(async () => {
+    const chosen = file.files[0];
+    file.value = "";
+    if (!chosen) return;
+    let archive;
+    try { archive = JSON.parse(await chosen.text()); } catch (_) { throw new Error("That file is not a valid JSON project archive"); }
+    const p = await api.post("/api/projects/import", archive);
+    toast("Imported as '" + p.name + "'", "ok");
+    location.hash = "#/p/" + p.id;
+  }));
+  return h("span", {}, file, h("button", { class: "btn", title: "Create a project from a full archive", onclick: () => file.click() }, icon("upload"), "Import"));
 }
 
 export function newProjectDialog() {

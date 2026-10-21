@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Data portability: a full project archive (documents, requirements, stories, baselines, comments, audit history) can be downloaded from Project settings and imported from the project list as a new project, keys and links preserved. Additive; no schema change.
 - AI provider errors say what to fix: a rejected key, model or access names the setting to check; running out of quota fails immediately (it is no longer retried) and keeps the provider's explanation; an unreachable provider names the host; a provider that needs a key but has none is refused when you click Extract/Generate, not after the run starts.
 - First run: the Admin pages show a prominent warning when sign-in is not configured (anyone who can reach the address could change AI keys, integrations and users); Extract and Generate stay disabled with the reason shown until a BRD or requirements exist.
 - Narrow screens and large text: card headers wrap instead of squeezing the title and description beside a button (the Recent changes description was 94 px wide at 320 px).

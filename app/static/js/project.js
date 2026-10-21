@@ -99,6 +99,9 @@ function editProjectDialog() {
   const close = modal({
     title: "Project settings",
     body: h("div", { class: "stack" }, field("Name", name), field("Target platform", platform), field("Description", desc),
+      h("div", { class: "callout small" }, h("div", { class: "grow" }, h("b", {}, "Take your data with you. "),
+        "A full archive holds the documents, requirements, stories, baselines, comments and audit history, and can be imported into any Fabulist."),
+        h("button", { class: "btn btn-sm", onclick: () => download(base() + "/archive.json") }, icon("download"), "Download archive")),
       p.archived ? null : h("div", { class: "callout warn small" }, h("div", { class: "grow" }, "Archiving hides the project and makes it read-only. Its audit trail is kept and an administrator can delete it later."),
         h("button", { class: "btn btn-sm", onclick: guard(async () => {
           if (!(await confirmBox("Archive '" + p.name + "'? It becomes read-only and leaves the project list.", { okLabel: "Archive project" }))) return;
