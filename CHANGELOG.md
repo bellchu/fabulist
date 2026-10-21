@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Reviewing requirements at volume: saving, deleting, applying an AI refinement or a bulk action now updates the list in place (scroll position, filters and the approved count stay put; before, every save jumped back to the top). The review drawer has **Approve & next** and **Prev / Next** (asking before discarding unsaved edits), and the bulk-action bar stays visible while scrolling. Measured on 300 requirements: 3 clicks plus re-finding the place per review became 1 click.
 - Extraction keeps every source of a repeated requirement: when the same requirement is stated in several BRDs (or under several BRD ids), the one requirement kept lists the others (`v1.md > Capture; also addendum.docx > Changes (BR-201)`) instead of silently forgetting them.
 - Story generation across many batches no longer loses stories: a story whose title matched an earlier one used to be dropped, together with its requirement links, silently uncovering those requirements. The same story twice in one feature area is now merged (links and new criteria kept); the same title in another feature area is kept, with the feature added to its title.
 - Security: pypdf 6.21.0 -> 6.21.1 (CVE-2026-113786: a crafted PDF could make pypdf call arbitrary image parsers when Pillow is installed; the production image does not include Pillow, so it was not reachable here).
