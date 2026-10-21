@@ -3,6 +3,7 @@
 Requirements follow ISO/IEC/IEEE 29148 characteristics (unambiguous, singular,
 verifiable, complete); stories follow INVEST plus a Definition of Ready.
 """
+import math
 import re
 from typing import Any, Dict, List
 
@@ -100,29 +101,35 @@ def _tokens(text: str) -> set:
 
 
 def duplicate_pairs(reqs: List[Dict[str, Any]], threshold: float = 0.85) -> Dict[str, List[str]]:
-    """Map requirement key -> keys of near-duplicates (token Jaccard >= threshold).
+    """Map requirement key -> keys of near-duplicates (token Jaccard >= threshold), exactly.
 
-    Uses an inverted index so only requirements that share a token are compared."""
-    toks = {r["key"]: _tokens(r.get("statement", "")) for r in reqs}
-    index: Dict[str, List[str]] = {}
-    for key, ts in toks.items():
-        for t in ts:
-            index.setdefault(t, []).append(key)
-    # Very common tokens don't discriminate; skipping them keeps candidate sets small.
-    max_df = max(5, len(reqs) // 10)
+    Prefix filtering (AllPairs): with tokens ordered rare-first, two sets whose Jaccard is at least t must share a token
+    among the first n - ceil(t*n) + 1 of each, so only requirements sharing one of those few rare tokens are compared, and
+    a length filter drops partners that are too short. The old shortcut (ignore tokens used by more than 10% of the
+    requirements) was fast but, on a repetitive BRD vocabulary, left nothing to compare and found no duplicates at all."""
+    items = [(r["key"], _tokens(r.get("statement", ""))) for r in reqs]
+    items = [(k, t) for k, t in items if len(t) >= 3]
+    freq: Dict[str, int] = {}
+    for _, ts in items:
+        for tok in ts:
+            freq[tok] = freq.get(tok, 0) + 1
+    items.sort(key=lambda kt: len(kt[1]))  # shorter first: every partner already indexed is no longer than the current one
+    index: Dict[str, List[int]] = {}
     out: Dict[str, List[str]] = {}
-    seen = set()
-    for key, ts in toks.items():
-        if len(ts) < 3:
-            continue
-        candidates = {k for t in ts if len(index[t]) <= max_df for k in index[t] if k != key}
-        for other in candidates:
-            pair = (key, other) if key < other else (other, key)
-            if pair in seen:
-                continue
-            seen.add(pair)
-            o = toks[other]
-            if len(o) >= 3 and len(ts & o) / len(ts | o) >= threshold:
-                out.setdefault(key, []).append(other)
-                out.setdefault(other, []).append(key)
+    for i, (key, ts) in enumerate(items):
+        ordered = sorted(ts, key=lambda tok: (freq[tok], tok))
+        need = math.ceil(threshold * len(ordered))  # a partner shorter than this cannot reach the threshold
+        prefix = ordered[: len(ordered) - need + 1]
+        seen = set()
+        for tok in prefix:
+            for j in index.get(tok, ()):
+                if j in seen:
+                    continue
+                seen.add(j)
+                other_key, other = items[j]
+                if len(other) >= need and len(ts & other) / len(ts | other) >= threshold:
+                    out.setdefault(key, []).append(other_key)
+                    out.setdefault(other_key, []).append(key)
+        for tok in prefix:
+            index.setdefault(tok, []).append(i)
     return {k: sorted(v) for k, v in out.items()}

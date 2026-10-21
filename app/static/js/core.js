@@ -109,6 +109,12 @@ export function toast(message, kind = "") {
   setTimeout(() => t.remove(), kind === "error" ? 6000 : 3500);
 }
 
+// Runs fn once typing pauses. Re-rendering a table of thousands of rows on every keystroke made typing a filter lag.
+export function debounce(fn, ms = 150) {
+  let timer;
+  return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
+}
+
 export function guard(fn) {
   return async (...args) => {
     try { return await fn(...args); } catch (e) { toast(e.message, "error"); }
