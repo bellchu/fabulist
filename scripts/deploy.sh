@@ -11,6 +11,16 @@ cd "$(dirname "$0")/.."
 : "${FABULIST_HOST:?set FABULIST_HOST}"
 : "${DEPLOY_SSH:?set DEPLOY_SSH}"
 REGISTRY="${REGISTRY:-localhost:32000}"
+# The image is built from the WORKING TREE, so anything uncommitted ships to production unreviewed and untested.
+# Deploy only a clean checkout of the latest main (the commit that passed the gate). ALLOW_DIRTY_DEPLOY=1 overrides.
+if [ -z "${ALLOW_DIRTY_DEPLOY:-}" ]; then
+  branch="$(git rev-parse --abbrev-ref HEAD)"
+  [ "$branch" = main ] || { echo "Refusing to deploy from branch $branch: merge to main and deploy from main (ALLOW_DIRTY_DEPLOY=1 overrides)." >&2; exit 1; }
+  [ -z "$(git status --porcelain)" ] || { echo "Refusing to deploy: uncommitted changes would be built into the image (commit, or stash them)." >&2; git status --short >&2; exit 1; }
+  if git remote get-url origin >/dev/null 2>&1 && git fetch -q origin main 2>/dev/null; then
+    [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || { echo "Refusing to deploy: HEAD is not the latest origin/main (git pull --ff-only)." >&2; exit 1; }
+  fi
+fi
 docker info >/dev/null 2>&1 || { echo "Docker daemon is not running; start it and retry." >&2; exit 1; }
 kubectl version --request-timeout=10s >/dev/null 2>&1 || { echo "Kubernetes API is unreachable (check the kube context or SSH tunnel)." >&2; exit 1; }
 TAG="$(date +%Y%m%d%H%M%S)"

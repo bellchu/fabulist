@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- `scripts/deploy.sh` refuses to deploy from a branch other than `main`, with uncommitted or untracked changes, or when HEAD is not the latest `origin/main` (the image is built from the working tree).
 - Git sync: the clone is pinned to the address that passed the private-network check and no longer follows HTTP redirects (a public host could previously redirect it to an internal service, or change its DNS answer between check and clone); a clone that grows past `MAX_REPO_MB` (500) is stopped; the clone timeout is `REPO_CLONE_TIMEOUT` (60 s, was 120 s, which exceeded the proxy timeout); a blocked redirect says to use the canonical URL.
 - Uploads: DOCX/XLSX that would expand beyond `MAX_UNZIPPED_MB` (decompression bombs) or contain thousands of parts are refused before parsing; PDFs over `MAX_PDF_PAGES` are refused and extraction stops once enough text is read; password-protected, scanned and damaged files get a clear message; truncation (long documents, 5,000+ spreadsheet rows, 50+ sheets, long pasted text) is announced in the document text instead of silent.
 - Database outages: API calls and `/healthz` return a retryable 503 (JSON message, `Retry-After`) instead of a plain 500; requests wait at most `DB_POOL_TIMEOUT` (10 s, was 30 s) for a connection; the pool validates connections when handing them out, so a database restart no longer fails the next requests (3 of 15 failed before, 0 after), and TCP keepalives detect a partitioned connection.
