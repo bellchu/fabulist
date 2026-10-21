@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Extraction keeps every source of a repeated requirement: when the same requirement is stated in several BRDs (or under several BRD ids), the one requirement kept lists the others (`v1.md > Capture; also addendum.docx > Changes (BR-201)`) instead of silently forgetting them.
 - Story generation across many batches no longer loses stories: a story whose title matched an earlier one used to be dropped, together with its requirement links, silently uncovering those requirements. The same story twice in one feature area is now merged (links and new criteria kept); the same title in another feature area is kept, with the feature added to its title.
 - Security: pypdf 6.21.0 -> 6.21.1 (CVE-2026-113786: a crafted PDF could make pypdf call arbitrary image parsers when Pillow is installed; the production image does not include Pillow, so it was not reachable here).
 - Large projects: before a run, `GET /api/projects/{id}/runs/estimate` and the Extract/Generate buttons show how many AI requests it will make (exact: the same batching the run uses), a time and token estimate calibrated from this installation's finished runs, and ask for confirmation from 20 requests; a run over `Max sections per run` is refused at the click with what to change instead of failing after it started. Runs now record their request count. Additive schema change (`runs.requests`), so rolling back is safe.

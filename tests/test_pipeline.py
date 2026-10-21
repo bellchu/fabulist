@@ -326,3 +326,19 @@ def test_same_title_in_the_same_feature_area_merges_so_no_requirement_loses_its_
 def test_unrelated_titles_and_invalid_links_are_unchanged():
     out = pipeline._finalize([_raw_story("Place an order", "Capture", ["REQ-001", "REQ-999"]), _raw_story("Cancel an order", "Capture", ["REQ-002"])], _req_list("REQ-001", "REQ-002"))
     assert [(s["title"], s["requirement_ids"]) for s in out] == [("Place an order", ["REQ-001"]), ("Cancel an order", ["REQ-002"])]
+
+
+def test_a_requirement_stated_in_several_documents_keeps_every_source():
+    docs = [{"id": "1", "filename": "v1.md", "text": "# Orders\n## Capture\nBR-101: The system shall allow buyers to place orders online.\nBR-102: The system shall email order confirmations to buyers."},
+            {"id": "2", "filename": "addendum.docx", "text": "# Orders\n## Changes\nBR-201: The system shall allow buyers to place orders online.\nBR-202: The system shall block orders for suspended accounts."},
+            {"id": "3", "filename": "legal.md", "text": "# Compliance\n## Audit\nBR-301: The system shall allow buyers to place orders online."}]
+    opts = {"chunk_chars": 6000, "max_chunks_per_run": 50, "rag_top_k": 0, "redact_pii": True}
+    reqs = pipeline.extract_requirements(docs, "generic", MOCK, opts, lambda m: None, {"in": 0, "out": 0})
+    assert [r["source_id"] for r in reqs] == ["BR-101", "BR-102", "BR-202"], "still one requirement per statement"
+    shared = reqs[0]["source_ref"]
+    assert shared.startswith("v1.md > Capture") and "also addendum.docx > Changes (BR-201)" in shared and "also legal.md > Audit (BR-301)" in shared
+    assert reqs[1]["source_ref"] == "v1.md > Capture", "a requirement stated once is unchanged"
+    # two BRD ids in one document that state the same thing both stay traceable, and a repeat is never listed twice
+    twice = [{"id": "1", "filename": "v1.md", "text": "# A\n## B\nBR-1: The system shall export orders.\nBR-2: The system shall export orders.\nBR-2: The system shall export orders."}]
+    only = pipeline.extract_requirements(twice, "generic", MOCK, opts, lambda m: None, {"in": 0, "out": 0})
+    assert len(only) == 1 and only[0]["source_ref"] == "v1.md > B; also v1.md > B (BR-2)"
