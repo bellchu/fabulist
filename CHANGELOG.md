@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Accessibility regression check (`tests/ui/a11y.py`, axe-core, WCAG 2.0/2.1 A and AA): the requirement and story lists and their review drawers, in light and dark, must have no serious or critical violations. Run with `scripts/ui-check-k8s.sh`.
 - `scripts/ui-check-k8s.sh` runs browser regression checks (`tests/ui/*.py`, headless Chromium) against the app in a temporary cluster namespace. The first one covers the review drawers: Approve & next, Prev/Next, shortcuts, unsaved-edit prompt, scroll kept after save, phone-width footer.
 - `scripts/deploy.sh` builds the image on the cluster (Kaniko in a throwaway namespace, pushed to the node registry) instead of on the developer's machine; `DEPLOY_SSH` is no longer needed.
 - `scripts/ci-k8s.sh` runs the quality gate (lint, tests on a throwaway pgvector database, JS check, dependency audit) in a temporary Kubernetes namespace that is always deleted, so no Docker is needed on the developer's machine.
