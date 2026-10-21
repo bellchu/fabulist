@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Phone layouts: Requirements, Stories (list), Sources, Product taxonomy and Activity tables keep only the essential columns so the content and row actions fit without sideways scrolling; header buttons and attribute rules wrap and stack.
 - Admin: all API tokens listed on Users & roles (owner, expiry, last used) with revoke.
 - Fix: the Archived view stacked under the normal project list instead of replacing it; on phones the Account and Users tables hide secondary columns so Revoke/Disable stay on screen.
 - Personal API tokens (`Authorization: Bearer fab_...`) for scripts and integrations, managed on the new Account page; admin list/revoke API. Additive schema change (`api_tokens`), so rolling back is safe.

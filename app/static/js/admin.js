@@ -249,11 +249,11 @@ async function viewTaxonomy(content) {
     const needle = q.value.toLowerCase();
     const rows = t.classes.filter((c) => !needle || (c.name + " " + c.attributes.join(" ") + " " + c.keywords.join(" ")).toLowerCase().includes(needle));
     tableBox.replaceChildren(h("div", { class: "card table-wrap" }, h("table", { class: "table" },
-      h("thead", {}, h("tr", {}, ["Product class", "Behaviour attributes", "Detection keywords", ""].map((x) => h("th", {}, x)))),
+      h("thead", {}, h("tr", {}, [["Product class", ""], ["Behaviour attributes", "hide-sm"], ["Detection keywords", "hide-sm"], ["", ""]].map(([x, c]) => h("th", { class: c }, x)))),
       h("tbody", {}, rows.length ? rows.map((c) => h("tr", {},
         h("td", {}, h("b", {}, c.name), c.description ? h("div", { class: "muted small" }, c.description) : null),
-        h("td", {}, h("div", { class: "row wrap" }, c.attributes.map((a) => badge(a, t.attribute_rules.some((r) => r.attribute === a) ? "accent" : "")))),
-        h("td", { class: "small" }, h("div", { class: "row wrap" }, c.keywords.slice(0, 8).map((k) => h("span", { class: "chip" }, k)),
+        h("td", { class: "hide-sm" }, h("div", { class: "row wrap" }, c.attributes.map((a) => badge(a, t.attribute_rules.some((r) => r.attribute === a) ? "accent" : "")))),
+        h("td", { class: "small hide-sm" }, h("div", { class: "row wrap" }, c.keywords.slice(0, 8).map((k) => h("span", { class: "chip" }, k)),
           c.keywords.length > 8 ? h("span", { class: "muted" }, "+" + (c.keywords.length - 8)) : null)),
         h("td", { class: "nowrap", style: { textAlign: "right" } },
           h("button", { class: "btn btn-sm btn-ghost", onclick: () => classDialog(c) }, "Edit"),
@@ -275,7 +275,7 @@ async function viewTaxonomy(content) {
         const rules = Object.fromEntries(Object.entries(ruleInputs).map(([a, el]) => [a, el.value]));
         await api.put("/api/admin/taxonomy/rules", { rules }); toast("Attribute rules saved", "ok"); rerender();
       }) }, "Save rules")),
-    h("div", { class: "card-body stack" }, attrs.map((a) => h("div", { class: "form-grid", style: { gridTemplateColumns: "200px 1fr" } },
+    h("div", { class: "card-body stack" }, attrs.map((a) => h("div", { class: "form-grid rule-row" },
       h("div", {}, badge(a, "accent")), ruleInputs[a]))));
 
   mount(content,
@@ -466,16 +466,16 @@ async function viewActivity(content) {
   const runs = await api.get("/api/admin/runs?limit=100");
   mount(content, head("Activity", "Every extraction and generation run across projects."),
     runs.length ? h("div", { class: "card table-wrap" }, h("table", { class: "table" },
-      h("thead", {}, h("tr", {}, ["When", "Project", "Stage", "By", "Provider", "Status", "Items", "Tokens", "Duration"].map((x) => h("th", {}, x)))),
+      h("thead", {}, h("tr", {}, [["When", ""], ["Project", ""], ["Stage", ""], ["By", "hide-sm"], ["Provider", "hide-sm"], ["Status", ""], ["Items", "hide-sm"], ["Tokens", "hide-sm"], ["Duration", "hide-sm"]].map(([x, c]) => h("th", { class: c }, x)))),
       h("tbody", {}, runs.map((r) => h("tr", {},
         h("td", { class: "small nowrap muted" }, timeAgo(r.created)),
         h("td", {}, r.project_name ? h("a", { href: "#/p/" + r.project_id }, r.project_name) : h("span", { class: "muted" }, "deleted")),
         h("td", {}, r.stage),
-        h("td", { class: "small" }, r.actor || "–"),
-        h("td", { class: "small" }, r.provider, r.model ? h("div", { class: "muted mono" }, r.model) : null),
+        h("td", { class: "small hide-sm" }, r.actor || "–"),
+        h("td", { class: "small hide-sm" }, r.provider, r.model ? h("div", { class: "muted mono" }, r.model) : null),
         h("td", {}, badge(r.status, statusTone[r.status]), r.error ? h("div", { class: "small", style: { color: "var(--red)", maxWidth: "320px" } }, r.error) : null),
-        h("td", {}, r.status === "done" ? r.item_count : "–"),
-        h("td", { class: "nowrap" }, fmt(r.tokens_in + r.tokens_out)),
-        h("td", { class: "nowrap" }, duration(r.duration_ms)))))))
+        h("td", { class: "hide-sm" }, r.status === "done" ? r.item_count : "–"),
+        h("td", { class: "nowrap hide-sm" }, fmt(r.tokens_in + r.tokens_out)),
+        h("td", { class: "nowrap hide-sm" }, duration(r.duration_ms)))))))
       : h("div", { class: "card" }, empty({ iconName: "activity", title: "No activity yet", text: "Runs appear here once projects start extracting requirements." })));
 }

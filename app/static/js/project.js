@@ -294,7 +294,7 @@ async function viewSources(body) {
 
   const pasteName = h("input", { type: "text", value: "pasted-brd.md" });
   const pasteText = h("textarea", { rows: 6, placeholder: "Paste BRD text. Markdown headings (#, ##) become epics and features.", "aria-label": "BRD text" });
-  const q = h("input", { type: "search", placeholder: "Ask a question, e.g. What is the return window for med-surg supplies?", "aria-label": "Question about the BRDs" });
+  const q = h("input", { type: "search", style: { flex: "1 1 220px" }, placeholder: "Ask a question, e.g. What is the return window for med-surg supplies?", "aria-label": "Question about the BRDs" });
   const results = h("div", { class: "stack", style: { marginTop: "12px" } });
   const search = guard(async () => {
     if (!q.value.trim()) return;
@@ -334,12 +334,12 @@ async function viewSources(body) {
     h("div", { class: "card", style: { marginBottom: "16px" } },
       h("div", { class: "card-head" }, h("h3", { class: "grow" }, "Documents"), h("span", { class: "muted small" }, docs.length + " total")),
       docs.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
-        h("thead", {}, h("tr", {}, ["Name", "Source", "Size", "Indexed passages", "Added", ""].map((x) => h("th", {}, x)))),
+        h("thead", {}, h("tr", {}, [["Name", ""], ["Source", "hide-sm"], ["Size", ""], ["Indexed passages", "hide-sm"], ["Added", ""], ["", ""]].map(([x, c]) => h("th", { class: c }, x)))),
         h("tbody", {}, docs.map((d) => h("tr", {},
           h("td", {}, h("div", { class: "row" }, icon("file"), h("b", {}, d.filename))),
-          h("td", {}, d.source === "repo" ? badge("Git", "violet") : badge("Upload")),
+          h("td", { class: "hide-sm" }, d.source === "repo" ? badge("Git", "violet") : badge("Upload")),
           h("td", { class: "muted" }, fmt(Math.round(d.chars / 6)) + " words"),
-          h("td", {}, d.chunks), h("td", { class: "muted small" }, timeAgo(d.created)),
+          h("td", { class: "hide-sm" }, d.chunks), h("td", { class: "muted small" }, timeAgo(d.created)),
           h("td", { class: "nowrap", style: { textAlign: "right" } },
             h("button", { class: "btn btn-sm btn-ghost", onclick: guard(async () => {
               const full = await api.get(base() + "/documents/" + d.id);
@@ -352,7 +352,7 @@ async function viewSources(body) {
         : empty({ iconName: "file", title: "No BRDs yet", text: "Upload or paste at least one business requirements document." })),
     h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Ask the BRDs"),
       h("span", { class: "muted small" }, "Answers come only from retrieved BRD passages, with numbered citations")),
-      h("div", { class: "card-body" }, h("div", { class: "row" }, q, h("button", { class: "btn btn-primary", onclick: ask }, icon("sparkles"), "Ask"),
+      h("div", { class: "card-body" }, h("div", { class: "row wrap" }, q, h("button", { class: "btn btn-primary", onclick: ask }, icon("sparkles"), "Ask"),
         h("button", { class: "btn", onclick: search }, icon("search"), "Find passages")), results)));
 }
 
@@ -434,16 +434,16 @@ async function viewRequirements(body) {
     const all = h("input", { type: "checkbox", "aria-label": "Select all", checked: rows.length > 0 && rows.every((r) => selected.has(r.id)),
       onchange: (e) => { rows.forEach((r) => (e.target.checked ? selected.add(r.id) : selected.delete(r.id))); renderTable(); renderBulk(); } });
     tableBox.replaceChildren(h("div", { class: "card table-wrap" }, h("table", { class: "table" },
-      h("thead", {}, h("tr", {}, h("th", { class: "w-check" }, all), ...["ID", "Type", "Requirement", "Section", "Quality", "Status"].map((x) => h("th", {}, x)))),
+      h("thead", {}, h("tr", {}, h("th", { class: "w-check" }, all), ...[["ID", ""], ["Type", "hide-sm"], ["Requirement", ""], ["Section", "hide-sm"], ["Quality", "hide-sm"], ["Status", ""]].map(([x, c]) => h("th", { class: c }, x)))),
       h("tbody", {}, rows.length ? rows.map((r) => h("tr", { class: "clickable" + (selected.has(r.id) ? " selected" : ""), onclick: () => reqDrawer(r) },
         h("td", { onclick: (e) => e.stopPropagation() }, h("input", { type: "checkbox", "aria-label": "Select " + r.key, checked: selected.has(r.id),
           onchange: (e) => { e.target.checked ? selected.add(r.id) : selected.delete(r.id); renderTable(); renderBulk(); } })),
         h("td", { class: "mono nowrap" }, rowOpener(r.key)),
-        h("td", {}, badge(r.type, typeTone[r.type])),
+        h("td", { class: "hide-sm" }, badge(r.type, typeTone[r.type])),
         h("td", { class: "statement" }, r.statement,
           r.issues.length ? h("div", { class: "issues" }, r.issues.map((i) => h("span", { class: "chip", title: i.message }, issueIcon(i.severity), i.code))) : null),
-        h("td", { class: "small muted" }, r.section),
-        h("td", {}, scorePill(r.quality_score)),
+        h("td", { class: "small muted hide-sm" }, r.section),
+        h("td", { class: "hide-sm" }, scorePill(r.quality_score)),
         h("td", {}, h("div", { class: "row" }, badge(r.status, statusTone[r.status]), talkBadge(talk[r.id])))))
         : h("tr", {}, h("td", { colspan: "7", class: "muted", style: { textAlign: "center", padding: "28px" } }, "No requirements match the filters."))))));
   };
@@ -640,15 +640,15 @@ function rowOpener(key, onclick) {
 
 function storyTable(rows) {
   return h("div", { class: "card table-wrap" }, h("table", { class: "table" },
-    h("thead", {}, h("tr", {}, ["ID", "Story", "Epic / feature", "Priority", "Pts", "Requirements", "Quality", "Status"].map((x) => h("th", {}, x)))),
+    h("thead", {}, h("tr", {}, [["ID", ""], ["Story", ""], ["Epic / feature", "hide-sm"], ["Priority", "hide-sm"], ["Pts", "hide-sm"], ["Requirements", "hide-sm"], ["Quality", "hide-sm"], ["Status", ""]].map(([x, c]) => h("th", { class: c }, x)))),
     h("tbody", {}, rows.map((s) => h("tr", { class: "clickable", onclick: () => storyDrawer(s) },
       h("td", { class: "mono nowrap" }, rowOpener(s.key)),
       h("td", {}, h("b", {}, s.title), h("div", { class: "small muted" }, s.persona)),
-      h("td", { class: "small" }, s.epic, h("div", { class: "muted" }, s.feature)),
-      h("td", { class: "nowrap" }, h("span", { class: "row" }, h("span", { class: "dot " + s.priority }), s.priority)),
-      h("td", {}, s.story_points || "–"),
-      h("td", { class: "small mono" }, s.requirement_ids.join(", ") || "–"),
-      h("td", { class: "nowrap" }, h("span", { class: "row" }, scorePill(s.quality_score), s.ready ? badge("Ready", "green") : null)),
+      h("td", { class: "small hide-sm" }, s.epic, h("div", { class: "muted" }, s.feature)),
+      h("td", { class: "nowrap hide-sm" }, h("span", { class: "row" }, h("span", { class: "dot " + s.priority }), s.priority)),
+      h("td", { class: "hide-sm" }, s.story_points || "–"),
+      h("td", { class: "small mono hide-sm" }, s.requirement_ids.join(", ") || "–"),
+      h("td", { class: "nowrap hide-sm" }, h("span", { class: "row" }, scorePill(s.quality_score), s.ready ? badge("Ready", "green") : null)),
       h("td", {}, h("div", { class: "row" }, badge(s.status, statusTone[s.status]), talkBadge((ctx.talk || {})[s.id]))))))));
 }
 
