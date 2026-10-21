@@ -179,9 +179,9 @@ export function confirmBox(message, { okLabel = "Confirm", danger = false, title
   });
 }
 
-export function drawer({ title, subtitle, body, footer }) {
+export function drawer({ title, subtitle, body, footer, onkeydown }) {
   const titleId = "dlg-" + ++layerSeq;
-  const panel = h("aside", { class: "drawer", role: "dialog", "aria-modal": "true", "aria-labelledby": titleId },
+  const panel = h("aside", { class: "drawer", role: "dialog", "aria-modal": "true", "aria-labelledby": titleId, onkeydown },
     h("div", { class: "drawer-head" },
       h("div", { class: "grow" }, subtitle ? h("div", { class: "muted small" }, subtitle) : null, h("h2", { id: titleId }, title)),
       h("button", { class: "btn btn-ghost icon-btn", "aria-label": "Close", onclick: () => close() }, icon("x"))),

@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Keyboard shortcuts in the requirement and story review drawers: Ctrl/Cmd+Enter saves, Ctrl/Cmd+Shift+Enter approves and opens the next item, Alt+Left/Right steps to the previous/next item (shown as tooltips on the buttons).
 - Fixed: on phones the review drawer's buttons ran off the right edge (613px of buttons in a 375px drawer) after Approve & next / Prev / Next were added; the footer now wraps.
 - Story review works the same way as requirement review: saves, deletes, refinements update the Stories list in place (scroll, filters, ready/points tally kept), and the story drawer has **Approve & next** and **Prev / Next**.
 - Reviewing requirements at volume: saving, deleting, applying an AI refinement or a bulk action now updates the list in place (scroll position, filters and the approved count stay put; before, every save jumped back to the top). The review drawer has **Approve & next** and **Prev / Next** (asking before discarding unsaved edits), and the bulk-action bar stays visible while scrolling. Measured on 300 requirements: 3 clicks plus re-finding the place per review became 1 click.
