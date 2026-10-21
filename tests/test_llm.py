@@ -82,7 +82,7 @@ def test_extract_requirements_via_llm_redacts_and_counts_tokens(monkeypatch):
     doc = {"id": "d", "filename": "brd.md", "text": "# Orders\nContact jane.doe@example.com. Orders shall be confirmed by email."}
     reqs = pipeline.extract_requirements([doc], "sap", OPENAI, OPTS, lambda m: None, usage)
     assert len(reqs) == 1 and reqs[0]["source_id"] == "BR-9" and reqs[0]["epic"] == "Orders"
-    assert usage == {"in": 100, "out": 40}
+    assert usage == {"in": 100, "out": 40, "requests": 1}  # tokens as reported by the provider, and the one request that made them
     prompt = fake.calls[0]["json"]["messages"][1]["content"]
     assert "jane.doe@example.com" not in prompt and "[EMAIL]" in prompt and "SAP S/4HANA" in prompt
 
@@ -98,7 +98,7 @@ def test_generate_stories_retries_invalid_json_and_filters_links(monkeypatch):
     out = pipeline.generate_stories(reqs, "p", "salesforce", OPENAI, OPTS, lambda m: None, usage)
     assert len(fake.calls) == 2 and "not valid JSON" in fake.calls[1]["json"]["messages"][1]["content"]
     assert out[0]["requirement_ids"] == ["REQ-001"] and out[0]["epic"] == "Orders" and out[0]["feature"] == "Notify"
-    assert usage == {"in": 20, "out": 10}
+    assert usage == {"in": 20, "out": 10, "requests": 2}  # the invalid-JSON retry is a second provider request
     assert quality.is_ready(quality.story_issues(out[0], {"REQ-001"}))
 
 

@@ -27,6 +27,9 @@ IDs → human review → epics, features and stories → requirements traceabili
    **Refine with AI** proposes an improved version of a story that fixes its issues; you
    review a before/after comparison before applying it. **Estimate with AI** proposes relative
    story points with a rationale for each unestimated story. Long AI runs can be cancelled.
+   Before a large run (20 or more AI requests) the app says how many requests it will make, with a time and token
+   estimate learned from your own finished runs, and asks for confirmation; a run over the configured limit is refused up
+   front with what to change.
 4. **Traceability**: a requirement-to-story matrix with coverage, gaps and orphan stories, plus
    product-class coverage: whether the stories linked to each requirement actually address the
    product classes it names (for example, a cold-chain requirement with no cold-chain criteria).
