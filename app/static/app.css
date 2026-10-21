@@ -116,7 +116,7 @@ input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="
 
 /* ---- cards & stats ---- */
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
-.card-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px 0; }
+.card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 12px 16px 0; }  /* wraps instead of squeezing the title and description beside a button on narrow screens */
 .card-head h3 { font-size: 14px; }
 .card-body { padding: 12px 16px 16px; }
 .grid { display: grid; gap: 12px; }
