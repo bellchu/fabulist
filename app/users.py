@@ -11,6 +11,7 @@ import re
 import secrets
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
@@ -19,12 +20,15 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from . import config, db
 
 _COMMENT_PATH = re.compile(r"^/api/projects/[^/]+/comments(/[^/]+/resolve)?$")
+_OWN_TOKEN_PATH = re.compile(r"^/api/me/tokens(/[^/]+)?$")  # every role manages its own tokens
 ROLES = {"admin": "Administrator", "analyst": "Business analyst", "viewer": "Viewer (read-only)"}
 _N, _R, _P = 2 ** 14, 8, 1
 _CACHE_TTL = 300
 _cache: Dict[Tuple[str, str], Tuple[float, Optional[str]]] = {}
 _cache_lock = threading.Lock()
 router = APIRouter(prefix="/api/admin/users")
+me_router = APIRouter(prefix="/api/me/tokens")
+admin_tokens_router = APIRouter(prefix="/api/admin/tokens")
 
 
 def _scrypt(password: str, salt: bytes, n: int, r: int, p: int) -> bytes:
@@ -145,6 +149,8 @@ def forget(username: str) -> None:
 def allowed(role: str, method: str, path: str) -> bool:
     if role == "admin":
         return True
+    if _OWN_TOKEN_PATH.match(path):
+        return True
     if path.startswith("/api/admin/"):
         return False
     if role == "viewer":
@@ -230,3 +236,92 @@ def delete_user(uid: str):
 
 def current(request: Request) -> Dict[str, str]:
     return {"username": getattr(request.state, "user", "anonymous"), "role": getattr(request.state, "role", "admin")}
+
+
+# ---- personal API tokens ---------------------------------------------------
+# For automation (CI, scripts, integrations) so nobody shares a password: `Authorization: Bearer fab_...`.
+# The secret is shown once; only its SHA-256 is stored (the token is 256 random bits, so a fast hash is safe).
+# A token carries its owner's current role, expires, and dies with the account.
+
+TOKEN_PREFIX = "fab_"
+MAX_TOKENS_PER_USER = 20
+DEFAULT_TOKEN_DAYS, MAX_TOKEN_DAYS = 90, 365
+
+
+def hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def bearer_token(header: str) -> Optional[str]:
+    return header[7:].strip() if header[:7].lower() == "bearer " and header[7:].strip().startswith(TOKEN_PREFIX) else None
+
+
+def authenticate_token(token: str) -> Optional[Tuple[str, str]]:
+    """(username, role) for a valid, unexpired token of an active user, else None."""
+    row = db.one("SELECT t.id, t.expires, t.last_used, u.username, u.role, u.disabled FROM api_tokens t "
+                 "JOIN users u ON u.id = t.user_id WHERE t.token_hash = %s", (hash_token(token),))
+    now = db.now()
+    if not row or row["disabled"] or row["expires"] <= now:
+        return None
+    # Recording every call would turn each API request into a write; a minute of resolution is enough.
+    if not row["last_used"] or (datetime.fromisoformat(now) - datetime.fromisoformat(row["last_used"])).total_seconds() > 60:
+        db.execute("UPDATE api_tokens SET last_used=%s WHERE id=%s", (now, row["id"]))
+    return row["username"], row["role"]
+
+
+def _token_public(r: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: r[k] for k in ("id", "name", "prefix", "created", "expires", "last_used") if k in r} | (
+        {"owner": r["owner"]} if "owner" in r else {})
+
+
+@me_router.get("")
+def list_my_tokens(request: Request):
+    me = _named_user(request)
+    return [_token_public(r) for r in db.rows("SELECT * FROM api_tokens WHERE user_id=%s ORDER BY created DESC", (me["id"],))]
+
+
+@me_router.post("", status_code=201)
+def create_token(request: Request, body: Dict[str, Any] = Body(...)):
+    me = _named_user(request)
+    name = str(body.get("name") or "").strip()
+    days = body.get("days", DEFAULT_TOKEN_DAYS)
+    if not 1 <= len(name) <= 80:
+        raise HTTPException(400, "Give the token a name (1-80 characters), e.g. the system that will use it")
+    if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= MAX_TOKEN_DAYS:
+        raise HTTPException(400, "Lifetime must be 1-%d days" % MAX_TOKEN_DAYS)
+    if db.one("SELECT count(*) AS n FROM api_tokens WHERE user_id=%s", (me["id"],))["n"] >= MAX_TOKENS_PER_USER:
+        raise HTTPException(400, "Limit of %d tokens reached; revoke one you no longer use" % MAX_TOKENS_PER_USER)
+    token = TOKEN_PREFIX + secrets.token_urlsafe(32)
+    tid, now = db.new_id(), datetime.now(timezone.utc)
+    expires = (now + timedelta(days=days)).isoformat(timespec="milliseconds")
+    db.execute("INSERT INTO api_tokens (id, user_id, name, prefix, token_hash, created, expires) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+               (tid, me["id"], name, token[:8], hash_token(token), db.now(), expires))
+    return dict(_token_public(db.one("SELECT * FROM api_tokens WHERE id=%s", (tid,))), token=token)
+
+
+@me_router.delete("/{tid}", status_code=204)
+def revoke_my_token(tid: str, request: Request):
+    me = _named_user(request)
+    if not db.one("SELECT 1 AS x FROM api_tokens WHERE id=%s AND user_id=%s", (tid, me["id"])):
+        raise HTTPException(404, "Token not found")
+    db.execute("DELETE FROM api_tokens WHERE id=%s", (tid,))
+
+
+@admin_tokens_router.get("")
+def list_all_tokens():
+    return [_token_public(r) for r in db.rows(
+        "SELECT t.*, u.username AS owner FROM api_tokens t JOIN users u ON u.id = t.user_id ORDER BY t.created DESC")]
+
+
+@admin_tokens_router.delete("/{tid}", status_code=204)
+def revoke_any_token(tid: str):
+    if not db.one("SELECT 1 AS x FROM api_tokens WHERE id=%s", (tid,)):
+        raise HTTPException(404, "Token not found")
+    db.execute("DELETE FROM api_tokens WHERE id=%s", (tid,))
+
+
+def _named_user(request: Request) -> Dict[str, Any]:
+    row = db.one("SELECT id FROM users WHERE username=%s", (current(request)["username"],))
+    if not row:
+        raise HTTPException(400, "API tokens belong to a named account; the bootstrap and anonymous identities cannot own one")
+    return row
