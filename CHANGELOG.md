@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Grafana dashboard: a *Reliability and security* row (database up/down, failed sign-ins and token attempts, edit conflicts and database 503s). A test now fails if any alert rule or dashboard panel references a metric the app does not expose.
 - Monitoring: `/metrics` keeps working during a database outage and reports `fabulist_database_up`; new counters for failed sign-ins/tokens, edit conflicts, database 503s and unpushed stories; new alerts `FabulistDatabaseUnavailable` (instead of a misleading "Fabulist is down") and `FabulistAuthFailureSpike`, with runbook entries.
 - Confluence publishing: a page deleted in Confluence is created again on the next publish (it used to fail with 404 forever); one edit conflict (409) is retried with the fresh version; a title collision says to rename the project or the page.
 - `scripts/deploy.sh` refuses to deploy from a branch other than `main`, with uncommitted or untracked changes, or when HEAD is not the latest `origin/main` (the image is built from the working tree).
