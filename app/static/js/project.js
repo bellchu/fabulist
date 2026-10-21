@@ -931,15 +931,25 @@ async function pushCard() {
   const push = guard(async () => {
     const approvedOnly = filters.exportScope === "approved";
     if (!(await confirmBox("Push " + (approvedOnly ? "approved" : "all non-rejected") + " stories to " + conn.selectedOptions[0].textContent + " (" + target.value + ")?", { okLabel: "Push" }))) return;
-    btn.disabled = true; btn.textContent = "Pushing…";
+    btn.disabled = true; btn.textContent = label() === "Publish page" ? "Publishing…" : "Pushing…";
+    result.replaceChildren();
     try {
       const r = await api.post(base() + "/push", { integration_id: conn.value, target: target.value, scope: approvedOnly ? "approved" : "all" });
-      result.replaceChildren(h("div", { class: "callout " + (r.failed.length ? "warn" : "ok") }, h("div", { class: "stack", style: { gap: "4px" } },
+      const partial = r.failed.length || r.remaining;
+      const shown = r.failed.slice(0, 10);
+      result.replaceChildren(h("div", { class: "callout " + (partial ? "warn" : "ok"), role: partial ? "alert" : "status" }, h("div", { class: "stack", style: { gap: "4px" } },
         h("b", {}, r.created + " created, " + r.updated + " updated" + (r.failed.length ? ", " + r.failed.length + " failed" : "")),
-        r.failed.map((f) => h("div", { class: "small" }, f.item + ": " + f.error)))));
-    } finally { btn.disabled = false; btn.textContent = "Push stories"; }
+        r.remaining ? h("div", {}, r.remaining + " " + (r.remaining === 1 ? "story was" : "stories were") + " not pushed because the time limit was reached. Push again to continue: stories already pushed are updated, not duplicated.") : null,
+        shown.map((f) => h("div", { class: "small" }, f.item + ": " + f.error)),
+        r.failed.length > shown.length ? h("div", { class: "small muted" }, "…and " + (r.failed.length - shown.length) + " more. The count is recorded in the audit trail.") : null)));
+    } catch (e) {
+      // Keep the failure in the card (a toast fades); the same message is announced to screen readers.
+      result.replaceChildren(h("div", { class: "callout error", role: "alert" }, e.message));
+    } finally { btn.disabled = false; btn.textContent = label(); }
   });
-  const btn = h("button", { class: "btn btn-primary", onclick: push }, "Push stories");
+  const label = () => (integrations.find((i) => i.id === conn.value) || {}).kind === "confluence" ? "Publish page" : "Push stories";
+  const btn = h("button", { class: "btn btn-primary", onclick: push }, label());
+  conn.addEventListener("change", () => { btn.textContent = label(); });
   card.append(h("div", { class: "runbox" }, conn, target, h("span", { class: "muted small grow" }, "Uses the export scope selected above."), btn, result));
   return card;
 }

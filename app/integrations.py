@@ -38,12 +38,21 @@ def _request(method: str, url: str, headers: Dict[str, str], body: Any = None, c
             if resp.status_code == 429 or resp.status_code >= 500:
                 last = "tracker returned HTTP %d" % resp.status_code
             elif resp.status_code >= 400:
-                raise TrackerError("HTTP %d: %s" % (resp.status_code, _error_text(resp)))
+                raise TrackerError(_http_error(resp))
             else:
                 return resp.json() if resp.content else {}
         if attempt < 2:
             time.sleep(1.5 * (2 ** attempt))
     raise TrackerError(last)
+
+
+SYSTEMIC = {401: "check the account and API token (credentials)", 403: "the token lacks permission for this project or space",
+            404: "not found: check the base URL and the target project or space"}
+
+
+def _http_error(resp: httpx.Response) -> str:
+    detail, hint = _error_text(resp).strip(), SYSTEMIC.get(resp.status_code)
+    return "HTTP %d%s%s" % (resp.status_code, ": " + detail if detail else "", " (%s)" % hint if hint else "")
 
 
 def _error_text(resp: httpx.Response) -> str:
@@ -291,14 +300,14 @@ def client_for(conn: Dict[str, Any]) -> Any:
 
 
 def push(project_id: str, conn: Dict[str, Any], target: str, stories: List[Dict[str, Any]],
-         progress: Callable[[str], None] = lambda m: None) -> Dict[str, Any]:
+         progress: Callable[[str], None] = lambda m: None, out_of_time: Callable[[], bool] = lambda: False) -> Dict[str, Any]:
     tracker = client_for(conn)
     if hasattr(tracker, "deliver"):
         return tracker.deliver(project_id, target, stories)
     links = {(r["item_type"], r["item_ref"]): r["external_key"] for r in db.rows(
         "SELECT item_type, item_ref, external_key FROM external_links WHERE integration_id=%s AND target=%s AND project_id=%s",
         (conn["id"], target, project_id))}
-    result: Dict[str, Any] = {"created": 0, "updated": 0, "failed": [], "items": []}
+    result: Dict[str, Any] = {"created": 0, "updated": 0, "failed": [], "items": [], "remaining": 0}
 
     def save_link(item_type: str, ref: str, key: str, url: str) -> None:
         db.execute("INSERT INTO external_links (id, project_id, integration_id, target, item_type, item_ref, external_key, external_url, updated) "
@@ -317,7 +326,15 @@ def push(project_id: str, conn: Dict[str, Any], target: str, stories: List[Dict[
         except TrackerError as exc:
             epic_keys[epic] = None
             result["failed"].append({"item": "Epic: " + epic, "error": str(exc)})
+    failed_epics = [f["error"] for f in result["failed"]]
+    if epic_keys and not any(epic_keys.values()) and len(set(failed_epics)) == 1 and failed_epics[0].startswith(
+            tuple("HTTP %d" % code for code in SYSTEMIC)):
+        # Every epic failed with the same credentials/permission/URL error: trying each story would only repeat it.
+        raise TrackerError(failed_epics[0])
     for i, s in enumerate(stories, 1):
+        if out_of_time():
+            result["remaining"] = len(stories) - i + 1  # pushing again continues: linked stories are updated, not duplicated
+            break
         progress("Pushing %d of %d" % (i, len(stories)))
         existing = links.get(("story", s["id"]))
         try:

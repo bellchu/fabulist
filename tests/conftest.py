@@ -1,4 +1,5 @@
 import os
+import time
 
 import pytest
 
@@ -23,3 +24,9 @@ def client(monkeypatch):
     taxonomy.invalidate()
     with TestClient(app, headers={"X-Requested-With": "fabulist"}) as c:
         yield c
+        # A background AI run must not outlive its test: on a slow machine it would run into the next one
+        # (and touch shared state such as the taxonomy cache).
+        for _ in range(150):
+            if not db.one("SELECT 1 AS x FROM runs WHERE status='running'"):
+                break
+            time.sleep(0.2)
