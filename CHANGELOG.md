@@ -5,6 +5,7 @@ Notable user-visible and operational changes, newest first.
 ## Unreleased
 
 - Fix: the product-taxonomy cache ignored invalidation for the first 30 s after a machine boot (a new or edited product class could be missed on a freshly started node).
+- Backups: the documented restore command now uses `--clean --if-exists --exit-on-error` (the old one exited 1 with 67 errors on a fresh database); `scripts/restore-drill.sh` verifies dump and restore end to end.
 - Fix: going back from a project that was still loading left that project's name in the Projects breadcrumb.
 - Project list: from 8 projects a filter bar (name/description, platform) and a sort (newest, name, most left to review) appear; the choice is kept while navigating.
 - AI run failures name the section or story group that failed and state that nothing was saved (e.g. "Section 12 of 40 (Returns): provider returned HTTP 503. Nothing was saved; existing results were kept.").

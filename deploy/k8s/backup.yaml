@@ -1,5 +1,5 @@
 # Nightly logical backups of the Fabulist database, kept for 7 days on their own volume.
-# Restore: kubectl -n fabulist exec -i postgres-0 -- pg_restore -U fabulist -d fabulist --clean < file.dump
+# Restore: kubectl -n fabulist exec -i postgres-0 -- pg_restore -U fabulist -d fabulist --clean --if-exists --exit-on-error < file.dump
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
