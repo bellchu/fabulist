@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- First run: the Admin pages show a prominent warning when sign-in is not configured (anyone who can reach the address could change AI keys, integrations and users); Extract and Generate stay disabled with the reason shown until a BRD or requirements exist.
 - Narrow screens and large text: card headers wrap instead of squeezing the title and description beside a button (the Recent changes description was 94 px wide at 320 px).
 - Printing any screen (or saving it as PDF) now gives the content on white in the light palette: navigation, tabs, the workflow bar, buttons and filters are hidden, tables repeat their header and do not split rows, and nothing is clipped. Previously everything printed, and printing from a system in dark mode produced near-white text on white paper.
 - Stakeholder report: shows when it was generated and its scope (approved only / everything in review; for baselines the version, name, who froze it and when), a status breakdown, A4 print layout with page numbers, repeating table headers and no split rows, and a review-and-approval block.

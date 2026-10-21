@@ -11,6 +11,12 @@ export async function renderAdmin(content, tab) {
   const view = { overview: viewOverview, providers: viewProviders, settings: viewSettings, taxonomy: viewTaxonomy, integrations: viewIntegrations, users: viewUsers, activity: viewActivity }[tab] || viewOverview;
   mount(content, h("nav", { class: "tabs", "aria-label": "Setup sections" }, Object.entries(TITLES).map(([id, label]) =>
     h("a", { class: "tab" + (id === tab ? " active" : ""), href: "#/admin/" + id, "aria-current": id === tab ? "page" : null }, label))));
+  if (state.me.username === "anonymous") {
+    // No authentication configured: on a shared network this is the single most important thing an administrator must know.
+    content.append(h("div", { class: "callout warn", style: { marginBottom: "12px" } }, icon("alert"), h("div", { class: "grow" },
+      h("b", {}, "Sign-in is not configured. "), "Anyone who can reach this address can view and change everything here, including AI keys, integrations and users. ",
+      "Set APP_BASIC_USER and APP_BASIC_PASSWORD, or configure single sign-on, before sharing this deployment.")));
+  }
   await view(content);
 }
 
