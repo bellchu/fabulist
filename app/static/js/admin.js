@@ -358,7 +358,7 @@ function integrationDialog(data, it) {
     azure: ["https://dev.azure.com/your-organization", "Project name, e.g. Order to Cash", "Creates Epic and User Story work items with acceptance criteria, priority, story points and a parent link. Use a PAT with Work Items (read & write)."],
     github: ["https://api.github.com", "owner/repository", "Creates an issue per epic (label 'epic') and per story with an acceptance-criteria checklist. Use a fine-grained token with Issues: read & write."],
     confluence: ["https://your-site.atlassian.net/wiki", "Space key, e.g. OTC", "Publishes the backlog (stories, acceptance criteria, traceability) as one page per project; later publishes add a new page version. Cloud: Atlassian email + API token; Data Center: personal access token."],
-    webhook: ["https://hooks.example.com/fabulist", "Optional label sent with each delivery", "POSTs the backlog as JSON (event backlog.pushed). If a secret is set, requests carry X-Fabulist-Signature: sha256=HMAC of the body."],
+    webhook: ["https://hooks.example.com/fabulist", "Optional label sent with each delivery", "POSTs the backlog as JSON (event backlog.pushed) with X-Fabulist-Delivery and X-Fabulist-Timestamp headers. With a secret, X-Fabulist-Signature-V2 signs timestamp.body so receivers can reject replays. Set a secret: unsigned deliveries can be forged."],
   };
   const sync = () => {
     const [url, tgt, hint] = HINTS[kind.value] || HINTS.jira;
