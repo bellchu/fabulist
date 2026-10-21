@@ -77,7 +77,8 @@ _TTL = 30.0
 
 def invalidate() -> None:
     with _lock:
-        _cache["at"] = 0.0
+        # Not 0.0: monotonic() counts from boot, so within 30 s of boot "stale since 0.0" would still look fresh.
+        _cache["at"] = float("-inf")
         _cache["gen"] += 1
 
 
