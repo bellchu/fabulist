@@ -598,7 +598,8 @@ function reqDrawer(r, nav) {
       nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Next requirement", title: "Alt+Right", disabled: !nextId, onclick: step(nextId) }, "Next ›") : null,
       isNew ? null : h("button", { class: "btn", onclick: guard(() => refineRequirementDialog(r, close, nav)) }, icon("sparkles"), "Refine with AI"),
       h("span", { class: "grow" }),
-      isNew ? null : h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete")],
+      isNew ? null : h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete"),
+      nav && !isNew ? shortcutHint() : null],
   });
 }
 
@@ -636,6 +637,10 @@ const reviewKeys = ({ save, approve, prev, next }) => (e) => {
   e.preventDefault();
   act();
 };
+
+const shortcutHint = () => h("div", { class: "shortcut-hint small muted hide-sm" },
+  h("kbd", {}, "Ctrl"), "+", h("kbd", {}, "Enter"), " save · ", h("kbd", {}, "Ctrl"), "+", h("kbd", {}, "Shift"), "+", h("kbd", {}, "Enter"), " approve & next · ",
+  h("kbd", {}, "Alt"), "+", h("kbd", {}, "←"), h("kbd", {}, "→"), " previous / next");
 
 let storyNav = null;  // list context for the story drawer: set by the Stories tab, never used from other tabs
 
@@ -878,7 +883,8 @@ function storyDrawer(s, nav = storyNav) {
       nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Next story", title: "Alt+Right", disabled: !nextId, onclick: step(nextId) }, "Next ›") : null,
       isNew ? null : h("button", { class: "btn", onclick: guard(() => refineDialog(s, close, nav)) }, icon("sparkles"), "Refine with AI"),
       h("span", { class: "grow" }),
-      isNew ? null : h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete")],
+      isNew ? null : h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete"),
+      nav && !isNew ? shortcutHint() : null],
   });
 }
 

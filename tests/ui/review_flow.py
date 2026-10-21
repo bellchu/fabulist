@@ -45,6 +45,7 @@ with sync_playwright() as p:
         row.click()
         page.wait_for_selector(".drawer")
         first = drawer_key()
+        check(page.locator(".drawer .shortcut-hint").is_visible(), f"{noun}: the drawer shows the keyboard shortcuts")
         page.get_by_role("button", name="Approve & next").click()
         wait_key_change(first)
         second = drawer_key()

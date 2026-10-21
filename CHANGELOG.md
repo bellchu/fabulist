@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- The review drawers show the keyboard shortcuts (save, approve & next, previous/next) as a hint line on desktop.
 - Fixed a WCAG contrast failure on selected rows: the ID link (accent colour on the tinted selection background) was 4.19:1; it now uses the darker accent text colour. The accessibility check now scans the lists with a selection.
 - Stories can be reviewed in bulk: the list view has a select column (with Select all) and a bulk bar to Approve, Mark draft or Reject the selection, confirmed first when 10 or more are selected. The bulk-status API existed; the UI now uses it.
 - Browser test for personal API tokens (`tests/ui/tokens.py`): create, one-time reveal dialog, copy, prefix-only listing, use as a Bearer token, revoke. `scripts/ui-check-k8s.sh` now also starts a sign-in-required instance for named-account flows, and pulls the Python image from the AWS public mirror (Docker Hub intermittently refused the node's pull; override with `PYTHON_IMAGE`).
