@@ -609,3 +609,18 @@ def test_push_remaining_is_counted(client, monkeypatch):
     r = client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"], "target": "FAB", "scope": "approved"}).json()
     assert r["remaining"] == 2
     assert 'fabulist_tracker_items_total{result="remaining",tracker="jira"} 2' in client.get("/metrics", headers={"Authorization": "Bearer scrape-token"}).text
+
+
+def test_html_report_states_scope_and_date_for_exports_and_baselines(client):
+    pid = client.post("/api/projects", json={"name": "Sign-off doc", "platform": "generic"}).json()["id"]
+    api = "/api/projects/%s" % pid
+    client.post(api + "/requirements", json={"statement": "The system shall export invoices to CSV.", "status": "approved"})
+    client.post(api + "/stories", json={"title": "Export invoices", "status": "approved"})
+    approved = client.get(api + "/export", params={"format": "html", "scope": "approved"}).text
+    assert "Scope: approved only" in approved and " UTC" in approved and "Generated " in approved
+    everything = client.get(api + "/export", params={"format": "html", "scope": "all"}).text
+    assert "Scope: everything in review" in everything
+    client.post(api + "/baselines", json={"name": "Release 1", "scope": "approved"})
+    bid = client.get(api + "/baselines").json()[0]["id"]
+    frozen = client.get(api + "/baselines/%s/export" % bid, params={"format": "html"}).text
+    assert "Baseline v1" in frozen and "Release 1" in frozen and "frozen " in frozen and "Scope: approved only" in frozen

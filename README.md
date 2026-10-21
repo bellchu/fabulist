@@ -40,7 +40,7 @@ IDs → human review → epics, features and stories → requirements traceabili
    Editing is concurrency-safe: each requirement and story carries a revision. If two people open the same item and the first saves, the second is told it changed (their text stays in the editor) instead of silently overwriting. API clients can send `rev` for the same protection; without it a save always applies.
 7. **Audit trail**: every manual edit, review decision, deletion, sync and AI run is recorded
    with who, when and field-level changes. The project's **Audit** tab lets reviewers filter by action and user and page through the whole trail; it also exports as CSV (oldest first).
-8. **Export**: a stakeholder HTML report (preview in the browser, print to PDF), Excel (stories, requirements, RTM sheets), Jira CSV, Azure DevOps CSV,
+8. **Export**: a stakeholder HTML report (preview in the browser, print to PDF; it states when it was generated and its scope, shows a status breakdown, has page numbers and repeating table headers, and ends with a review-and-approval block; baseline exports also state the version and who froze it), Excel (stories, requirements, RTM sheets), Jira CSV, Azure DevOps CSV,
    Markdown, CSV, JSON and Gherkin `.feature` test scenarios (tagged with story, requirement and
    compliance IDs for end-to-end traceability), or push directly to **Jira**, **Azure DevOps** or **GitHub Issues**, publish a **Confluence** page,
    or to any system through a signed JSON **webhook**. Tracker pushes are
