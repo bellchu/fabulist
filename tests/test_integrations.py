@@ -251,3 +251,45 @@ def test_item_level_errors_do_not_abort_the_push(client, monkeypatch):
     pid, _ = _project_with_stories(client)
     r = client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"], "target": "FAB", "scope": "approved"})
     assert r.status_code == 200
+
+
+def test_webhook_carries_a_timestamp_a_delivery_id_and_a_signature_that_covers_the_timestamp(monkeypatch):
+    import hashlib
+    import hmac
+    sent = []
+
+    def flaky_post(url, content=None, headers=None, timeout=None):
+        sent.append((content, dict(headers)))
+        return httpx.Response(503 if len(sent) == 1 else 204, request=httpx.Request("POST", url))
+    monkeypatch.setattr(integrations.httpx, "post", flaky_post)
+    monkeypatch.setattr(integrations.time, "sleep", lambda s: None)
+    hook = integrations.Webhook({"base_url": "https://hooks.example.com/x"}, "s3cret")
+    hook._post({"event": "ping", "sent_at": "now"})
+    assert len(sent) == 2, "the 503 was retried"
+    (body1, h1), (body2, h2) = sent
+    assert h1["X-Fabulist-Delivery"] == h2["X-Fabulist-Delivery"] and len(h1["X-Fabulist-Delivery"]) == 32, "a retry is the same delivery"
+    assert abs(int(h2["X-Fabulist-Timestamp"]) - __import__("time").time()) < 5
+    # the reference verification documented in the README
+    def verify(secret, body, headers, tolerance=300, now=None):
+        ts = headers["X-Fabulist-Timestamp"]
+        if abs((now or __import__("time").time()) - int(ts)) > tolerance:
+            return False
+        expected = "sha256=" + hmac.new(secret.encode(), ts.encode() + b"." + body, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, headers["X-Fabulist-Signature-V2"])
+    assert verify("s3cret", body2, h2)
+    assert not verify("wrong", body2, h2), "bad secret"
+    assert not verify("s3cret", body2 + b" ", h2), "tampered body"
+    assert not verify("s3cret", body2, h2, now=int(h2["X-Fabulist-Timestamp"]) + 3600), "a captured delivery replayed an hour later"
+    forged = dict(h2, **{"X-Fabulist-Timestamp": str(int(h2["X-Fabulist-Timestamp"]) + 3600)})
+    assert not verify("s3cret", body2, forged, now=int(h2["X-Fabulist-Timestamp"]) + 3600), "a fresh timestamp cannot be forged onto an old signature"
+    # existing receivers that check the body-only signature keep working
+    assert h2["X-Fabulist-Signature"] == "sha256=" + hmac.new(b"s3cret", body2, hashlib.sha256).hexdigest()
+
+
+def test_unsigned_webhook_still_identifies_the_delivery(monkeypatch):
+    sent = []
+    monkeypatch.setattr(integrations.httpx, "post", lambda url, content=None, headers=None, timeout=None:
+                        sent.append(dict(headers)) or httpx.Response(204, request=httpx.Request("POST", url)))
+    integrations.Webhook({"base_url": "https://hooks.example.com/x"}, "")._post({"event": "ping"})
+    assert "X-Fabulist-Delivery" in sent[0] and "X-Fabulist-Timestamp" in sent[0]
+    assert "X-Fabulist-Signature" not in sent[0] and "X-Fabulist-Signature-V2" not in sent[0]

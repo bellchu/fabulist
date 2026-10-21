@@ -6,6 +6,7 @@ import html
 import json
 import re
 import time
+import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
@@ -214,11 +215,18 @@ class Webhook:
 
     def _post(self, payload: Dict[str, Any]) -> None:
         body = json.dumps(payload, separators=(",", ":")).encode()
-        headers = {"Content-Type": "application/json", "User-Agent": "Fabulist-Webhook"}
-        if self.secret:
-            headers["X-Fabulist-Signature"] = "sha256=" + hmac.new(self.secret.encode(), body, hashlib.sha256).hexdigest()
+        delivery = uuid.uuid4().hex  # the same across retries, so a receiver can drop duplicates
         last = "unknown error"
         for attempt in range(3):
+            # Fresh timestamp per attempt, signed together with the body (V2): a captured request cannot be replayed
+            # after the receiver's tolerance window, and the timestamp cannot be swapped onto an old signature.
+            # X-Fabulist-Signature (body only) is kept for receivers written before V2.
+            ts = str(int(time.time()))
+            headers = {"Content-Type": "application/json", "User-Agent": "Fabulist-Webhook",
+                       "X-Fabulist-Delivery": delivery, "X-Fabulist-Timestamp": ts}
+            if self.secret:
+                headers["X-Fabulist-Signature"] = "sha256=" + hmac.new(self.secret.encode(), body, hashlib.sha256).hexdigest()
+                headers["X-Fabulist-Signature-V2"] = "sha256=" + hmac.new(self.secret.encode(), ts.encode() + b"." + body, hashlib.sha256).hexdigest()
             try:
                 resp = httpx.post(self.url, content=body, headers=headers, timeout=30)
             except httpx.HTTPError as exc:

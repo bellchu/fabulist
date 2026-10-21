@@ -47,6 +47,26 @@ IDs → human review → epics, features and stories → requirements traceabili
    idempotent: epics and stories are linked to their issues, so pushing again updates them
    instead of creating duplicates.
 
+### Receiving webhooks
+
+Each delivery is one JSON `POST` with `X-Fabulist-Delivery` (unique per delivery, the same on retries: drop duplicates),
+`X-Fabulist-Timestamp` (Unix seconds) and, when a secret is set, `X-Fabulist-Signature-V2: sha256=<hex>`, the HMAC-SHA256 of
+`"<timestamp>.<raw body>"`. Verify the signature in constant time and reject timestamps older than your tolerance (5 minutes
+is typical), so a captured request cannot be replayed:
+
+```python
+import hashlib, hmac, time
+
+def verify(secret: str, body: bytes, headers, tolerance=300) -> bool:
+    ts = headers["X-Fabulist-Timestamp"]
+    if abs(time.time() - int(ts)) > tolerance:
+        return False
+    expected = "sha256=" + hmac.new(secret.encode(), ts.encode() + b"." + body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, headers["X-Fabulist-Signature-V2"])
+```
+
+`X-Fabulist-Signature` (HMAC of the body alone) is still sent for receivers written before V2, but it cannot detect replays.
+
 ## Admin dashboard
 
 - **AI providers**: any OpenAI-compatible API (OpenAI, DeepSeek, Azure, vLLM, Ollama),
