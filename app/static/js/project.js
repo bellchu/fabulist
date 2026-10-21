@@ -118,6 +118,9 @@ function runPanel(stage) {
   const running = run && run.status === "running";
   const scope = select([["all", "Approved + draft requirements"], ["approved", "Approved requirements only"]], "all", { "aria-label": "Requirement scope" });
   const isReq = stage === "requirements";
+  // Say why a run cannot start instead of failing after the click.
+  const blocked = isReq ? (ctx.project.documents === 0 ? "Add a BRD on the Sources tab first." : "")
+    : (ctx.project.requirements === 0 ? "Extract or add requirements first." : "");
   const start = guard(async () => {
     const hasData = isReq ? ctx.project.requirements > 0 || ctx.project.stories > 0 : ctx.project.stories > 0;
     if (hasData && !(await confirmBox(isReq
@@ -149,9 +152,10 @@ function runPanel(stage) {
       h("div", { class: "grow" }, h("div", { class: "title" }, isReq ? "Extract requirements from BRDs" : "Generate user stories"),
         h("div", { class: "muted small" }, isReq
           ? "AI reads each BRD section and proposes atomic requirements with types and sources for your review."
-          : "Builds epics, features and INVEST stories with Gherkin criteria, linked to requirement IDs.")),
+          : "Builds epics, features and INVEST stories with Gherkin criteria, linked to requirement IDs."),
+        blocked ? h("div", { class: "small", id: "run-blocked-" + stage, style: { color: "var(--amber)", marginTop: "2px" } }, blocked) : null),
       isReq ? null : scope,
-      h("button", { class: "btn btn-primary", disabled: running, onclick: start }, icon("sparkles"), running ? "Running…" : isReq ? (ctx.project.requirements ? "Re-extract" : "Extract") : (ctx.project.stories ? "Regenerate" : "Generate")),
+      h("button", { class: "btn btn-primary", disabled: running || !!blocked, title: blocked || null, "aria-describedby": blocked ? "run-blocked-" + stage : null, onclick: start }, icon("sparkles"), running ? "Running…" : isReq ? (ctx.project.requirements ? "Re-extract" : "Extract") : (ctx.project.stories ? "Regenerate" : "Generate")),
       running ? h("div", { class: "progress-line" }) : null, statusLine));
 }
 
