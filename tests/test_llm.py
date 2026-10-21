@@ -159,3 +159,37 @@ def test_estimate_via_llm_filters_invalid(monkeypatch):
     monkeypatch.setattr(llm.httpx, "post", Fake([chat(reply)]))
     stories = [{"key": "US-001", "title": "A", "acceptance_criteria": []}, {"key": "US-002", "title": "B", "acceptance_criteria": []}]
     assert pipeline.estimate_stories(stories, OPENAI, OPTS, {"in": 0, "out": 0}) == [{"key": "US-001", "points": 5, "rationale": "integration"}]
+
+
+def test_out_of_quota_is_not_retried_and_keeps_the_providers_explanation(monkeypatch):
+    fake = Fake([(429, {"error": {"message": "You exceeded your current quota, please check your plan and billing details.", "type": "insufficient_quota"}})] * 3)
+    monkeypatch.setattr(llm.httpx, "post", fake)
+    with pytest.raises(llm.LLMError) as err:
+        llm.complete(OPENAI, "s", "u", OPTS)
+    assert len(fake.calls) == 1, "running out of quota is not transient"
+    assert "exceeded your current quota" in str(err.value) and "out of quota" in str(err.value)
+
+
+def test_a_failure_after_retries_still_says_what_the_provider_said(monkeypatch):
+    monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+    monkeypatch.setattr(llm.httpx, "post", Fake([(503, {"error": {"message": "The server is overloaded"}})] * 3))
+    with pytest.raises(llm.LLMError, match="HTTP 503: The server is overloaded"):
+        llm.complete(OPENAI, "s", "u", OPTS)
+
+
+@pytest.mark.parametrize("status,hint", [(401, "API key"), (403, "access"), (404, "model name")])
+def test_authentication_and_model_errors_say_what_to_check(monkeypatch, status, hint):
+    monkeypatch.setattr(llm.httpx, "post", Fake([(status, {"error": {"message": "nope"}})]))
+    with pytest.raises(llm.LLMError, match=hint):
+        llm.complete(OPENAI, "s", "u", OPTS)
+
+
+def test_an_unreachable_provider_names_the_host_and_what_to_check(monkeypatch):
+    monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+
+    def refuse(url, headers=None, json=None, timeout=None):
+        raise httpx.ConnectError("refused")
+    monkeypatch.setattr(llm.httpx, "post", refuse)
+    with pytest.raises(llm.LLMError) as err:
+        llm.complete(OPENAI, "s", "u", OPTS)
+    assert "llm.test" in str(err.value) and "endpoint URL" in str(err.value) and "ConnectError" in str(err.value)

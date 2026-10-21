@@ -319,6 +319,8 @@ def start_run(pid: str, body: RunIn, tasks: BackgroundTasks, request: Request):
     if body.scope not in ("approved", "all"):
         raise HTTPException(400, "Unknown scope")
     profile = settings.get_provider(body.provider_id) if body.provider_id else settings.default_provider()
+    if profile["kind"] == "anthropic" and not profile.get("api_key"):  # fail at the click, not after a run has started
+        raise HTTPException(400, "The provider %s has no API key. Add one in Admin > AI providers." % profile["name"])
     if body.stage == "requirements" and not db.one("SELECT 1 AS x FROM documents WHERE project_id=%s LIMIT 1", (pid,)):
         raise HTTPException(400, "Add at least one BRD document first")
     if db.one("SELECT 1 AS x FROM runs WHERE project_id=%s AND status='running'", (pid,)):
