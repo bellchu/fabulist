@@ -392,15 +392,28 @@ def generate_stories(reqs: List[Dict[str, Any]], project_id: str, platform: str,
 
 
 def _finalize(raw: List[Dict[str, Any]], reqs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Normalise the stories from every batch. Titles are not unique across a large run (an AI writes 'Manage users' in many
+    feature areas), and dropping the later story also dropped its requirement links, silently uncovering those requirements:
+    - same title in the same feature area: one story twice; merge it (links and any new criteria are kept);
+    - same title in another feature area: a different story; keep it, with the feature in the title to tell them apart."""
     valid = {r["key"] for r in reqs}
-    out, seen = [], set()
+    out: List[Dict[str, Any]] = []
+    by_title: Dict[str, List[Dict[str, Any]]] = {}
     for r in raw:
         s = normalize_story(r)
-        if not s or _norm_key(s["title"]) in seen:
+        if not s:
             continue
-        seen.add(_norm_key(s["title"]))
         s["requirement_ids"] = [k for k in dict.fromkeys(s["requirement_ids"]) if k in valid]
+        key, feature = _norm_key(s["title"]), _norm_key(s.get("feature") or "")
+        twin = next((o for o in by_title.get(key, []) if _norm_key(o.get("feature") or "") == feature), None)
+        if twin:
+            twin["requirement_ids"] = list(dict.fromkeys(twin["requirement_ids"] + s["requirement_ids"]))
+            twin["acceptance_criteria"] += [a for a in s["acceptance_criteria"] if a not in twin["acceptance_criteria"]][:max(0, 12 - len(twin["acceptance_criteria"]))]
+            continue
         _enrich(s, s["title"] + " " + s["narrative"])
+        if by_title.get(key):
+            s["title"] = ("%s (%s)" % (s["title"], s.get("feature") or "other"))[:200]
+        by_title.setdefault(key, []).append(s)
         out.append(s)
     return out
 

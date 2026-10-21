@@ -298,3 +298,31 @@ def test_every_provider_request_is_counted_for_the_run(monkeypatch):
     usage = {"in": 0, "out": 0}
     pipeline._ask({"kind": "openai"}, {"redact_pii": False}, "sys", "prompt", usage)
     assert usage["requests"] == 2 and usage["in"] == 20, "the retry for invalid JSON is a second request"
+
+
+def _raw_story(title, feature, reqs, criteria=("Given a, when b, then c.",), epic="Orders"):
+    return {"title": title, "epic": epic, "feature": feature, "narrative": "As a user, I want x, so that y.",
+            "acceptance_criteria": list(criteria), "requirement_ids": list(reqs)}
+
+
+def _req_list(*keys):
+    return [{"key": k, "type": "functional", "statement": "The system shall do %s." % k, "epic": "Orders", "section": "S"} for k in keys]
+
+
+def test_same_title_in_different_feature_areas_keeps_both_stories():
+    out = pipeline._finalize([_raw_story("Manage users", "Billing", ["REQ-001"]), _raw_story("Manage users", "Returns", ["REQ-002"])], _req_list("REQ-001", "REQ-002"))
+    assert [(s["title"], s["feature"], s["requirement_ids"]) for s in out] == [
+        ("Manage users", "Billing", ["REQ-001"]), ("Manage users (Returns)", "Returns", ["REQ-002"])], "the second story is kept, with its links, under a title that tells them apart"
+
+
+def test_same_title_in_the_same_feature_area_merges_so_no_requirement_loses_its_story():
+    out = pipeline._finalize([_raw_story("Export report", "Reporting", ["REQ-001"], ["Given a, when b, then c."]),
+                              _raw_story("Export Report", "Reporting", ["REQ-002", "REQ-001"], ["Given a, when b, then c.", "Given d, when e, then f."])],
+                             _req_list("REQ-001", "REQ-002"))
+    assert len(out) == 1 and out[0]["requirement_ids"] == ["REQ-001", "REQ-002"]
+    assert out[0]["acceptance_criteria"] == ["Given a, when b, then c.", "Given d, when e, then f."], "criteria from the duplicate are kept, not repeated"
+
+
+def test_unrelated_titles_and_invalid_links_are_unchanged():
+    out = pipeline._finalize([_raw_story("Place an order", "Capture", ["REQ-001", "REQ-999"]), _raw_story("Cancel an order", "Capture", ["REQ-002"])], _req_list("REQ-001", "REQ-002"))
+    assert [(s["title"], s["requirement_ids"]) for s in out] == [("Place an order", ["REQ-001"]), ("Cancel an order", ["REQ-002"])]
