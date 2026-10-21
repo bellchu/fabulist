@@ -28,7 +28,9 @@ with sync_playwright() as p:
         api, page = ctx.request, ctx.new_page()
         pid = api.post(BASE + "/api/projects", data={"name": "A11y " + scheme, "platform": "generic"}, headers=H).json()["id"]
         for i in range(8):
-            api.post(f"{BASE}/api/projects/{pid}/requirements", data={"statement": "The system shall support capability %d." % i}, headers=H)
+            made = api.post(f"{BASE}/api/projects/{pid}/requirements", data={"statement": "The system shall support capability %d." % i}, headers=H).json()
+            if i == 0:  # an open discussion renders on a tinted background: that is where ghost buttons lost contrast on the live site
+                api.post(f"{BASE}/api/projects/{pid}/comments", data={"item_id": made["id"], "body": "Is this in scope for release 1?"}, headers=H)
             api.post(f"{BASE}/api/projects/{pid}/stories", data={"title": "Story %d" % i, "persona": "buyer", "narrative": "As a buyer, I want %d, so that value." % i,
                                                               "acceptance_criteria": ["Given a, when b, then c"], "epic": "E", "feature": "F"}, headers=H)
         for tab in ("requirements", "stories"):

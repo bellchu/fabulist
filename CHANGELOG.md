@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Fixed a WCAG contrast failure found on the live site: ghost buttons (e.g. "Resolve" on an open discussion) were 4.19:1 on the tinted background; they now use the darker accent text colour. The accessibility check seeds an open discussion so this stays covered.
 - Bulk actions on 10 or more selected requirements (Approve, Mark draft, Exclude) now ask for confirmation first; cancelling changes nothing and keeps the selection.
 - Accessibility regression check (`tests/ui/a11y.py`, axe-core, WCAG 2.0/2.1 A and AA): the requirement and story lists and their review drawers, in light and dark, must have no serious or critical violations. Run with `scripts/ui-check-k8s.sh`.
 - `scripts/ui-check-k8s.sh` runs browser regression checks (`tests/ui/*.py`, headless Chromium) against the app in a temporary cluster namespace. The first one covers the review drawers: Approve & next, Prev/Next, shortcuts, unsaved-edit prompt, scroll kept after save, phone-width footer.

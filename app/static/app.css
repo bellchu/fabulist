@@ -90,7 +90,8 @@ p { margin: 0; }
 .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--on-accent); }
 .btn-primary:disabled { background: #c9c9c9; border-color: #c9c9c9; color: #fff; }
 .btn-danger { color: var(--red); } .btn-danger:hover { background: var(--red-soft); border-color: var(--red); color: var(--red); }
-.btn-ghost { border-color: transparent; background: transparent; } .btn-ghost:hover { background: var(--sunken); border-color: transparent; }
+.btn-ghost { border-color: transparent; background: transparent; color: var(--accent-text); }  /* --accent itself is only 4.2:1 on --accent-soft */
+.btn-ghost.btn-danger { color: var(--red); } .btn-ghost:hover { background: var(--sunken); border-color: transparent; }
 .btn-sm { height: 24px; padding: 0 10px; font-size: 12px; }
 .icon-btn { width: 32px; padding: 0; color: var(--text-3); }
 input[type=text], input[type=number], input[type=password], input[type=url], input[type=search], select, textarea {
