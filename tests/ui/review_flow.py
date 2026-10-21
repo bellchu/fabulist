@@ -87,6 +87,18 @@ with sync_playwright() as p:
     page.get_by_role("button", name="ID").click()
     check(id_header.get_attribute("aria-sort") == "none" and first_key() == original, "sort: third click restores the original order")
 
+    # the stories list sorts the same way
+    page.goto(f"{BASE}/#/p/{pid}/stories")
+    page.reload()
+    page.get_by_role("button", name="List").click()
+    page.wait_for_selector("tr.clickable")
+    story_first = lambda: page.locator("tbody tr.clickable .row-open").first.inner_text()
+    page.get_by_role("button", name="ID").click()
+    page.get_by_role("button", name="ID").click()
+    check(story_first() == "US-120", f"sort: stories sort descending by ID (top is {story_first()})")
+    page.get_by_role("button", name="Pts").click()
+    check(page.locator("th", has=page.get_by_role("button", name="Pts")).get_attribute("aria-sort") == "ascending", "sort: choosing another column moves the sort to it")
+
     # bulk actions on a large selection are confirmed first, and cancelling changes nothing
     page.goto(f"{BASE}/#/p/{pid}/requirements")
     page.reload()

@@ -10,7 +10,7 @@ const TABS = [["overview", "Overview"], ["sources", "Sources"], ["requirements",
 const TYPE_COLORS = { business: "#5867e8", functional: "#0176d3", "non-functional": "#dd7a01", constraint: "#ba0517", rule: "#06a59a" };
 
 // Filters survive re-renders within the session.
-const filters = { reqQ: "", reqType: "", reqStatus: "", reqFlagged: false, reqSort: "", reqDir: 1, storyQ: "", storyStatus: "", storyView: "map", storyReady: "", traceGaps: false, exportScope: "all" };
+const filters = { reqQ: "", reqType: "", reqStatus: "", reqFlagged: false, reqSort: "", reqDir: 1, storySort: "", storyDir: 1, storyQ: "", storyStatus: "", storyView: "map", storyReady: "", traceGaps: false, exportScope: "all" };
 let ctx = null;
 let pollTimer = null;
 
@@ -427,7 +427,28 @@ const talkBadge = (n) => (n ? h("span", { class: "chip", title: n + " open discu
 
 const BULK_CONFIRM_AT = 10;  // a bulk change this large is confirmed first: it is one click for hundreds of reviews
 
+// A column header that sorts: ascending, descending, then back to the original order. `prefix` names the filters entry that remembers it.
+function sortHeader(label, cls, key, prefix, redraw) {
+  if (!key) return h("th", { class: cls }, label);
+  const on = filters[prefix + "Sort"] === key, dir = filters[prefix + "Dir"];
+  return h("th", { class: cls, "aria-sort": on ? (dir > 0 ? "ascending" : "descending") : "none" },
+    h("button", { type: "button", class: "th-sort", onclick: () => {
+      if (!on) { filters[prefix + "Sort"] = key; filters[prefix + "Dir"] = 1; } else if (dir > 0) filters[prefix + "Dir"] = -1; else filters[prefix + "Sort"] = "";
+      redraw();
+    } }, label, on ? (dir > 0 ? " ▲" : " ▼") : null));
+}
+
 const STATUS_RANK = { draft: 0, approved: 1, excluded: 2 };
+const PRIORITY_RANK = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+const STORY_SORTS = {
+  key: (a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }),
+  title: (a, b) => a.title.localeCompare(b.title),
+  epic: (a, b) => (a.epic + a.feature).localeCompare(b.epic + b.feature, undefined, { numeric: true }),
+  priority: (a, b) => (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9),
+  points: (a, b) => (a.story_points || 0) - (b.story_points || 0),
+  quality: (a, b) => a.quality_score - b.quality_score,
+  status: (a, b) => a.status.localeCompare(b.status),
+};
 const SORTS = {
   key: (a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }),
   type: (a, b) => a.type.localeCompare(b.type) || a.key.localeCompare(b.key, undefined, { numeric: true }),
@@ -471,16 +492,6 @@ async function viewRequirements(body) {
       }) }, l)),
     h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); renderTable(); renderBulk(); } }, "Clear"))] : []));
 
-  const sortHeader = (label, cls, key) => {
-    if (!key) return h("th", { class: cls }, label);
-    const on = filters.reqSort === key;
-    return h("th", { class: cls, "aria-sort": on ? (filters.reqDir > 0 ? "ascending" : "descending") : "none" },
-      h("button", { type: "button", class: "th-sort", onclick: () => {
-        if (!on) { filters.reqSort = key; filters.reqDir = 1; } else if (filters.reqDir > 0) filters.reqDir = -1; else filters.reqSort = "";  // asc, desc, then back to the original order
-        renderTable();
-      } }, label, on ? (filters.reqDir > 0 ? " ▲" : " ▼") : null));
-  };
-
   const renderTable = () => {
     const rows = sorted();
     const all = h("input", { type: "checkbox", "aria-label": "Select all", checked: rows.length > 0 && rows.every((r) => selected.has(r.id)),
@@ -491,7 +502,7 @@ async function viewRequirements(body) {
         renderBulk();
       } });
     tableBox.replaceChildren(h("div", { class: "card table-wrap" }, h("table", { class: "table" },
-      h("thead", {}, h("tr", {}, h("th", { class: "w-check" }, all), ...[["ID", "", "key"], ["Type", "hide-sm", "type"], ["Requirement", ""], ["Section", "hide-sm", "section"], ["Quality", "hide-sm", "quality"], ["Status", "", "status"]].map(([x, c, k]) => sortHeader(x, c, k)))),
+      h("thead", {}, h("tr", {}, h("th", { class: "w-check" }, all), ...[["ID", "", "key"], ["Type", "hide-sm", "type"], ["Requirement", ""], ["Section", "hide-sm", "section"], ["Quality", "hide-sm", "quality"], ["Status", "", "status"]].map(([x, c, k]) => sortHeader(x, c, k, "req", renderTable)))),
       h("tbody", {}, rows.length ? rows.map((r) => h("tr", { class: "clickable" + (selected.has(r.id) ? " selected" : ""), onclick: () => reqDrawer(r, nav) },
         h("td", { onclick: (e) => e.stopPropagation() }, h("input", { type: "checkbox", "aria-label": "Select " + r.key, checked: selected.has(r.id),
           onchange: (e) => {
@@ -647,7 +658,8 @@ async function viewStories(body) {
     (!filters.storyQ || (s.key + " " + s.title + " " + s.narrative + " " + s.epic + " " + s.feature).toLowerCase().includes(filters.storyQ.toLowerCase())) &&
     (!filters.storyStatus || s.status === filters.storyStatus) &&
     (!filters.storyReady || (filters.storyReady === "ready") === s.ready));
-  const render = () => { const rows = visible(); box.replaceChildren(filters.storyView === "map" ? storyMap(rows) : storyTable(rows)); };
+  const sorted = () => { const rows = visible(), by = STORY_SORTS[filters.storySort]; return by ? rows.sort((a, b) => filters.storyDir * by(a, b)) : rows; };
+  const render = () => { const rows = sorted(); box.replaceChildren(filters.storyView === "map" ? storyMap(rows) : storyTable(rows, render)); };
   q.addEventListener("input", debounce(() => { filters.storyQ = q.value; render(); }));
   status.addEventListener("change", () => { filters.storyStatus = status.value; render(); });
   ready.addEventListener("change", () => { filters.storyReady = ready.value; render(); });
@@ -658,7 +670,7 @@ async function viewStories(body) {
   };
   // Reload the data but redraw only the list, so a reviewer keeps their place.
   const refresh = async () => { stories.splice(0, stories.length, ...(await api.get(base() + "/stories"))); tally(); render(); };
-  storyNav = { rows: visible, refresh, find: (id) => stories.find((x) => x.id === id) };
+  storyNav = { rows: sorted, refresh, find: (id) => stories.find((x) => x.id === id) };
   tally();
   mount(body, h("div", { class: "toolbar" },
     segmented([["map", "Story map"], ["list", "List"]], filters.storyView, (v) => { filters.storyView = v; render(); }),
@@ -744,9 +756,9 @@ function rowOpener(key, onclick) {
   return h("button", { type: "button", class: "row-open", "aria-label": "Open " + key, onclick }, key);
 }
 
-function storyTable(rows) {
+function storyTable(rows, redraw) {
   return h("div", { class: "card table-wrap" }, h("table", { class: "table" },
-    h("thead", {}, h("tr", {}, [["ID", ""], ["Story", ""], ["Epic / feature", "hide-sm"], ["Priority", "hide-sm"], ["Pts", "hide-sm"], ["Requirements", "hide-sm"], ["Quality", "hide-sm"], ["Status", ""]].map(([x, c]) => h("th", { class: c }, x)))),
+    h("thead", {}, h("tr", {}, [["ID", "", "key"], ["Story", "", "title"], ["Epic / feature", "hide-sm", "epic"], ["Priority", "hide-sm", "priority"], ["Pts", "hide-sm", "points"], ["Requirements", "hide-sm"], ["Quality", "hide-sm", "quality"], ["Status", "", "status"]].map(([x, c, k]) => sortHeader(x, c, k, "story", redraw)))),
     h("tbody", {}, rows.map((s) => h("tr", { class: "clickable", onclick: () => storyDrawer(s) },
       h("td", { class: "mono nowrap" }, rowOpener(s.key)),
       h("td", {}, h("b", {}, s.title), h("div", { class: "small muted" }, s.persona)),
