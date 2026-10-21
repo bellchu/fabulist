@@ -43,7 +43,7 @@ def _project_with_stories(client):
     client.post("/api/projects/%s/documents/text" % pid, json={"name": "brd.md", "text": BRD})
     for stage in ("requirements", "stories"):
         client.post("/api/projects/%s/runs" % pid, json={"stage": stage})
-        for _ in range(50):
+        for _ in range(200):  # wait for the run itself: moving on with it still running leaks it into later tests
             if client.get("/api/projects/%s/runs?limit=1" % pid).json()[0]["status"] != "running":
                 break
             time.sleep(0.1)
@@ -192,3 +192,62 @@ def test_confluence_publish_creates_then_versions_page(client, monkeypatch):
     assert r2["updated"] == 1 and r2["created"] == 0
     put = next(c for c in calls if c[0] == "PUT")
     assert put[2]["version"] == {"number": 2} and put[2]["id"] == "777"
+
+
+def test_push_stops_at_the_time_budget_and_a_second_push_finishes_without_duplicates(client, monkeypatch):
+    from app import config, db
+    fake = FakeTracker()
+    monkeypatch.setattr(integrations.httpx, "request", fake)
+    conn = client.post("/api/admin/integrations", json={"kind": "jira", "name": "Jira", "base_url": "https://acme.atlassian.net",
+                                                         "username": "ana@example.com", "target": "FAB", "token": "jira-tok-1234"}).json()
+    pid, stories = _project_with_stories(client)
+    assert len(stories) >= 2
+    # out of time before the first story: only the epics go out, every story is reported as remaining
+    monkeypatch.setattr(config, "PUSH_BUDGET_SECONDS", 0)
+    first = client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"], "target": "FAB", "scope": "approved"}).json()
+    assert first["remaining"] == len(stories) and first["items"] == []
+    assert client.get("/api/projects/%s/history?limit=1" % pid).json()[0]["summary"].endswith("%d not pushed (time limit)" % len(stories))
+    # the unit: it stops mid-list and says how many are left
+    calls = []
+
+    def out_of_time():
+        calls.append(1)
+        return len(calls) > 1  # one story fits
+    part = integrations.push(pid, db.one("SELECT * FROM integrations WHERE id=%s", (conn["id"],)), "FAB", stories, out_of_time=out_of_time)
+    assert len(part["items"]) == 1 and part["remaining"] == len(stories) - 1
+    # pushing again with a normal budget finishes the rest; stories already pushed are updated, never duplicated
+    monkeypatch.setattr(config, "PUSH_BUDGET_SECONDS", 60)
+    done = client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"], "target": "FAB", "scope": "approved"}).json()
+    assert done["remaining"] == 0 and len(done["items"]) == len(stories)
+    created = [c for c in fake.calls if c["method"] == "POST" and c["url"].endswith("/rest/api/2/issue")]
+    again = client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"], "target": "FAB", "scope": "approved"}).json()
+    assert again["created"] == 0 and again["remaining"] == 0
+    assert len([c for c in fake.calls if c["method"] == "POST" and c["url"].endswith("/rest/api/2/issue")]) == len(created)
+
+
+@pytest.mark.parametrize("status,hint", [(401, "credentials"), (403, "permission"), (404, "base URL")])
+def test_systemic_tracker_errors_stop_the_push_with_one_actionable_message(client, monkeypatch, status, hint):
+    calls = []
+
+    def rejecting(method, url, headers=None, json=None, timeout=None):
+        calls.append(url)
+        return httpx.Response(status, json={"message": "nope"}, request=httpx.Request(method, url))
+    monkeypatch.setattr(integrations.httpx, "request", rejecting)
+    conn = client.post("/api/admin/integrations", json={"kind": "jira", "name": "Jira", "base_url": "https://acme.atlassian.net",
+                                                         "username": "ana@example.com", "target": "FAB", "token": "jira-tok-1234"}).json()
+    pid, stories = _project_with_stories(client)
+    r = client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"], "target": "FAB", "scope": "approved"})
+    assert r.status_code == 400 and "HTTP %d" % status in r.json()["detail"] and hint in r.json()["detail"]
+    epics = {s["epic"] for s in stories}
+    assert len(calls) == len(epics), "no story was attempted once every epic failed the same way"
+    assert client.get("/api/projects/%s/history?limit=1" % pid).json()[0]["action"] != "pushed to jira"
+
+
+def test_item_level_errors_do_not_abort_the_push(client, monkeypatch):
+    fake = FakeTracker(fail_summary="Capture")  # a 400 on some issues is a per-item problem, not a systemic one
+    monkeypatch.setattr(integrations.httpx, "request", fake)
+    conn = client.post("/api/admin/integrations", json={"kind": "jira", "name": "Jira", "base_url": "https://acme.atlassian.net",
+                                                         "username": "ana@example.com", "target": "FAB", "token": "jira-tok-1234"}).json()
+    pid, _ = _project_with_stories(client)
+    r = client.post("/api/projects/%s/push" % pid, json={"integration_id": conn["id"], "target": "FAB", "scope": "approved"})
+    assert r.status_code == 200

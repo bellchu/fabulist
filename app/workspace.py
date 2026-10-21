@@ -717,15 +717,18 @@ def push_to_tracker(pid: str, body: PushIn, request: Request):
             result = integrations.publish_page(pid, conn, target, project["name"] + " backlog",
                                                exporters.confluence_storage(stories, reqs, project["name"]))
         else:
-            result = integrations.push(pid, conn, target, stories)
+            deadline = time.monotonic() + config.PUSH_BUDGET_SECONDS
+            result = integrations.push(pid, conn, target, stories, out_of_time=lambda: time.monotonic() >= deadline)
     except (integrations.TrackerError, settings.SettingsError) as exc:
         raise HTTPException(400, str(exc))
+    result.setdefault("remaining", 0)
     for outcome in ("created", "updated"):
         metrics.inc("fabulist_tracker_items_total", result[outcome], tracker=conn["kind"], result=outcome)
     metrics.inc("fabulist_tracker_items_total", len(result["failed"]), tracker=conn["kind"], result="failed")
     with db.conn() as c:
         history.record(c, pid, "push", conn["id"], target, "pushed to " + conn["kind"], history.actor(request),
-                       "%s %s: %d created, %d updated, %d failed" % (conn["name"], target, result["created"], result["updated"], len(result["failed"])))
+                       "%s %s: %d created, %d updated, %d failed%s" % (conn["name"], target, result["created"], result["updated"], len(result["failed"]),
+                                                           ", %d not pushed (time limit)" % result["remaining"] if result["remaining"] else ""))
     return result
 
 
