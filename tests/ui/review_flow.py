@@ -65,6 +65,28 @@ with sync_playwright() as p:
         check(abs(scroll_y() - y0) < 5, f"{noun}: scroll position kept after saving ({y0} -> {scroll_y()})")
         check(page.locator("tbody .badge.green").count() >= 1, f"{noun}: list shows the approval without a reload")
 
+    # sortable columns: ascending, descending, back to the original order; the drawer's Prev/Next follows the sort
+    page.goto(f"{BASE}/#/p/{pid}/requirements")
+    page.reload()
+    page.wait_for_selector("tr.clickable")
+    first_key = lambda: page.locator("tbody tr.clickable .row-open").first.inner_text()
+    id_header = page.locator("th", has=page.get_by_role("button", name="ID"))
+    original = first_key()
+    page.get_by_role("button", name="ID").click()
+    check(id_header.get_attribute("aria-sort") == "ascending" and first_key() == original, "sort: first click sorts ascending")
+    page.get_by_role("button", name="ID").click()
+    check(id_header.get_attribute("aria-sort") == "descending" and first_key() == "REQ-120", f"sort: second click sorts descending (top is {first_key()})")
+    page.locator("tr.clickable").first.click()
+    page.wait_for_selector(".drawer")
+    top = drawer_key()
+    page.wait_for_function("document.activeElement.closest('.drawer')")
+    page.keyboard.press("Alt+ArrowRight")
+    wait_key_change(top)
+    check(drawer_key() == "REQ-119", f"sort: drawer Next follows the sorted order ({top} -> {drawer_key()})")
+    page.keyboard.press("Escape")
+    page.get_by_role("button", name="ID").click()
+    check(id_header.get_attribute("aria-sort") == "none" and first_key() == original, "sort: third click restores the original order")
+
     # bulk actions on a large selection are confirmed first, and cancelling changes nothing
     page.goto(f"{BASE}/#/p/{pid}/requirements")
     page.reload()
