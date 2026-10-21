@@ -210,6 +210,7 @@ def _ask(profile: Dict[str, Any], opts: Dict[str, Any], system: str, prompt: str
     text, u = llm.complete(profile, system, prompt, opts)
     usage["in"] += u["in"]
     usage["out"] += u["out"]
+    usage["requests"] = usage.get("requests", 0) + 1
     try:
         return parse_json_array(text)
     except (ValueError, json.JSONDecodeError):
@@ -217,6 +218,7 @@ def _ask(profile: Dict[str, Any], opts: Dict[str, Any], system: str, prompt: str
                                                  "array for this input.\n\n" + prompt, opts)
         usage["in"] += u["in"]
         usage["out"] += u["out"]
+        usage["requests"] += 1
         try:
             return parse_json_array(text)
         except (ValueError, json.JSONDecodeError):
@@ -266,7 +268,7 @@ def extract_requirements(documents: List[Dict[str, Any]], platform: str, profile
                          opts: Dict[str, Any], progress: Progress, usage: Usage) -> List[Dict[str, Any]]:
     work = [(d, ch) for d in documents for ch in chunk_sections(d["text"], int(opts["chunk_chars"]))]
     if len(work) > int(opts["max_chunks_per_run"]):
-        raise ValueError("Documents produce %d sections, above the limit of %d (see admin settings)."
+        raise ValueError("Documents produce %d sections, above the limit of %d. Raise 'Max sections per run' in Admin > Generation settings or split the documents."
                          % (len(work), opts["max_chunks_per_run"]))
     out: List[Dict[str, Any]] = []
     seen = set()
@@ -353,21 +355,24 @@ def mock_stories(reqs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return stories
 
 
+def story_batches(reqs: List[Dict[str, Any]]) -> List[Tuple[str, str, List[Dict[str, Any]]]]:
+    """The AI requests story generation makes: requirements grouped by feature area, at most 25 per request."""
+    groups: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    for r in reqs:
+        groups.setdefault((r.get("epic", ""), r.get("section", "")), []).append(r)
+    return [(epic, section, items[i:i + 25]) for (epic, section), items in groups.items() for i in range(0, len(items), 25)]
+
+
 def generate_stories(reqs: List[Dict[str, Any]], project_id: str, platform: str, profile: Dict[str, Any],
                      opts: Dict[str, Any], progress: Progress, usage: Usage) -> List[Dict[str, Any]]:
     if profile["kind"] == "mock":
         progress("Drafting stories for %d requirements" % len(reqs))
         raw = mock_stories(reqs)
         return _finalize(raw, reqs)
-    groups: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
-    for r in reqs:
-        groups.setdefault((r.get("epic", ""), r.get("section", "")), []).append(r)
-    batches = []
-    for (epic, section), items in groups.items():
-        for i in range(0, len(items), 25):
-            batches.append((epic, section, items[i:i + 25]))
+    batches = story_batches(reqs)
     if len(batches) > int(opts["max_chunks_per_run"]):
-        raise ValueError("Too many requirement groups (%d) for one run." % len(batches))
+        raise ValueError("Too many requirement groups (%d) for one run (limit %d). Raise 'Max sections per run' in Admin > Generation "
+                         "settings, or generate from approved requirements only." % (len(batches), int(opts["max_chunks_per_run"])))
     raw: List[Dict[str, Any]] = []
     for i, (epic, section, items) in enumerate(batches, 1):
         progress("Writing stories %d of %d: %s" % (i, len(batches), section[:60]))

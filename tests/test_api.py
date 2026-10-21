@@ -782,3 +782,56 @@ def test_interactive_ai_endpoints_answer_429_when_too_many_are_in_flight_and_the
     finally:
         release.set()
         first.join(10)
+
+
+def _project_for_estimates(client):
+    pid = client.post("/api/projects", json={"name": "Estimate", "platform": "generic"}).json()["id"]
+    api = "/api/projects/%s" % pid
+    client.post(api + "/documents/text", json={"name": "brd.md", "text": "# A\nThe system shall do a.\n\n# B\nThe system shall do b.\n\n# C\nThe system shall do c."})
+    for i in range(30):
+        client.post(api + "/requirements", json={"statement": "The system shall support capability number %d." % i, "epic": "E1", "section": "Big area", "status": "approved"})
+    client.post(api + "/requirements", json={"statement": "The system shall obey the single rule.", "epic": "E1", "section": "Small area"})
+    return pid
+
+
+def test_run_estimate_counts_the_ai_requests_a_run_will_make(client):
+    pid = _project_for_estimates(client)
+    est = lambda **q: client.get("/api/projects/%s/runs/estimate" % pid, params=q).json()  # noqa: E731
+    stories = est(stage="stories", scope="all")
+    assert stories["requests"] == 3 and stories["limit"] >= 3 and stories["over_limit"] is False  # 30 -> 25 + 5, plus the small area
+    assert est(stage="stories", scope="approved")["requests"] == 2, "only approved requirements are in scope"
+    assert est(stage="requirements")["requests"] == 3 and est(stage="requirements")["items"] == 1, "one document, three headed sections"
+    assert stories["seconds"] is None and stories["tokens"] is None, "nothing to base a time or cost guess on yet"
+    assert client.get("/api/projects/%s/runs/estimate" % pid, params={"stage": "nope"}).status_code == 400
+
+
+def test_run_estimate_is_calibrated_from_past_runs_and_flags_the_limit(client):
+    from app import db
+    pid = _project_for_estimates(client)
+    db.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, actor, created, requests, duration_ms, tokens_in, tokens_out, item_count) "
+               "VALUES (%s,%s,'done','stories','DeepSeek','m','t',%s,10,100000,6000,4000,12)", (db.new_id(), pid, db.now()))
+    est = client.get("/api/projects/%s/runs/estimate" % pid, params={"stage": "stories", "scope": "all"}).json()
+    assert est["seconds"] == 30 and est["tokens"] == 3000 and "10 requests" in est["basis"], est  # 3 requests x 10 s and x 1000 tokens
+    client.put("/api/admin/settings", json={"max_chunks_per_run": 2})
+    over = client.get("/api/projects/%s/runs/estimate" % pid, params={"stage": "stories", "scope": "all"}).json()
+    assert over["over_limit"] is True and over["limit"] == 2
+
+
+def test_a_finished_run_records_how_many_provider_requests_it_made(client, monkeypatch):
+    import json as _json
+    import httpx
+    from app import db, llm
+    pid = client.post("/api/projects", json={"name": "Counted", "platform": "generic"}).json()["id"]
+    api = "/api/projects/%s" % pid
+    for i in range(30):  # 30 requirements in one feature area -> 25 + 5 = two story requests
+        client.post(api + "/requirements", json={"statement": "The system shall support capability %d." % i, "epic": "E1", "section": "Area", "status": "approved"})
+    prov = client.post("/api/admin/providers", json={"name": "Fake", "kind": "openai", "base_url": "https://llm.test/v1", "model": "m", "api_key": "k"}).json()["id"]
+    story = [{"title": "A story", "narrative": "As a user, I want x, so that y.", "acceptance_criteria": ["Given a, when b, then c."], "requirement_ids": ["REQ-001"]}]
+
+    def fake(url, headers=None, json=None, timeout=None):
+        return httpx.Response(200, json={"choices": [{"message": {"content": _json.dumps(story)}}], "usage": {"prompt_tokens": 7, "completion_tokens": 3}}, request=httpx.Request("POST", url))
+    monkeypatch.setattr(llm.httpx, "post", fake)
+    assert client.post(api + "/runs", json={"stage": "stories", "provider_id": prov}).status_code == 202
+    run = _wait(client, pid)
+    assert run["status"] == "done" and run["requests"] == 2 and run["tokens_in"] == 14
+    assert db.one("SELECT requests FROM runs WHERE id=%s", (run["id"],))["requests"] == 2

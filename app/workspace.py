@@ -310,8 +310,8 @@ def _run_stage(run_id: str, pid: str, stage: str, provider_id: str, scope: str, 
             with c.cursor() as cur:
                 cur.executemany(sql, params)
             c.execute("UPDATE runs SET status='done', item_count=%s, story_count=%s, progress='', tokens_in=%s, "
-                      "tokens_out=%s, duration_ms=%s WHERE id=%s",
-                      (len(items), len(items), usage["in"], usage["out"], int((time.monotonic() - started) * 1000), run_id))
+                      "tokens_out=%s, duration_ms=%s, requests=%s WHERE id=%s",
+                      (len(items), len(items), usage["in"], usage["out"], int((time.monotonic() - started) * 1000), usage.get("requests", 0), run_id))
         metrics.inc("fabulist_runs_total", stage=stage, status="done")
     except RunCancelled:
         metrics.inc("fabulist_runs_total", stage=stage, status="cancelled")
@@ -352,6 +352,33 @@ def shutdown_runs() -> None:
 
 def _stale_cutoff() -> str:
     return (datetime.now(timezone.utc) - timedelta(minutes=config.STALE_RUN_MINUTES)).isoformat(timespec="milliseconds")
+
+
+@router.get("/api/projects/{pid}/runs/estimate")
+def estimate_run(pid: str, stage: str, scope: str = "all"):
+    """What a run would ask of the AI provider, before anyone clicks: the number of requests (exact, from the same batching the
+    run uses), and a time and token guess calibrated from this installation's own finished runs of that stage."""
+    _project(pid)
+    if stage not in STAGES or scope not in ("approved", "all"):
+        raise HTTPException(400, "Unknown stage or scope")
+    opts = settings.get_settings()
+    if stage == "requirements":
+        docs = db.rows("SELECT text FROM documents WHERE project_id=%s", (pid,))
+        requests, items = sum(len(pipeline.chunk_sections(d["text"], int(opts["chunk_chars"]))) for d in docs), len(docs)
+    else:
+        reqs = [r for r in _requirements(pid) if r["status"] == "approved" or (scope == "all" and r["status"] == "draft")]
+        requests, items = len(pipeline.story_batches(reqs)), len(reqs)
+    past = db.rows("SELECT requests, duration_ms, tokens_in + tokens_out AS tokens FROM runs WHERE stage=%s AND status='done' AND requests > 0 "
+                   "ORDER BY created DESC LIMIT 10", (stage,))
+    seconds = tokens = None
+    basis = "No finished AI runs yet to base a time or cost estimate on."
+    if past:
+        total = sum(r["requests"] for r in past)
+        seconds = round(requests * sum(r["duration_ms"] for r in past) / 1000 / total)
+        tokens = round(requests * sum(r["tokens"] for r in past) / total)
+        basis = "Based on your last %d run%s (%d requests)." % (len(past), "" if len(past) == 1 else "s", total)
+    return {"stage": stage, "scope": scope, "items": items, "requests": requests, "limit": int(opts["max_chunks_per_run"]),
+            "over_limit": requests > int(opts["max_chunks_per_run"]), "seconds": seconds, "tokens": tokens, "basis": basis}
 
 
 def _recover_stuck_runs(pid: str) -> None:

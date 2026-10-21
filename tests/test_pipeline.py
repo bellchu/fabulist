@@ -279,3 +279,22 @@ def test_duplicate_detection_scales_to_thousands_of_requirements():
     started = time.monotonic()
     quality.duplicate_pairs(reqs)
     assert time.monotonic() - started < 0.5, "4000 requirements took %.2fs (about 1.1 s before the prefix filter)" % (time.monotonic() - started)
+
+
+def test_story_batches_group_by_feature_area_and_split_at_25():
+    reqs = [{"key": "REQ-%03d" % i, "type": "functional", "statement": "The system shall do thing %d." % i, "epic": "E1", "section": "A"} for i in range(30)]
+    reqs += [{"key": "REQ-100", "type": "rule", "statement": "The system shall obey rule.", "epic": "E1", "section": "B"}]
+    batches = pipeline.story_batches(reqs)
+    assert [(e, s, len(items)) for e, s, items in batches] == [("E1", "A", 25), ("E1", "A", 5), ("E1", "B", 1)]
+
+
+def test_every_provider_request_is_counted_for_the_run(monkeypatch):
+    calls = []
+
+    def fake(profile, system, user, opts):
+        calls.append(1)
+        return ("not json" if len(calls) == 1 else '[{"statement": "The system shall export orders to CSV.", "type": "functional"}]'), {"in": 10, "out": 5}
+    monkeypatch.setattr(pipeline.llm, "complete", fake)
+    usage = {"in": 0, "out": 0}
+    pipeline._ask({"kind": "openai"}, {"redact_pii": False}, "sys", "prompt", usage)
+    assert usage["requests"] == 2 and usage["in"] == 20, "the retry for invalid JSON is a second request"

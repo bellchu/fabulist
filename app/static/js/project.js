@@ -116,6 +116,8 @@ function editProjectDialog() {
 
 // ---- runs ---------------------------------------------------------------
 
+const LARGE_RUN = 20;  // from this many AI requests a run asks for confirmation, with the estimate
+
 function runPanel(stage) {
   const run = ctx.project.runs[stage];
   const running = run && run.status === "running";
@@ -125,10 +127,23 @@ function runPanel(stage) {
   const blocked = isReq ? (ctx.project.documents === 0 ? "Add a BRD on the Sources tab first." : "")
     : (ctx.project.requirements === 0 ? "Extract or add requirements first." : "");
   const start = guard(async () => {
+    // Say what the run will ask of the AI provider before it does: a big project means many requests, hours and real cost.
+    const est = await api.get(base() + "/runs/estimate?stage=" + stage + "&scope=" + (isReq ? "all" : scope.value));
+    if (est.over_limit) {
+      modal({ title: "Too large for one run",
+        body: h("p", {}, "This run needs " + est.requests + " AI requests, above the limit of " + est.limit + ". Raise “Max sections per run” in Admin → Generation settings"
+          + (isReq ? ", or split the documents." : ", or generate from approved requirements only (choose it next to the button).")), actions: [] });
+      return;
+    }
+    const big = est.requests >= LARGE_RUN;
+    const cost = big ? "This run will make about " + est.requests + " AI requests"
+      + (est.seconds ? " (roughly " + (est.seconds >= 90 ? Math.round(est.seconds / 60) + " minutes" : est.seconds + " seconds") + (est.tokens ? " and " + fmt(est.tokens) + " tokens" : "") + ")" : "")
+      + ". " + est.basis + " " : "";
     const hasData = isReq ? ctx.project.requirements > 0 || ctx.project.stories > 0 : ctx.project.stories > 0;
-    if (hasData && !(await confirmBox(isReq
-      ? "Re-extracting replaces all requirements and the current backlog, including your edits."
-      : "Regenerating replaces the current stories, including your edits.", { okLabel: isReq ? "Re-extract" : "Regenerate", danger: true }))) return;
+    const replace = hasData ? (isReq ? "Re-extracting replaces all requirements and the current backlog, including your edits."
+      : "Regenerating replaces the current stories, including your edits.") : "";
+    if ((big || hasData) && !(await confirmBox((cost + replace).trim() + (big && !hasData ? " Continue?" : ""),
+      { okLabel: hasData ? (isReq ? "Re-extract" : "Regenerate") : (isReq ? "Extract" : "Generate"), danger: hasData }))) return;
     await api.post(base() + "/runs", { stage, scope: scope.value });
     toast(isReq ? "Extraction started" : "Story generation started");
     rerender();
