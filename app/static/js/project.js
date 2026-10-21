@@ -436,7 +436,7 @@ async function viewRequirements(body) {
   }
   const selected = new Set();
   const tableBox = h("div");
-  const bulk = h("div");
+  const bulk = h("div", { class: "bulk-sticky" });
   const q = h("input", { type: "search", class: "search", placeholder: "Search requirements", "aria-label": "Search requirements", value: filters.reqQ });
   const type = select([["", "All types"], ...state.meta.requirement_types.map((t) => [t, t])], filters.reqType, { "aria-label": "Type" });
   const status = select([["", "All statuses"], ["draft", "Draft"], ["approved", "Approved"], ["excluded", "Excluded"]], filters.reqStatus, { "aria-label": "Status" });
@@ -451,7 +451,7 @@ async function viewRequirements(body) {
     h("span", { class: "grow" }),
     ...[["approved", "Approve"], ["draft", "Mark draft"], ["excluded", "Exclude"]].map(([s, l]) =>
       h("button", { class: "btn btn-sm", onclick: guard(async () => {
-        await api.post(base() + "/requirements/bulk", { ids: [...selected], status: s }); toast(l + ": " + selected.size, "ok"); rerender();
+        await api.post(base() + "/requirements/bulk", { ids: [...selected], status: s }); toast(l + ": " + selected.size, "ok"); selected.clear(); await refresh();
       }) }, l)),
     h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); renderTable(); renderBulk(); } }, "Clear"))] : []));
 
@@ -461,7 +461,7 @@ async function viewRequirements(body) {
       onchange: (e) => { rows.forEach((r) => (e.target.checked ? selected.add(r.id) : selected.delete(r.id))); renderTable(); renderBulk(); } });
     tableBox.replaceChildren(h("div", { class: "card table-wrap" }, h("table", { class: "table" },
       h("thead", {}, h("tr", {}, h("th", { class: "w-check" }, all), ...[["ID", ""], ["Type", "hide-sm"], ["Requirement", ""], ["Section", "hide-sm"], ["Quality", "hide-sm"], ["Status", ""]].map(([x, c]) => h("th", { class: c }, x)))),
-      h("tbody", {}, rows.length ? rows.map((r) => h("tr", { class: "clickable" + (selected.has(r.id) ? " selected" : ""), onclick: () => reqDrawer(r) },
+      h("tbody", {}, rows.length ? rows.map((r) => h("tr", { class: "clickable" + (selected.has(r.id) ? " selected" : ""), onclick: () => reqDrawer(r, nav) },
         h("td", { onclick: (e) => e.stopPropagation() }, h("input", { type: "checkbox", "aria-label": "Select " + r.key, checked: selected.has(r.id),
           onchange: (e) => { e.target.checked ? selected.add(r.id) : selected.delete(r.id); renderTable(); renderBulk(); } })),
         h("td", { class: "mono nowrap" }, rowOpener(r.key)),
@@ -473,19 +473,26 @@ async function viewRequirements(body) {
         h("td", {}, h("div", { class: "row", style: { flexWrap: "wrap" } }, badge(r.status, statusTone[r.status]), talkBadge(talk[r.id])))))
         : h("tr", {}, h("td", { colspan: "7", class: "muted", style: { textAlign: "center", padding: "28px" } }, "No requirements match the filters."))))));
   };
+  // Reload the data but redraw only the table, so a reviewer keeps their place in a long list.
+  const count = h("span", { class: "muted small right" });
+  const refresh = async () => {
+    reqs.splice(0, reqs.length, ...(await api.get(base() + "/requirements")));
+    count.textContent = reqs.filter((r) => r.status === "approved").length + " of " + reqs.length + " approved";
+    renderTable(); renderBulk();
+  };
+  const nav = { rows: visible, refresh, find: (id) => reqs.find((r) => r.id === id) };
   q.addEventListener("input", debounce(() => { filters.reqQ = q.value; renderTable(); }));
   type.addEventListener("change", () => { filters.reqType = type.value; renderTable(); });
   status.addEventListener("change", () => { filters.reqStatus = status.value; renderTable(); });
   flagged.addEventListener("change", () => { filters.reqFlagged = flagged.checked; renderTable(); });
 
-  const approved = reqs.filter((r) => r.status === "approved").length;
-  mount(body, h("div", { class: "toolbar" }, q, type, status, h("label", { class: "switch small" }, flagged, "Flagged only"),
-    h("span", { class: "muted small right" }, approved + " of " + reqs.length + " approved"),
+  count.textContent = reqs.filter((r) => r.status === "approved").length + " of " + reqs.length + " approved";
+  mount(body, h("div", { class: "toolbar" }, q, type, status, h("label", { class: "switch small" }, flagged, "Flagged only"), count,
     h("button", { class: "btn", onclick: () => reqDrawer(null) }, icon("plus"), "Add requirement")), bulk, tableBox);
   renderTable();
 }
 
-function reqDrawer(r) {
+function reqDrawer(r, nav) {
   const isNew = !r;
   r = r || { statement: "", type: "functional", status: "draft", epic: "", section: "", actors: [], product_scope: [], compliance_tags: [], issues: [], quality_score: 100 };
   let status = r.status;
@@ -499,22 +506,35 @@ function reqDrawer(r) {
   const compliance = tagsInput(r.compliance_tags, state.meta.compliance_tags);
   const rationale = h("textarea", { rows: 2, value: r.rationale || "" });
   const notes = h("textarea", { rows: 2, value: r.notes || "", placeholder: "Reviewer notes, decisions, clarifications" });
-  const save = guard(async () => {
+  const rows = nav && !isNew ? nav.rows() : [];
+  const at = rows.findIndex((x) => x.id === r.id);
+  const [prevId, nextId] = [rows[at - 1]?.id, rows[at + 1]?.id];  // neighbours as the list is now, before a save reorders or filters it
+  let dirty = false;
+  const save = (approveAndNext) => guard(async () => {
+    if (approveAndNext) status = "approved";
     const payload = { statement: statement.value, type: type.value, status, epic: epic.value, section: section.value, source_id: sourceId.value,
       actors: actors.get(), product_scope: scope.get(), compliance_tags: compliance.get(), rationale: rationale.value, notes: notes.value };
     if (isNew) await api.post(base() + "/requirements", Object.assign(payload, { source_ref: "Manual" }));
     else await api.patch(base() + "/requirements/" + r.id, Object.assign(payload, { rev: r.rev }));  // refused if someone saved first
-    close(); toast(isNew ? "Requirement added" : "Saved " + r.key, "ok"); rerender();
+    close(); toast(isNew ? "Requirement added" : "Saved " + r.key, "ok");
+    if (!nav || isNew) return rerender();
+    await nav.refresh();
+    if (approveAndNext) go(nextId);
+  });
+  const go = (id) => { const n = id && nav.find(id); if (n) reqDrawer(n, nav); };
+  const step = (id) => guard(async () => {
+    if (dirty && !(await confirmBox("Discard your unsaved changes to " + r.key + "?", { okLabel: "Discard" }))) return;
+    close(); go(id);
   });
   const remove = guard(async () => {
     if (!(await confirmBox("Delete " + r.key + "? Stories keep a dangling link until regenerated.", { danger: true, okLabel: "Delete" }))) return;
-    await api.del(base() + "/requirements/" + r.id); close(); rerender();
+    await api.del(base() + "/requirements/" + r.id); close(); nav ? await nav.refresh() : rerender();
   });
   const close = drawer({
     subtitle: isNew ? "New requirement" : r.key + " · " + (r.source_ref || ""), title: isNew ? "Add requirement" : "Review requirement",
-    body: h("div", { class: "stack" },
+    body: h("div", { class: "stack", oninput: () => { dirty = true; } },
       isNew ? null : h("div", { class: "card card-body" }, h("div", { class: "row", style: { marginBottom: "10px" } }, h("b", { class: "grow" }, "Quality (ISO/IEC/IEEE 29148)"), scorePill(r.quality_score)), issueList(r.issues)),
-      field("Review status", segmented([["draft", "Draft"], ["approved", "Approved"], ["excluded", "Excluded"]], status, (v) => (status = v))),
+      field("Review status", segmented([["draft", "Draft"], ["approved", "Approved"], ["excluded", "Excluded"]], status, (v) => { status = v; dirty = true; })),
       field("Statement", statement, "One verifiable requirement. Avoid vague terms such as 'fast' or 'user-friendly'."),
       h("div", { class: "form-grid" }, field("Type", type), field("BRD reference ID", sourceId), field("Epic", epic), field("Section / feature", section)),
       field("Actors", actors.el),
@@ -523,14 +543,17 @@ function reqDrawer(r) {
       field("Rationale", rationale), field("Notes", notes),
       isNew ? null : discussionSection(r.id),
       isNew ? null : historySection(r.id)),
-    footer: [h("button", { class: "btn btn-primary", onclick: save }, "Save"),
-      isNew ? null : h("button", { class: "btn", onclick: guard(() => refineRequirementDialog(r, close)) }, icon("sparkles"), "Refine with AI"),
+    footer: [h("button", { class: "btn btn-primary", onclick: save(false) }, "Save"),
+      nav && !isNew && nextId ? h("button", { class: "btn", onclick: save(true), title: "Mark approved, save, and open the next requirement" }, "Approve & next") : null,
+      nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Previous requirement", disabled: !prevId, onclick: step(prevId) }, "‹ Prev") : null,
+      nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Next requirement", disabled: !nextId, onclick: step(nextId) }, "Next ›") : null,
+      isNew ? null : h("button", { class: "btn", onclick: guard(() => refineRequirementDialog(r, close, nav)) }, icon("sparkles"), "Refine with AI"),
       h("span", { class: "grow" }),
       isNew ? null : h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete")],
   });
 }
 
-async function refineRequirementDialog(r, closeDrawer) {
+async function refineRequirementDialog(r, closeDrawer, nav) {
   toast("Asking AI to improve " + r.key + "…");
   const res = await api.post(base() + "/requirements/" + r.id + "/refine", {});
   const split = res.proposals.length > 1;
@@ -549,7 +572,7 @@ async function refineRequirementDialog(r, closeDrawer) {
       const [first, ...rest] = res.proposals.map((p) => p.requirement);
       await api.patch(base() + "/requirements/" + r.id, { statement: first.statement, type: first.type, actors: first.actors, notes: first.notes });
       for (const extra of rest) await api.post(base() + "/requirements", extra);
-      closeDrawer(); toast(split ? "Split into " + res.proposals.length + " requirements" : "Applied to " + r.key, "ok"); rerender();
+      closeDrawer(); toast(split ? "Split into " + res.proposals.length + " requirements" : "Applied to " + r.key, "ok"); nav ? await nav.refresh() : rerender();
     } }],
   });
 }
