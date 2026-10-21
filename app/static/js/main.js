@@ -115,7 +115,8 @@ let archivedList = null;  // null: showing active projects
 
 function renderHome(content, keepView = false) {
   setCrumbs("Projects");
-  if (!keepView) archivedList = null;
+  if (keepView) content.replaceChildren(content.querySelector("#crumbs"));  // mount() appends: drop the previous view
+  else archivedList = null;
   const list = archivedList || state.projects;
   const toggle = h("button", { class: "btn", onclick: guard(async () => {
     archivedList = archivedList ? null : await api.get("/api/projects?archived=true");

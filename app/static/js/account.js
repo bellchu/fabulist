@@ -3,7 +3,7 @@ import { h, mount, icon, api, guard, toast, modal, confirmBox, badge, timeAgo, f
 import { state, setCrumbs } from "./main.js";
 
 const rerender = () => window.dispatchEvent(new HashChangeEvent("hashchange"));
-const when = (iso) => new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+export const when = (iso) => new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 
 function revealToken(t) {
   const box = h("input", { type: "text", readonly: true, value: t.token, "aria-label": "New API token", style: { fontFamily: "var(--mono, monospace)" } });
@@ -52,11 +52,11 @@ export async function renderAccount(content) {
   }
   mount(content, head, h("div", { class: "card" }, tokens.length
     ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
-      h("thead", {}, h("tr", {}, ["Name", "Token", "Created", "Expires", "Last used", ""].map((x) => h("th", {}, x)))),
+      h("thead", {}, h("tr", {}, [["Name", ""], ["Token", ""], ["Created", "hide-sm"], ["Expires", ""], ["Last used", ""], ["", ""]].map(([x, c]) => h("th", { class: c }, x)))),
       h("tbody", {}, tokens.map((t) => h("tr", {},
         h("td", {}, t.name),
-        h("td", { class: "mono small" }, t.prefix + "…"),
-        h("td", { class: "muted small nowrap" }, when(t.created)),
+        h("td", { class: "mono small hide-sm" }, t.prefix + "…"),
+        h("td", { class: "muted small nowrap hide-sm" }, when(t.created)),
         h("td", { class: "small nowrap" }, when(t.expires), new Date(t.expires) < new Date() ? [" ", badge("Expired", "red")] : null),
         h("td", { class: "muted small nowrap" }, t.last_used ? timeAgo(t.last_used) : "never"),
         h("td", {}, h("button", { class: "btn btn-sm btn-ghost btn-danger", "aria-label": "Revoke token " + t.name, onclick: guard(async () => {

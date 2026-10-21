@@ -1,6 +1,7 @@
 // Admin dashboard: usage overview, AI provider profiles, generation settings, activity log.
 import { h, mount, icon, api, guard, toast, modal, confirmBox, badge, statusTone, meter, fmt, duration, timeAgo, field, select, segmented, empty } from "./core.js";
 import { state, setCrumbs } from "./main.js";
+import { when } from "./account.js";
 
 const rerender = () => window.dispatchEvent(new HashChangeEvent("hashchange"));
 const TITLES = { overview: "Overview", providers: "AI providers", settings: "Generation settings", taxonomy: "Product taxonomy", integrations: "Integrations", users: "Users & roles", activity: "Activity" };
@@ -401,15 +402,15 @@ async function viewUsers(content) {
     return;
   }
   card.append(h("div", { class: "table-wrap" }, h("table", { class: "table" },
-    h("thead", {}, h("tr", {}, ["User", "Role", "Status", "Created", ""].map((x) => h("th", {}, x)))),
+    h("thead", {}, h("tr", {}, [["User", ""], ["Role", ""], ["Status", ""], ["Created", "hide-sm"], ["", ""]].map(([x, c]) => h("th", { class: c }, x)))),
     h("tbody", {}, data.users.map((u) => {
       const role = select(Object.entries(data.roles), u.role, { "aria-label": "Role for " + u.username });
       role.addEventListener("change", guard(async () => { await api.patch("/api/admin/users/" + u.id, { role: role.value }); toast(u.username + " is now " + role.value, "ok"); }));
       return h("tr", {},
-        h("td", {}, h("b", {}, u.username)), h("td", { style: { width: "220px" } }, role),
+        h("td", {}, h("b", {}, u.username)), h("td", { style: { minWidth: "150px" } }, role),
         h("td", {}, u.disabled ? badge("Disabled", "red") : badge("Active", "green")),
-        h("td", { class: "muted small" }, timeAgo(u.created)),
-        h("td", { class: "nowrap", style: { textAlign: "right" } },
+        h("td", { class: "muted small hide-sm" }, timeAgo(u.created)),
+        h("td", { style: { textAlign: "right" } }, h("div", { class: "row wrap", style: { justifyContent: "flex-end", gap: "0" } },
           h("button", { class: "btn btn-sm btn-ghost", onclick: () => userDialog(data, u) }, "Reset password"),
           h("button", { class: "btn btn-sm btn-ghost", onclick: guard(async () => {
             await api.patch("/api/admin/users/" + u.id, { disabled: !u.disabled }); rerender();
@@ -417,8 +418,29 @@ async function viewUsers(content) {
           h("button", { class: "btn btn-sm btn-ghost btn-danger", "aria-label": "Delete " + u.username, onclick: guard(async () => {
             if (!(await confirmBox("Delete user '" + u.username + "'? Their past changes stay in the audit trail.", { danger: true, okLabel: "Delete" }))) return;
             await api.del("/api/admin/users/" + u.id); rerender();
-          }) }, icon("trash"))));
+          }) }, icon("trash")))));
     })))));
+  content.append(await tokensCard());
+}
+
+// Admin view of every personal API token (never the secret): who owns it, when it expires, whether it is in use.
+async function tokensCard() {
+  const tokens = await api.get("/api/admin/tokens");
+  return h("div", { class: "card", style: { marginTop: "16px" } },
+    h("div", { class: "card-head" }, h("h3", { class: "grow" }, "API tokens"),
+      h("span", { class: "muted small" }, tokens.length + (tokens.length === 1 ? " token" : " tokens") + " · created by users on their Account page")),
+    tokens.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
+      h("thead", {}, h("tr", {}, [["Owner", ""], ["Name", ""], ["Token", "hide-sm"], ["Expires", ""], ["Last used", "hide-sm"], ["", ""]].map(([x, c]) => h("th", { class: c }, x)))),
+      h("tbody", {}, tokens.map((t) => h("tr", {},
+        h("td", {}, h("b", {}, t.owner)), h("td", {}, t.name), h("td", { class: "mono small hide-sm" }, t.prefix + "…"),
+        h("td", { class: "small nowrap" }, when(t.expires), new Date(t.expires) < new Date() ? [" ", badge("Expired", "red")] : null),
+        h("td", { class: "muted small nowrap hide-sm" }, t.last_used ? timeAgo(t.last_used) : "never"),
+        h("td", { style: { textAlign: "right" } }, h("button", { class: "btn btn-sm btn-ghost btn-danger", "aria-label": "Revoke " + t.owner + "'s token " + t.name,
+          onclick: guard(async () => {
+            if (!(await confirmBox("Revoke '" + t.name + "' owned by " + t.owner + "? Anything using it stops working immediately.", { danger: true, okLabel: "Revoke token" }))) return;
+            await api.del("/api/admin/tokens/" + t.id); toast("Token revoked", "ok"); rerender();
+          }) }, "Revoke")))))))
+      : h("div", { class: "card-body muted small" }, "No API tokens. Users create them on their Account page (click their name in the header)."));
 }
 
 function userDialog(data, u) {
