@@ -313,9 +313,9 @@ def test_baselines_snapshot_compare_and_export(client):
     client.patch("/api/projects/%s/stories/%s" % (pid, s1["id"]), json={"title": "Export invoices to CSV", "story_points": 3})
     client.post("/api/projects/%s/stories" % pid, json={"title": "Email invoices", "status": "draft"})
     cmp = client.get("/api/projects/%s/baselines/%s/compare" % (pid, b1["id"])).json()
-    assert cmp["from"] == "v1" and cmp["to"] == "current backlog"
+    assert cmp["from"] == "v1" and cmp["to"] == "current backlog (approved only)"
     assert cmp["stories"]["changed"] == [{"key": "US-001", "title": "Export invoices to CSV", "fields": ["title", "story_points"]}]
-    assert [a["key"] for a in cmp["stories"]["added"]] == ["US-002"] and cmp["requirements"]["changed"] == []
+    assert cmp["stories"]["added"] == [] and cmp["requirements"]["changed"] == [], "a draft is not a change to an approved-only baseline"
     b2 = client.post("/api/projects/%s/baselines" % pid, json={"name": "Sprint 2", "scope": "all"}).json()
     assert b2["version"] == 2
     listing = client.get("/api/projects/%s/baselines" % pid).json()
@@ -325,6 +325,28 @@ def test_baselines_snapshot_compare_and_export(client):
     assert x.status_code == 200 and "base-v1-json" in x.headers["content-disposition"]
     assert [s["title"] for s in x.json()["stories"]] == ["Export invoices"], "baseline keeps the frozen version"
     assert client.get("/api/projects/%s/history?limit=1" % pid).json()[0]["action"] == "baselined"
+
+
+def test_baseline_compare_uses_the_baselines_own_scope(client):
+    pid = client.post("/api/projects", json={"name": "Scope", "platform": "generic"}).json()["id"]
+    story = lambda title, status: client.post("/api/projects/%s/stories" % pid, json={"title": title, "status": status}).json()  # noqa: E731
+    kept, flipped = story("Kept", "approved"), story("Flipped", "approved")
+    approved_only = client.post("/api/projects/%s/baselines" % pid, json={"name": "Sign-off"}).json()
+    with_drafts = client.post("/api/projects/%s/baselines" % pid, json={"name": "Working copy", "scope": "all"}).json()
+    new_draft, later = story("New draft", "draft"), story("Later approved", "draft")
+    client.patch("/api/projects/%s/stories/%s" % (pid, later["id"]), json={"status": "approved"})
+    client.patch("/api/projects/%s/stories/%s" % (pid, flipped["id"]), json={"status": "draft"})
+    compare = lambda b: client.get("/api/projects/%s/baselines/%s/compare" % (pid, b["id"])).json()  # noqa: E731
+    keys = lambda diff: sorted(x["key"] for x in diff)  # noqa: E731
+    sign_off = compare(approved_only)
+    # Against an approved-only baseline, only approval changes count: the new draft is invisible, the later approval is added,
+    # and the story that left 'approved' is removed from the approved set.
+    assert sign_off["to"] == "current backlog (approved only)"
+    assert keys(sign_off["stories"]["added"]) == [later["key"]] and keys(sign_off["stories"]["removed"]) == [flipped["key"]]
+    working = compare(with_drafts)
+    assert working["to"] == "current backlog (approved and draft)"
+    assert keys(working["stories"]["added"]) == sorted([new_draft["key"], later["key"]]) and working["stories"]["removed"] == []
+    assert kept["key"] not in keys(sign_off["stories"]["added"]) + keys(sign_off["stories"]["removed"])
 
 
 def test_estimate_and_apply_points(client):
