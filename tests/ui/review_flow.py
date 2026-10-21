@@ -70,6 +70,12 @@ with sync_playwright() as p:
     page.reload()
     page.wait_for_selector("tr.clickable")
     page.get_by_role("checkbox", name="Select all").check()
+    check(page.locator("tbody tr.selected").count() == 120 and page.locator("tbody input:checked").count() == 120, "bulk: select all marks every row")
+    page.locator("tbody input[type=checkbox]").nth(3).uncheck()
+    check(not page.get_by_role("checkbox", name="Select all").is_checked() and page.locator("tbody tr.selected").count() == 119 and "119 selected" in page.locator(".bulkbar").inner_text(),
+          "bulk: unticking one row clears select-all and updates the count")
+    page.locator("tbody input[type=checkbox]").nth(3).check()
+    check(page.get_by_role("checkbox", name="Select all").is_checked(), "bulk: ticking the last row restores select-all")
     before = page.locator(".toolbar .right").inner_text()
     page.locator(".bulkbar").get_by_role("button", name="Exclude").click()
     check(page.get_by_text("Exclude 120 requirements?").count() == 1, "bulk: large selections ask for confirmation")
