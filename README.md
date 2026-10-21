@@ -118,8 +118,10 @@ A nightly CronJob (`deploy/k8s/backup.yaml`) writes `pg_dump` backups to a separ
 keeps 7 days. To restore one:
 
 ```bash
-kubectl -n fabulist exec -i postgres-0 -- pg_restore -U fabulist -d fabulist --clean < fabulist-YYYYMMDD-HHMMSS.dump
+kubectl -n fabulist exec -i postgres-0 -- pg_restore -U fabulist -d fabulist --clean --if-exists --exit-on-error < fabulist-YYYYMMDD-HHMMSS.dump
 ```
+
+The flags matter: plain `--clean` restores the data into an empty database but prints dozens of "does not exist" errors and exits 1, so you cannot tell whether it worked. With `--if-exists --exit-on-error` a good restore is silent and exits 0, and it works both into a fresh database and over a populated one. `scripts/restore-drill.sh` proves this end to end with Docker only (seed through the app, dump like the CronJob, restore into a fresh database, then check row counts, app health, semantic search and baselines). Run it after changing the schema or the backup job.
 
 The script generates the database password, the Basic-auth password and the encryption key
 in-cluster on first deploy. They are never stored in the repository.

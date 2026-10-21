@@ -22,6 +22,10 @@ authenticated `/api/meta` as `version`) and rolls it out. Deploy from `main` aft
 check `/healthz` and `/api/meta`. Rollback: redeploy the previous commit; migrations are additive
 (`ADD COLUMN IF NOT EXISTS`), so an older image keeps working against a newer schema.
 
+## Backups
+
+Change the schema or the backup job? Run `scripts/restore-drill.sh` (Docker only): it proves a dump restores into a fresh database and the app works on it.
+
 ## Conventions
 
 - Match the surrounding code; reuse existing helpers; no new dependency without discussion.
