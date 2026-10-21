@@ -444,7 +444,7 @@ async function viewRequirements(body) {
           r.issues.length ? h("div", { class: "issues" }, r.issues.map((i) => h("span", { class: "chip", title: i.message }, issueIcon(i.severity), i.code))) : null),
         h("td", { class: "small muted hide-sm" }, r.section),
         h("td", { class: "hide-sm" }, scorePill(r.quality_score)),
-        h("td", {}, h("div", { class: "row" }, badge(r.status, statusTone[r.status]), talkBadge(talk[r.id])))))
+        h("td", {}, h("div", { class: "row", style: { flexWrap: "wrap" } }, badge(r.status, statusTone[r.status]), talkBadge(talk[r.id])))))
         : h("tr", {}, h("td", { colspan: "7", class: "muted", style: { textAlign: "center", padding: "28px" } }, "No requirements match the filters."))))));
   };
   q.addEventListener("input", () => { filters.reqQ = q.value; renderTable(); });
@@ -649,7 +649,7 @@ function storyTable(rows) {
       h("td", { class: "hide-sm" }, s.story_points || "–"),
       h("td", { class: "small mono hide-sm" }, s.requirement_ids.join(", ") || "–"),
       h("td", { class: "nowrap hide-sm" }, h("span", { class: "row" }, scorePill(s.quality_score), s.ready ? badge("Ready", "green") : null)),
-      h("td", {}, h("div", { class: "row" }, badge(s.status, statusTone[s.status]), talkBadge((ctx.talk || {})[s.id]))))))));
+      h("td", {}, h("div", { class: "row", style: { flexWrap: "wrap" } }, badge(s.status, statusTone[s.status]), talkBadge((ctx.talk || {})[s.id]))))))));
 }
 
 function storyDrawer(s) {
