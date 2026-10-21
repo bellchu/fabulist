@@ -198,3 +198,21 @@ def test_gherkin_steps_and_feature_zip():
 def test_confluence_storage_escapes_content():
     body = exporters.confluence_storage([_story(title="<b>x</b> & y")], [REQ, dict(REQ, key="REQ-002")], "Demo")
     assert "&lt;b&gt;x&lt;/b&gt; &amp; y" in body and "<strong>Gap</strong>" in body and "50%" in body
+
+
+def test_provider_failure_names_the_section_and_says_nothing_was_saved(monkeypatch):
+    from app import llm
+    doc = {"filename": "brd.md", "text": "# A\nThe system shall export orders.\n\n# B\nThe system shall email invoices.\n\n# C\nThe system shall archive invoices."}
+    calls = []
+
+    def flaky(profile, system, user, opts):
+        calls.append(1)
+        if len(calls) == 2:
+            raise llm.LLMError("provider returned HTTP 503")
+        return '[{"statement": "The system shall export orders to CSV.", "type": "functional"}]', {"in": 1, "out": 1}
+    monkeypatch.setattr(pipeline.llm, "complete", flaky)
+    opts = {"chunk_chars": 40, "max_chunks_per_run": 50, "redact_pii": False}
+    with pytest.raises(llm.LLMError) as err:
+        pipeline.extract_requirements([doc], "generic", {"kind": "openai"}, opts, lambda m: None, {"in": 0, "out": 0})
+    msg = str(err.value)
+    assert "section 2 of 3" in msg.lower() and "HTTP 503" in msg and "nothing was saved" in msg.lower()

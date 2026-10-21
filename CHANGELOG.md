@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- AI run failures name the section or story group that failed and state that nothing was saved (e.g. "Section 12 of 40 (Returns): provider returned HTTP 503. Nothing was saved; existing results were kept.").
 - Tracker push: stops at a time budget (`PUSH_BUDGET_SECONDS`) and reports how many stories remain instead of timing out at the proxy; wrong credentials, permissions or URL stop the push with one actionable message instead of N identical failures; results and errors stay visible in the card and are announced to screen readers; the button says *Publish page* for Confluence.
 - Baselines on phones: the table fits, with a one-line contents summary under each name and the Export/Compare actions in reach.
 - Accessibility: dialog and side-panel footer buttons now meet WCAG AA contrast (4.43:1 → above 4.5:1). Links inside sentences are underlined (WCAG 1.4.1). Axe-core (WCAG 2.0/2.1 A and AA) is clean on 24 screens, keyboard-only use of the token flow verified.
