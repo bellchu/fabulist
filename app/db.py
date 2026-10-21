@@ -53,6 +53,8 @@ SCHEMA = [
          action TEXT NOT NULL, actor TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
          changes JSONB NOT NULL DEFAULT '{}', created TEXT NOT NULL)""",
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS archived TEXT",
+    "ALTER TABLE requirements ADD COLUMN IF NOT EXISTS rev INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE stories ADD COLUMN IF NOT EXISTS rev INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS actor TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS cancel_requested BOOLEAN NOT NULL DEFAULT FALSE",
     # Monotonic order for entries written within the same second.
@@ -178,5 +180,5 @@ def item_row(r: Dict[str, Any], prefix: str) -> Dict[str, Any]:
     """Flatten a requirements/stories row: JSONB payload plus identity columns."""
     data = dict(r["data"] if isinstance(r["data"], dict) else json.loads(r["data"]))
     data.update({"id": r["id"], "project_id": r["project_id"], "status": r["status"], "seq": r["seq"],
-                 "key": "%s-%03d" % (prefix, r["seq"] + 1)})
+                 "key": "%s-%03d" % (prefix, r["seq"] + 1), "rev": r.get("rev", 1)})
     return data

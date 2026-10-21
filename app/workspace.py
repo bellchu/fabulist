@@ -396,19 +396,27 @@ def _label(item: Dict[str, Any]) -> str:
     return str(item.get("statement") or item.get("title") or "")[:160]
 
 
+STALE = "This item was changed by someone else since you opened it. Close it and open it again to see their changes."
+
+
 def _save_item(table: str, pid: str, iid: Optional[str], body: Dict[str, Any], who: str) -> str:
     statuses = STATUSES if table == "requirements" else STORY_STATUSES
     fields = REQ_FIELDS if table == "requirements" else STORY_FIELDS
     current: Dict[str, Any] = {}
     old_status = status = "draft"
-    seq = None
+    seq = rev = None
+    expected = body.get("rev")
+    if expected is not None and (isinstance(expected, bool) or not isinstance(expected, int)):
+        raise HTTPException(400, "rev must be the revision number the item had when it was opened")
     if iid:
         row = db.one("SELECT * FROM %s WHERE id=%%s AND project_id=%%s" % table, (iid, pid))
         if not row:
             raise HTTPException(404, "Item not found")
         current = dict(row["data"])
         old_status = status = row["status"]
-        seq = row["seq"]
+        seq, rev = row["seq"], row["rev"]
+        if expected is not None and expected != rev:
+            raise HTTPException(409, STALE)
     status = body.get("status", status)
     if status not in statuses:
         raise HTTPException(400, "Invalid status")
@@ -427,7 +435,9 @@ def _save_item(table: str, pid: str, iid: Optional[str], body: Dict[str, Any], w
     with db.conn() as c:
         if iid:
             changes = history.diff(dict(current, status=old_status), dict(item, status=status))
-            c.execute("UPDATE %s SET data=%%s, status=%%s WHERE id=%%s" % table, (json.dumps(item), status, iid))
+            if c.execute("UPDATE %s SET data=%%s, status=%%s, rev=rev+1 WHERE id=%%s AND rev=%%s" % table,
+                         (json.dumps(item), status, iid, rev)).rowcount != 1:
+                raise HTTPException(409, STALE)  # someone saved between our read and this write
             if changes:
                 action = "status changed" if set(changes) == {"status"} else "edited"
                 history.record(c, pid, kind, iid, history.item_key(kind, seq), action, who, _label(item), changes)
@@ -453,7 +463,7 @@ def _bulk(table: str, pid: str, body: BulkIn, who: str) -> Dict[str, int]:
         rows = c.execute("SELECT id, seq, status, data FROM %s WHERE project_id=%%s AND id = ANY(%%s) FOR UPDATE" % table,
                          (pid, body.ids)).fetchall()
         changed = [r for r in rows if r["status"] != body.status]
-        c.execute("UPDATE %s SET status=%%s WHERE project_id=%%s AND id = ANY(%%s)" % table,
+        c.execute("UPDATE %s SET status=%%s, rev=rev+1 WHERE project_id=%%s AND id = ANY(%%s)" % table,
                   (body.status, pid, [r["id"] for r in changed]))
         for r in changed:
             history.record(c, pid, kind, r["id"], history.item_key(kind, r["seq"]), "status changed", who,
@@ -613,7 +623,7 @@ def apply_points(pid: str, body: PointsIn, request: Request):
                 continue
             old = data.get("story_points")
             data["story_points"] = new
-            c.execute("UPDATE stories SET data=%s WHERE id=%s", (json.dumps(data), r["id"]))
+            c.execute("UPDATE stories SET data=%s, rev=rev+1 WHERE id=%s", (json.dumps(data), r["id"]))
             history.record(c, pid, "story", r["id"], history.item_key("story", r["seq"]), "estimated", who, data.get("title", ""),
                            {"story_points": {"from": old, "to": new}})
             updated += 1
@@ -747,6 +757,7 @@ def export(pid: str, format: str = "xlsx", scope: str = "approved-or-all", inlin
         raise HTTPException(404, "Nothing to export yet")
     for item in stories + reqs:
         item.pop("issues", None)
+        item.pop("rev", None)
     payload, mime = (exporters.html_report(stories, reqs, project["name"] + " backlog") if format == "html"
                      else entry[0](stories, reqs))
     slug = re.sub(r"[^a-z0-9]+", "-", project["name"].lower()).strip("-") or "backlog"
@@ -776,7 +787,7 @@ def _snapshot(pid: str, scope: str) -> Dict[str, Any]:
     reqs = [r for r in _requirements(pid) if r["status"] == "approved" or (scope == "all" and r["status"] == "draft")]
     stories = [s for s in _stories(pid) if s["status"] == "approved" or (scope == "all" and s["status"] == "draft")]
     for item in reqs + stories:
-        for k in ("issues", "external", "project_id"):
+        for k in ("issues", "external", "project_id", "rev"):
             item.pop(k, None)
     return {"requirements": reqs, "stories": stories}
 

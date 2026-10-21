@@ -471,3 +471,32 @@ def test_archive_restore_and_guarded_permanent_delete(client, monkeypatch):
     assert client.delete("/api/projects/%s" % pid, auth=analyst).status_code == 403
     assert client.delete("/api/projects/%s" % pid, auth=root).status_code == 204
     assert client.get("/api/projects/%s" % pid, auth=root).status_code == 404
+
+
+def test_concurrent_edits_are_detected_with_a_revision(client):
+    pid = client.post("/api/projects", json={"name": "Concurrent", "platform": "generic"}).json()["id"]
+    api = "/api/projects/%s" % pid
+    r = client.post(api + "/requirements", json={"statement": "The system shall export invoices to CSV."}).json()
+    assert r["rev"] == 1
+    mine = client.patch(api + "/requirements/%s" % r["id"], json={"statement": "The system shall export invoices to CSV and PDF.", "rev": 1})
+    assert mine.status_code == 200
+    item = lambda: next(x for x in client.get(api + "/requirements").json() if x["id"] == r["id"])
+    assert item()["rev"] == 2
+    # a second person who opened the item before that save is told, and nothing is overwritten
+    stale = client.patch(api + "/requirements/%s" % r["id"], json={"statement": "The system shall export invoices to XML.", "rev": 1})
+    assert stale.status_code == 409 and "changed by someone else" in stale.json()["detail"]
+    assert item()["statement"].endswith("CSV and PDF.") and item()["rev"] == 2
+    assert [e["action"] for e in client.get(api + "/history", params={"item_id": r["id"]}).json()] == ["edited", "created"]
+    # clients that send no revision (scripts) keep working
+    assert client.patch(api + "/requirements/%s" % r["id"], json={"notes": "scripted"}).status_code == 200 and item()["rev"] == 3
+    # a bulk approval by someone else also makes an open editor stale (its payload would revert the status)
+    client.post(api + "/requirements/bulk", json={"ids": [r["id"]], "status": "approved"})
+    assert item()["rev"] == 4
+    assert client.patch(api + "/requirements/%s" % r["id"], json={"statement": "The system shall export invoices to JSON.", "status": "draft", "rev": 3}).status_code == 409
+    assert item()["status"] == "approved"
+    # stories behave the same way
+    s = client.post(api + "/stories", json={"title": "Export invoices"}).json()
+    assert s["rev"] == 1
+    assert client.patch(api + "/stories/%s" % s["id"], json={"title": "Export invoices now", "rev": 1}).status_code == 200
+    assert client.patch(api + "/stories/%s" % s["id"], json={"title": "Export invoices later", "rev": 1}).status_code == 409
+    assert client.patch(api + "/stories/%s" % s["id"], json={"title": "Export invoices", "rev": "abc"}).status_code == 400

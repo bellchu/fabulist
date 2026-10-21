@@ -478,7 +478,7 @@ function reqDrawer(r) {
     const payload = { statement: statement.value, type: type.value, status, epic: epic.value, section: section.value, source_id: sourceId.value,
       actors: actors.get(), product_scope: scope.get(), compliance_tags: compliance.get(), rationale: rationale.value, notes: notes.value };
     if (isNew) await api.post(base() + "/requirements", Object.assign(payload, { source_ref: "Manual" }));
-    else await api.patch(base() + "/requirements/" + r.id, payload);
+    else await api.patch(base() + "/requirements/" + r.id, Object.assign(payload, { rev: r.rev }));  // refused if someone saved first
     close(); toast(isNew ? "Requirement added" : "Saved " + r.key, "ok"); rerender();
   });
   const remove = guard(async () => {
@@ -682,7 +682,7 @@ function storyDrawer(s) {
       variant_criteria: readLines(variants).map((line) => { const i = line.indexOf(":"); return i > 0 ? { scope: line.slice(0, i).trim(), criteria: line.slice(i + 1).trim() } : { scope: "", criteria: line }; }),
       open_questions: readLines(questions), notes: notes.value };
     if (isNew) await api.post(base() + "/stories", payload);
-    else await api.patch(base() + "/stories/" + s.id, payload);
+    else await api.patch(base() + "/stories/" + s.id, Object.assign(payload, { rev: s.rev }));
     close(); toast(isNew ? "Story added" : "Saved " + s.key, "ok"); rerender();
   });
   const remove = guard(async () => {
