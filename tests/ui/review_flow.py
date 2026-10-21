@@ -65,6 +65,22 @@ with sync_playwright() as p:
         check(abs(scroll_y() - y0) < 5, f"{noun}: scroll position kept after saving ({y0} -> {scroll_y()})")
         check(page.locator("tbody .badge.green").count() >= 1, f"{noun}: list shows the approval without a reload")
 
+    # bulk actions on a large selection are confirmed first, and cancelling changes nothing
+    page.goto(f"{BASE}/#/p/{pid}/requirements")
+    page.reload()
+    page.wait_for_selector("tr.clickable")
+    page.get_by_role("checkbox", name="Select all").check()
+    before = page.locator(".toolbar .right").inner_text()
+    page.locator(".bulkbar").get_by_role("button", name="Exclude").click()
+    check(page.get_by_text("Exclude 120 requirements?").count() == 1, "bulk: large selections ask for confirmation")
+    page.get_by_role("button", name="Cancel").click()
+    page.wait_for_timeout(300)
+    check(page.locator(".toolbar .right").inner_text() == before and page.locator(".bulkbar").count() == 1, "bulk: cancelling changes nothing and keeps the selection")
+    page.locator(".bulkbar").get_by_role("button", name="Approve", exact=True).click()
+    page.get_by_role("button", name="Approve", exact=True).last.click()
+    page.wait_for_function("document.querySelector('.toolbar .right').innerText.startsWith('120 of 120')")
+    check(True, "bulk: confirming applies to every selected requirement")
+
     # phone width: the drawer footer must fit
     phone = browser.new_context(viewport={"width": 375, "height": 800}, bypass_csp=True)
     mp = phone.new_page()

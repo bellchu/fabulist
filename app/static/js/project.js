@@ -425,6 +425,8 @@ function historySection(itemId) {
 
 const talkBadge = (n) => (n ? h("span", { class: "chip", title: n + " open discussion" + (n === 1 ? "" : "s") }, icon("chat"), String(n)) : null);
 
+const BULK_CONFIRM_AT = 10;  // a bulk change this large is confirmed first: it is one click for hundreds of reviews
+
 async function viewRequirements(body) {
   const [reqs, talk] = await Promise.all([api.get(base() + "/requirements"), api.get(base() + "/comments")]);
   mount(body, runPanel("requirements"));
@@ -451,6 +453,7 @@ async function viewRequirements(body) {
     h("span", { class: "grow" }),
     ...[["approved", "Approve"], ["draft", "Mark draft"], ["excluded", "Exclude"]].map(([s, l]) =>
       h("button", { class: "btn btn-sm", onclick: guard(async () => {
+        if (selected.size >= BULK_CONFIRM_AT && !(await confirmBox(l + " " + selected.size + " requirements?", { okLabel: l, danger: s === "excluded" }))) return;
         await api.post(base() + "/requirements/bulk", { ids: [...selected], status: s }); toast(l + ": " + selected.size, "ok"); selected.clear(); await refresh();
       }) }, l)),
     h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); renderTable(); renderBulk(); } }, "Clear"))] : []));
