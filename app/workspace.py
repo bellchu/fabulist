@@ -765,7 +765,8 @@ def export(pid: str, format: str = "xlsx", scope: str = "approved-or-all", inlin
     for item in stories + reqs:
         item.pop("issues", None)
         item.pop("rev", None)
-    payload, mime = (exporters.html_report(stories, reqs, project["name"] + " backlog") if format == "html"
+    details = ["Generated %s UTC" % _utc_minutes(db.now()), "Scope: " + ("approved only" if scope == "approved" else "everything in review")]
+    payload, mime = (exporters.html_report(stories, reqs, project["name"] + " backlog", details) if format == "html"
                      else entry[0](stories, reqs))
     slug = re.sub(r"[^a-z0-9]+", "-", project["name"].lower()).strip("-") or "backlog"
     headers = {"Content-Disposition": '%s; filename="%s-%s.%s"' % ("inline" if inline and format == "html" else "attachment",
@@ -788,6 +789,10 @@ class BaselineIn(BaseModel):
 SNAPSHOT_STORY_FIELDS = ("title", "narrative", "acceptance_criteria", "priority", "story_points", "status", "epic", "feature",
                          "requirement_ids", "variant_criteria", "open_questions")
 SNAPSHOT_REQ_FIELDS = ("statement", "type", "status", "section")
+
+
+def _utc_minutes(iso: str) -> str:
+    return iso[:16].replace("T", " ")  # db.now() is UTC ISO-8601: "2026-10-21T02:41:15.123+00:00"
 
 
 def _snapshot(pid: str, scope: str) -> Dict[str, Any]:
@@ -870,7 +875,10 @@ def export_baseline(pid: str, bid: str, format: str = "xlsx"):
         raise HTTPException(400, "Unknown format")
     snap = b["snapshot"]
     title = "%s backlog v%d (%s)" % (project["name"], b["version"], b["name"])
-    payload, mime = (exporters.html_report(snap["stories"], snap["requirements"], title) if format == "html"
+    details = ["Baseline v%d (%s), frozen %s UTC by %s" % (b["version"], b["name"], _utc_minutes(b["created"]), b.get("actor") or "unknown"),
+               "Scope: " + ("approved only" if b["scope"] == "approved" else "approved and draft"),
+               "Exported %s UTC" % _utc_minutes(db.now())]
+    payload, mime = (exporters.html_report(snap["stories"], snap["requirements"], title, details) if format == "html"
                      else entry[0](snap["stories"], snap["requirements"]))
     slug = re.sub(r"[^a-z0-9]+", "-", project["name"].lower()).strip("-") or "backlog"
     headers = {"Content-Disposition": 'attachment; filename="%s-v%d-%s.%s"' % (slug, b["version"], format, entry[1])}
