@@ -500,3 +500,38 @@ def test_concurrent_edits_are_detected_with_a_revision(client):
     assert client.patch(api + "/stories/%s" % s["id"], json={"title": "Export invoices now", "rev": 1}).status_code == 200
     assert client.patch(api + "/stories/%s" % s["id"], json={"title": "Export invoices later", "rev": 1}).status_code == 409
     assert client.patch(api + "/stories/%s" % s["id"], json={"title": "Export invoices", "rev": "abc"}).status_code == 400
+
+
+def test_database_outage_is_a_retryable_503_with_a_clear_message(client, monkeypatch):
+    import psycopg
+    import psycopg_pool
+    from app import db
+
+    def pool_timeout():
+        raise psycopg_pool.PoolTimeout("couldn't get a connection after 10.00 sec")
+
+    def dropped():
+        raise psycopg.OperationalError("server closed the connection unexpectedly")
+    real_conn = db.conn
+    for failure in (pool_timeout, dropped):
+        monkeypatch.setattr(db, "conn", failure)
+        for path in ("/api/projects", "/healthz"):
+            r = client.get(path)
+            assert r.status_code == 503, (failure.__name__, path, r.status_code)
+            assert r.headers["retry-after"] == "5" and "database" in r.json()["detail"].lower()
+    monkeypatch.setattr(db, "conn", real_conn)
+    assert client.get("/healthz").status_code == 200  # recovers as soon as the database is back
+
+
+def test_other_server_errors_stay_500(client, monkeypatch):
+    from app import db
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    def broken():
+        raise RuntimeError("bug")
+    real_conn = db.conn
+    with TestClient(app, raise_server_exceptions=False, headers={"X-Requested-With": "fabulist"}) as c:  # started before the patch
+        monkeypatch.setattr(db, "conn", broken)
+        assert c.get("/api/projects").status_code == 500
+        monkeypatch.setattr(db, "conn", real_conn)  # the fixture's teardown needs the database

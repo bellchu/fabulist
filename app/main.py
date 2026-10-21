@@ -6,6 +6,8 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
+import psycopg
+import psycopg_pool
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -190,6 +192,15 @@ def me(request: Request) -> Dict[str, Any]:
     out: Dict[str, Any] = dict(users.current(request))
     out["sso"] = bool(sso.enabled() and request.cookies.get(sso.SESSION_COOKIE))
     return out
+
+
+@app.exception_handler(psycopg_pool.PoolTimeout)
+@app.exception_handler(psycopg.OperationalError)
+async def database_unavailable(_request: Request, exc: Exception):
+    # Postgres down, restarting, failing over or saturated: a short, retryable answer instead of a stack trace.
+    log.warning("database unavailable", extra={"fields": {"error": type(exc).__name__}})
+    return JSONResponse({"detail": "The database is temporarily unavailable. Please try again in a moment."},
+                        status_code=503, headers={"Retry-After": "5"})
 
 
 @app.exception_handler(settings.SettingsError)

@@ -129,8 +129,13 @@ def _pool() -> ConnectionPool:
     with _pools_lock:
         pool = _pools.get(config.DATABASE_URL)
         if pool is None:
+            # check: a connection that died with a restarted/failed-over database is replaced when it is handed out,
+            # instead of failing the request that happened to get it. Keepalives and tcp_user_timeout make a
+            # silently partitioned connection fail in ~20 s rather than hang until the OS gives up.
             pool = ConnectionPool(config.DATABASE_URL, min_size=1, max_size=int(os.environ.get("DB_POOL_MAX", "10")),
-                                  kwargs={"row_factory": dict_row, "connect_timeout": 10}, timeout=30, open=True)
+                                  kwargs={"row_factory": dict_row, "connect_timeout": 5, "keepalives": 1, "keepalives_idle": 10,
+                                          "keepalives_interval": 5, "keepalives_count": 3, "tcp_user_timeout": 20000},
+                                  timeout=float(os.environ.get("DB_POOL_TIMEOUT", "10")), check=ConnectionPool.check_connection, open=True)
             _pools[config.DATABASE_URL] = pool
     return pool
 
