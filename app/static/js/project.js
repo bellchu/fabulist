@@ -526,6 +526,7 @@ function reqDrawer(r, nav) {
     if (dirty && !(await confirmBox("Discard your unsaved changes to " + r.key + "?", { okLabel: "Discard" }))) return;
     close(); go(id);
   });
+  const keys = reviewKeys({ save: save(false), approve: nextId ? save(true) : save(false), prev: () => prevId && step(prevId)(), next: () => nextId && step(nextId)() });
   const remove = guard(async () => {
     if (!(await confirmBox("Delete " + r.key + "? Stories keep a dangling link until regenerated.", { danger: true, okLabel: "Delete" }))) return;
     await api.del(base() + "/requirements/" + r.id); close(); nav ? await nav.refresh() : rerender();
@@ -543,10 +544,11 @@ function reqDrawer(r, nav) {
       field("Rationale", rationale), field("Notes", notes),
       isNew ? null : discussionSection(r.id),
       isNew ? null : historySection(r.id)),
+    onkeydown: keys,
     footer: [h("button", { class: "btn btn-primary", onclick: save(false) }, "Save"),
-      nav && !isNew && nextId ? h("button", { class: "btn", onclick: save(true), title: "Mark approved, save, and open the next requirement" }, "Approve & next") : null,
-      nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Previous requirement", disabled: !prevId, onclick: step(prevId) }, "‹ Prev") : null,
-      nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Next requirement", disabled: !nextId, onclick: step(nextId) }, "Next ›") : null,
+      nav && !isNew && nextId ? h("button", { class: "btn", onclick: save(true), title: "Mark approved, save, and open the next requirement (Ctrl+Shift+Enter)" }, "Approve & next") : null,
+      nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Previous requirement", title: "Alt+Left", disabled: !prevId, onclick: step(prevId) }, "‹ Prev") : null,
+      nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Next requirement", title: "Alt+Right", disabled: !nextId, onclick: step(nextId) }, "Next ›") : null,
       isNew ? null : h("button", { class: "btn", onclick: guard(() => refineRequirementDialog(r, close, nav)) }, icon("sparkles"), "Refine with AI"),
       h("span", { class: "grow" }),
       isNew ? null : h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete")],
@@ -578,6 +580,15 @@ async function refineRequirementDialog(r, closeDrawer, nav) {
 }
 
 // ---- stories ------------------------------------------------------------
+
+// Keyboard shortcuts shared by the review drawers: Ctrl/Cmd+Enter saves, Ctrl/Cmd+Shift+Enter approves and moves on, Alt+Left/Right steps.
+const reviewKeys = ({ save, approve, prev, next }) => (e) => {
+  const mod = e.ctrlKey || e.metaKey;
+  const act = mod && e.key === "Enter" ? (e.shiftKey ? approve : save) : e.altKey && e.key === "ArrowRight" ? next : e.altKey && e.key === "ArrowLeft" ? prev : null;
+  if (!act) return;
+  e.preventDefault();
+  act();
+};
 
 let storyNav = null;  // list context for the story drawer: set by the Stories tab, never used from other tabs
 
@@ -756,6 +767,7 @@ function storyDrawer(s, nav = storyNav) {
     if (dirty && !(await confirmBox("Discard your unsaved changes to " + s.key + "?", { okLabel: "Discard" }))) return;
     close(); go(id);
   });
+  const keys = reviewKeys({ save: save(false), approve: nextId ? save(true) : save(false), prev: () => prevId && step(prevId)(), next: () => nextId && step(nextId)() });
   const remove = guard(async () => {
     if (!(await confirmBox("Delete " + s.key + "?", { danger: true, okLabel: "Delete" }))) return;
     await api.del(base() + "/stories/" + s.id); close(); nav ? await nav.refresh() : rerender();
@@ -781,10 +793,11 @@ function storyDrawer(s, nav = storyNav) {
       field("Open questions", questions, "Stories with open questions don't meet the Definition of Ready."), field("Notes", notes),
       isNew ? null : discussionSection(s.id),
       isNew ? null : historySection(s.id)),
+    onkeydown: keys,
     footer: [h("button", { class: "btn btn-primary", onclick: save(false) }, "Save"),
-      nav && !isNew && nextId ? h("button", { class: "btn", onclick: save(true), title: "Mark approved, save, and open the next story" }, "Approve & next") : null,
-      nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Previous story", disabled: !prevId, onclick: step(prevId) }, "‹ Prev") : null,
-      nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Next story", disabled: !nextId, onclick: step(nextId) }, "Next ›") : null,
+      nav && !isNew && nextId ? h("button", { class: "btn", onclick: save(true), title: "Mark approved, save, and open the next story (Ctrl+Shift+Enter)" }, "Approve & next") : null,
+      nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Previous story", title: "Alt+Left", disabled: !prevId, onclick: step(prevId) }, "‹ Prev") : null,
+      nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Next story", title: "Alt+Right", disabled: !nextId, onclick: step(nextId) }, "Next ›") : null,
       isNew ? null : h("button", { class: "btn", onclick: guard(() => refineDialog(s, close, nav)) }, icon("sparkles"), "Refine with AI"),
       h("span", { class: "grow" }),
       isNew ? null : h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete")],
