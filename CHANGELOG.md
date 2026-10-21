@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- `scripts/deploy.sh` builds the image on the cluster (Kaniko in a throwaway namespace, pushed to the node registry) instead of on the developer's machine; `DEPLOY_SSH` is no longer needed.
 - `scripts/ci-k8s.sh` runs the quality gate (lint, tests on a throwaway pgvector database, JS check, dependency audit) in a temporary Kubernetes namespace that is always deleted, so no Docker is needed on the developer's machine.
 - Keyboard shortcuts in the requirement and story review drawers: Ctrl/Cmd+Enter saves, Ctrl/Cmd+Shift+Enter approves and opens the next item, Alt+Left/Right steps to the previous/next item (shown as tooltips on the buttons).
 - Fixed: on phones the review drawer's buttons ran off the right edge (613px of buttons in a 375px drawer) after Approve & next / Prev / Next were added; the footer now wraps.

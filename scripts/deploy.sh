@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# Build the image for linux/amd64, load it onto the cluster node, and apply manifests.
+# Build the image on the cluster (Kaniko, linux/amd64), push it to the node's registry, and apply manifests.
 #
 # Required env:
 #   FABULIST_HOST   ingress hostname, e.g. fabulist.example.com
-#   DEPLOY_SSH      ssh target of the k8s node (user@host) used to import the image
+#   DEPLOY_SSH      ssh target of the k8s node (user@host); kept for compatibility, no longer used for the image
 # Optional env:
 #   REGISTRY (default localhost:32000)  image name prefix used by the node
 set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${FABULIST_HOST:?set FABULIST_HOST}"
-: "${DEPLOY_SSH:?set DEPLOY_SSH}"
 REGISTRY="${REGISTRY:-localhost:32000}"
 # The image is built from the WORKING TREE, so anything uncommitted ships to production unreviewed and untested.
 # Deploy only a clean checkout of the latest main (the commit that passed the gate). ALLOW_DIRTY_DEPLOY=1 overrides.
@@ -21,7 +20,6 @@ if [ -z "${ALLOW_DIRTY_DEPLOY:-}" ]; then
     [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || { echo "Refusing to deploy: HEAD is not the latest origin/main (git pull --ff-only)." >&2; exit 1; }
   fi
 fi
-docker info >/dev/null 2>&1 || { echo "Docker daemon is not running; start it and retry." >&2; exit 1; }
 kubectl version --request-timeout=10s >/dev/null 2>&1 || { echo "Kubernetes API is unreachable (check the kube context or SSH tunnel)." >&2; exit 1; }
 TAG="$(date +%Y%m%d%H%M%S)"
 IMAGE="${REGISTRY}/fabulist:${TAG}"
@@ -55,8 +53,28 @@ kubectl apply -f deploy/k8s/postgres.yaml
 kubectl -n "$NS" rollout status statefulset/postgres --timeout=240s
 kubectl apply -f deploy/k8s/backup.yaml
 
-docker buildx build --platform linux/amd64 --build-arg APP_VERSION="$(git rev-parse --short HEAD)" -t "$IMAGE" --load .
-docker save "$IMAGE" | ssh "$DEPLOY_SSH" "sudo microk8s ctr image import -"
+# Build on the cluster (Kaniko in a throwaway namespace, pushing to the node's registry): nothing runs on the developer's machine.
+BUILD_NS="fabulist-build-${TAG}"
+trap 'kubectl delete namespace "$BUILD_NS" --wait=false >/dev/null 2>&1 || true' EXIT
+kubectl create namespace "$BUILD_NS" >/dev/null
+kubectl -n "$BUILD_NS" apply -f - >/dev/null <<YAML
+apiVersion: v1
+kind: Pod
+metadata: {name: build}
+spec:
+  restartPolicy: Never
+  hostNetwork: true  # reaches the registry on the node's localhost:32000
+  volumes: [{name: ws, emptyDir: {}}]
+  containers:
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:debug
+    command: [sleep, "1800"]
+    volumeMounts: [{name: ws, mountPath: /workspace}]
+YAML
+kubectl -n "$BUILD_NS" wait --for=condition=Ready pod/build --timeout=300s >/dev/null
+git ls-files -z | COPYFILE_DISABLE=1 tar --null -T - -cf - | kubectl -n "$BUILD_NS" exec -i build -- tar -xf - -C /workspace
+kubectl -n "$BUILD_NS" exec build -- /kaniko/executor --context=dir:///workspace --dockerfile=/workspace/Dockerfile \
+  --destination="$IMAGE" --insecure --build-arg APP_VERSION="$(git rev-parse --short HEAD)"
 
 sed -e "s|IMAGE|${IMAGE}|" -e "s|FABULIST_HOST|${FABULIST_HOST}|" deploy/k8s/app.yaml | kubectl apply -f -
 sed -e "s|IMAGE|${IMAGE}|" deploy/k8s/audit.yaml | kubectl apply -f -
