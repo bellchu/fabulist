@@ -4,6 +4,8 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Browser test stability: the token test no longer matches the create dialog's title by mistake (intermittent failure seen in the full suite).
+- Phones: the project header no longer pushes the work off-screen. The counts and description (already shown in the tabs and stepper) are hidden below 820px, so the tabs start at about 290px instead of 600px (measured at 390px wide).
 - The review drawers show the keyboard shortcuts (save, approve & next, previous/next) as a hint line on desktop.
 - Fixed a WCAG contrast failure on selected rows: the ID link (accent colour on the tinted selection background) was 4.19:1; it now uses the darker accent text colour. The accessibility check now scans the lists with a selection.
 - Stories can be reviewed in bulk: the list view has a select column (with Select all) and a bulk bar to Approve, Mark draft or Reject the selection, confirmed first when 10 or more are selected. The bulk-status API existed; the UI now uses it.

@@ -32,7 +32,7 @@ with sync_playwright() as p:
     page.get_by_role("button", name="New token").first.click()
     page.get_by_placeholder("e.g. Nightly Jira sync").fill("ci-sync")
     page.get_by_role("button", name="Create token").click()
-    box = page.get_by_label("New API token")
+    box = page.locator("input[aria-label='New API token']")  # not get_by_label: the create dialog's title carries the same name while it closes
     box.wait_for()
     token = box.input_value()
     check(token.startswith("fab_") and len(token) > 20, "reveal dialog shows the new token once")
