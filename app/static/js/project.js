@@ -34,7 +34,7 @@ export async function renderProject(content, pid, tab) {
 // ---- chrome -------------------------------------------------------------
 
 function header(p) {
-  const kv = (label, value) => h("div", {}, h("div", { class: "object-label" }, label), h("div", {}, value));
+  const kv = (label, value, cls = "") => h("div", { class: cls }, h("div", { class: "object-label" }, label), h("div", {}, value));
   return h("div", { class: "page-head" },
     h("span", { class: "object-icon project" }, icon("folder")),
     h("div", { class: "grow" }, h("div", { class: "object-label" }, "Project"), h("h1", {}, p.name)),
@@ -42,8 +42,9 @@ function header(p) {
       h("a", { class: "btn", href: "#/p/" + p.id + "/export" }, "Export")),
     h("div", { class: "row wrap", style: { flexBasis: "100%", gap: "32px", paddingLeft: "44px" } },
       kv("Target platform", state.meta.platforms[p.platform] || p.platform),
-      kv("BRDs", String(p.documents)), kv("Requirements", String(p.requirements)), kv("Stories", String(p.stories)),
-      kv("Coverage", p.coverage + "%"), kv("Description", p.description || "–")));
+      // On phones the counts live in the tabs and the stepper, so the header keeps only what they don't show.
+      kv("BRDs", String(p.documents), "hide-sm"), kv("Requirements", String(p.requirements), "hide-sm"), kv("Stories", String(p.stories), "hide-sm"),
+      kv("Coverage", p.coverage + "%"), kv("Description", p.description || "–", "hide-sm")));
 }
 
 function archivedBanner(p) {
@@ -80,7 +81,7 @@ function stepper(p) {
       h("a", { class: "step" + (done ? " done" : "") + (i === current ? " current" : ""), href: "#/p/" + p.id + "/" + tab, role: "listitem", title: t + ": " + s,
         "aria-current": i === current ? "step" : null },
         h("span", { class: "num" }, icon("check")), h("span", { class: "t" }, t)))),
-    h("div", { class: "path-detail" }, steps.map(([, t, s]) => h("div", {}, t, h("b", {}, s)))));
+    h("div", { class: "path-detail hide-sm" }, steps.map(([, t, s]) => h("div", {}, t, h("b", {}, s)))));
 }
 
 function tabBar(p, active) {
