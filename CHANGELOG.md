@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Printing any screen (or saving it as PDF) now gives the content on white in the light palette: navigation, tabs, the workflow bar, buttons and filters are hidden, tables repeat their header and do not split rows, and nothing is clipped. Previously everything printed, and printing from a system in dark mode produced near-white text on white paper.
 - Stakeholder report: shows when it was generated and its scope (approved only / everything in review; for baselines the version, name, who froze it and when), a status breakdown, A4 print layout with page numbers, repeating table headers and no split rows, and a review-and-approval block.
 - Accessibility: tables that scroll sideways on narrow screens are keyboard-focusable (arrow keys scroll them) and labelled; the tab stop is removed when the table fits. Axe is clean on all 32 live pages (16 screens x desktop and phone).
 - Grafana dashboard: a *Reliability and security* row (database up/down, failed sign-ins and token attempts, edit conflicts and database 503s). A test now fails if any alert rule or dashboard panel references a metric the app does not expose.
