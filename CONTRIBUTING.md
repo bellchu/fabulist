@@ -7,7 +7,8 @@
 3. Run the full gate before opening a PR (there is no hosted CI):
 
    ```bash
-   scripts/ci.sh    # lint, tests on a throwaway pgvector DB, JS check, pip-audit, image build
+   scripts/ci-k8s.sh   # runs on the cluster (kubectl only): lint, tests on a throwaway pgvector DB, JS check, pip-audit
+   scripts/ci.sh       # same plus the image build, on a local Docker daemon
    ```
 
 4. One feature or fix per PR, squash-merged into `main`. Use conventional commit titles
