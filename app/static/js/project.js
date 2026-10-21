@@ -20,6 +20,7 @@ const base = () => "/api/projects/" + ctx.pid;
 export async function renderProject(content, pid, tab) {
   clearTimeout(pollTimer);
   const project = await api.get("/api/projects/" + pid);
+  if (!content.isConnected) return;  // the user already navigated away: don't touch the new page's breadcrumb
   ctx = { pid, project, tab };
   setCrumbs({ href: "#/", label: "Projects" }, project.name);
   const body = h("div");

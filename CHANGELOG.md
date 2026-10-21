@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Fix: going back from a project that was still loading left that project's name in the Projects breadcrumb.
 - Project list: from 8 projects a filter bar (name/description, platform) and a sort (newest, name, most left to review) appear; the choice is kept while navigating.
 - AI run failures name the section or story group that failed and state that nothing was saved (e.g. "Section 12 of 40 (Returns): provider returned HTTP 503. Nothing was saved; existing results were kept.").
 - Tracker push: stops at a time budget (`PUSH_BUDGET_SECONDS`) and reports how many stories remain instead of timing out at the proxy; wrong credentials, permissions or URL stop the push with one actionable message instead of N identical failures; results and errors stay visible in the card and are announced to screen readers; the button says *Publish page* for Confluence.
