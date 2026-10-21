@@ -226,3 +226,34 @@ def test_without_a_cancel_check_nothing_changes(monkeypatch):
     fake = Fake([(503, {}), chat("ok")])
     monkeypatch.setattr(llm.httpx, "post", fake)
     assert llm.complete(OPENAI, "s", "u", OPTS)[0] == "ok" and len(fake.calls) == 2
+
+
+def test_interactive_ai_calls_are_limited_and_refused_fast_when_the_limit_is_reached(monkeypatch):
+    import threading
+    from app import config
+    monkeypatch.setattr(config, "MAX_INTERACTIVE_AI_CALLS", 1)
+    llm._reset_interactive_slots()
+    entered, release = threading.Event(), threading.Event()
+
+    def slow(url, headers=None, json=None, timeout=None):
+        entered.set()
+        release.wait(10)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}], "usage": {}}, request=httpx.Request("POST", url))
+    monkeypatch.setattr(llm.httpx, "post", slow)
+    first = threading.Thread(target=lambda: llm.complete(OPENAI, "s", "u", OPTS))
+    first.start()
+    assert entered.wait(5)
+    try:
+        with pytest.raises(llm.AIBusy):
+            llm.complete(OPENAI, "s", "u", OPTS)  # refused at once, it does not wait for the slot (that would hold a request thread)
+        # a background run is bounded by its own pool and must never be refused
+        result = []
+        run = threading.Thread(target=lambda: (llm.set_cancel_check(lambda: None), result.append(llm.complete(OPENAI, "s", "u", OPTS)[0])))
+        run.start()
+        release.set()
+        run.join(10)
+        assert result == ["ok"]
+    finally:
+        release.set()
+        first.join(10)
+    assert llm.complete(OPENAI, "s", "u", OPTS)[0] == "ok", "the slot is released when a call finishes"
