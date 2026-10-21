@@ -112,6 +112,8 @@ async function route() {
 }
 
 let archivedList = null;  // null: showing active projects
+const FILTER_FROM = 8;  // show the filter bar from this many projects
+const homeFilter = { q: "", platform: "", sort: "new" };  // kept while navigating, so coming back to the list keeps the filter
 
 function renderHome(content, keepView = false) {
   setCrumbs("Projects");
@@ -137,7 +139,7 @@ function renderHome(content, keepView = false) {
         action: h("button", { class: "btn btn-primary", onclick: newProjectDialog }, icon("plus"), "Create project") })));
     return;
   }
-  const cards = list.map((p) => {
+  const card = (p) => {
     const pct = p.requirements ? Math.round((100 * p.requirements_approved) / p.requirements) : 0;
     return h("a", { class: "card project-card", href: "#/p/" + p.id },
       h("div", { class: "row" }, h("h3", { class: "grow" }, p.name), badge(state.meta.platforms[p.platform] || p.platform, "accent")),
@@ -148,8 +150,31 @@ function renderHome(content, keepView = false) {
         h("div", {}, h("b", {}, p.stories), h("span", {}, "Stories"))),
       h("div", {}, h("div", { class: "row small muted" }, h("span", { class: "grow" }, "Requirements reviewed"), pct + "%"), meter(pct, "good")),
       h("div", { class: "muted small" }, "Created " + timeAgo(p.created)));
-  });
-  mount(content, head, h("div", { class: "grid grid-3" }, cards));
+  };
+  const grid = h("div", { class: "grid grid-3" });
+  // A filter bar only earns its space once the list is long enough to scroll.
+  if (list.length < FILTER_FROM) { grid.append(...list.map(card)); mount(content, head, grid); return; }
+  const q = h("input", { type: "search", value: homeFilter.q, placeholder: "Filter by name or description", "aria-label": "Filter projects", style: { maxWidth: "280px" } });
+  const platforms = [...new Set(list.map((p) => p.platform))].sort();
+  const platform = select([["", "All platforms"], ...platforms.map((k) => [k, state.meta.platforms[k] || k])], homeFilter.platform, { "aria-label": "Platform", style: { width: "auto" } });
+  const sort = select([["new", "Newest first"], ["name", "Name A–Z"], ["review", "Most left to review"]], homeFilter.sort, { "aria-label": "Sort projects", style: { width: "auto" } });
+  const count = h("span", { class: "muted small", role: "status" });
+  const draw = () => {
+    Object.assign(homeFilter, { q: q.value, platform: platform.value, sort: sort.value });
+    const needle = q.value.trim().toLowerCase();
+    const shown = list.filter((p) => (!platform.value || p.platform === platform.value)
+      && (!needle || (p.name + " " + (p.description || "")).toLowerCase().includes(needle)));
+    const left = (p) => p.requirements - p.requirements_approved;
+    shown.sort(sort.value === "name" ? (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+      : sort.value === "review" ? (a, b) => left(b) - left(a) || a.name.localeCompare(b.name)
+      : (a, b) => (a.created < b.created ? 1 : -1));
+    count.textContent = shown.length === list.length ? list.length + " projects" : shown.length + " of " + list.length + " projects";
+    grid.replaceChildren(...(shown.length ? shown.map(card) : [h("div", { class: "card", style: { gridColumn: "1 / -1" } }, empty({
+      iconName: "search", title: "No projects match", text: "Try a different name or clear the platform filter." }))]));
+  };
+  [q, platform, sort].forEach((el) => el.addEventListener(el === q ? "input" : "change", draw));
+  mount(content, head, h("div", { class: "row wrap", style: { marginBottom: "12px" } }, q, platform, sort, count), grid);
+  draw();
 }
 
 export function newProjectDialog() {
