@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import admin, config, db, exporters, integrations, metrics, pipeline, repos, settings, sso, taxonomy, users, workspace
+from . import admin, config, db, exporters, integrations, metrics, pipeline, portability, repos, settings, sso, taxonomy, users, workspace
 from .profiles import PLATFORMS
 
 log = logging.getLogger("fabulist")
@@ -62,6 +62,7 @@ app.include_router(integrations.router)
 app.include_router(users.router)
 app.include_router(users.me_router)
 app.include_router(users.admin_tokens_router)
+app.include_router(portability.router)
 app.include_router(workspace.router)
 app.include_router(sso.router)
 
@@ -93,7 +94,7 @@ async def auth_and_guards(request: Request, call_next):
             declared = int(request.headers.get("content-length") or 0)
         except ValueError:
             return JSONResponse({"detail": "Invalid Content-Length"}, status_code=400)
-        if declared > config.max_body_bytes():
+        if declared > config.max_body_bytes(path):
             return JSONResponse({"detail": "Request body too large"}, status_code=413)
     if path == "/metrics":
         # Scraped by Prometheus with a bearer token; never behind user Basic auth.

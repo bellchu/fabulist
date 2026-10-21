@@ -25,8 +25,13 @@ REPO_CLONE_TIMEOUT = _int("REPO_CLONE_TIMEOUT", 60)  # seconds; keep under the p
 MAX_REPO_MB = _int("MAX_REPO_MB", 500)  # a clone that grows past this is killed
 
 
-def max_body_bytes() -> int:
+MAX_ARCHIVE_MB = _int("MAX_ARCHIVE_MB", 50)  # size of a project archive that may be imported
+
+
+def max_body_bytes(path: str = "") -> int:
     """Largest accepted API request body: an upload, or pasted text (up to 4 bytes per character), plus form overhead."""
+    if path == "/api/projects/import":
+        return MAX_ARCHIVE_MB * 1024 * 1024
     return max(MAX_UPLOAD_BYTES, MAX_DOC_CHARS * 4) + 1024 * 1024
 
 # Defaults for admin-tunable generation settings.

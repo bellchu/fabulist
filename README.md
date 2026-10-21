@@ -40,6 +40,12 @@ IDs → human review → epics, features and stories → requirements traceabili
    Editing is concurrency-safe: each requirement and story carries a revision. If two people open the same item and the first saves, the second is told it changed (their text stays in the editor) instead of silently overwriting. API clients can send `rev` for the same protection; without it a save always applies.
 7. **Audit trail**: every manual edit, review decision, deletion, sync and AI run is recorded
    with who, when and field-level changes. The project's **Audit** tab lets reviewers filter by action and user and page through the whole trail; it also exports as CSV (oldest first).
+   **Portability**: *Project settings > Download archive* exports a whole project (documents, requirements, stories with
+   their keys, statuses and order, baselines, comments and the audit history) as one versioned JSON file, and the
+   **Import** button on the project list restores it as a new project (never over an existing one; the name gets
+   *(imported)*). Imported items go through the same validation as manual edits, nothing is written unless the whole file
+   is valid, and the audit trail gets an *imported* entry stating that the earlier entries come from the archive and are
+   not verified here. AI run logs, repository connections and tracker links stay behind (they belong to the installation).
 8. **Export**: a stakeholder HTML report (preview in the browser, print to PDF; it states when it was generated and its scope, shows a status breakdown, has page numbers and repeating table headers, and ends with a review-and-approval block; baseline exports also state the version and who froze it), Excel (stories, requirements, RTM sheets), Jira CSV, Azure DevOps CSV,
    Markdown, CSV, JSON and Gherkin `.feature` test scenarios (tagged with story, requirement and
    compliance IDs for end-to-end traceability), or push directly to **Jira**, **Azure DevOps** or **GitHub Issues**, publish a **Confluence** page,
@@ -99,6 +105,7 @@ def verify(secret: str, body: bytes, headers, tolerance=300) -> bool:
 | `MAX_UPLOAD_MB`, `CHUNK_CHARS`, `MAX_CHUNKS_PER_RUN`, `RAG_TOP_K` | limits and defaults | 10, 6000, 200, 3 |
 | `MAX_UNZIPPED_MB`, `MAX_PDF_PAGES` | DOCX/XLSX may expand to at most this many MB (decompression-bomb guard; the upload limit counts compressed bytes), and PDFs may have at most this many pages | `200`, `500` |
 | `REPO_CLONE_TIMEOUT`, `MAX_REPO_MB` | seconds a Git sync may spend cloning (keep under the proxy timeout), and the size a clone may grow to before it is stopped | `60`, `500` |
+| `MAX_ARCHIVE_MB` | size of a project archive that may be imported | `50` |
 | `MAX_DOC_CHARS` | characters kept per pasted/parsed document; API bodies above `max(MAX_UPLOAD_MB, 4 x MAX_DOC_CHARS bytes) + 1 MiB` get `413` | 2000000 |
 | `METRICS_TOKEN` | bearer token for `/metrics` (disabled when unset) | - |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL` | single sign-on (Okta, Entra ID, Google, Keycloak, Salesforce...) | off |
