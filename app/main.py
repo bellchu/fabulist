@@ -58,6 +58,8 @@ app.include_router(admin.router)
 app.include_router(repos.router)
 app.include_router(integrations.router)
 app.include_router(users.router)
+app.include_router(users.me_router)
+app.include_router(users.admin_tokens_router)
 app.include_router(workspace.router)
 app.include_router(sso.router)
 
@@ -112,7 +114,8 @@ async def auth_and_guards(request: Request, call_next):
         return RedirectResponse("/auth/login?next=" + quote(path), status_code=302)
     elif ((users.auth_enabled() or sso.enabled()) and path != "/healthz" and not path.startswith("/auth/")
           and not (sso.enabled() and path.startswith("/static/"))):
-        creds = users.parse_basic(request.headers.get("authorization", ""))
+        token = users.bearer_token(request.headers.get("authorization", ""))
+        creds = None if token else users.parse_basic(request.headers.get("authorization", ""))
         # Throttle per username and per client address (Cloudflare/Traefik forward the real IP).
         client_ip = (request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
                      or (request.client.host if request.client else ""))
@@ -120,18 +123,24 @@ async def auth_and_guards(request: Request, call_next):
         if any(users.throttled(k) for k in keys):
             return JSONResponse({"detail": "Too many failed sign-in attempts; try again in a few minutes"}, status_code=429,
                                 headers={"Retry-After": str(int(users.FAIL_WINDOW))})
-        role = await run_in_threadpool(users.authenticate, *creds) if creds else None
+        if token:
+            who = await run_in_threadpool(users.authenticate_token, token)
+            role = who[1] if who else None
+        else:
+            role = await run_in_threadpool(users.authenticate, *creds) if creds else None
         if not role:
-            if creds:
+            if creds or token:
                 for k in keys:
                     users.record_failure(k)
-                log.warning("failed sign-in", extra={"fields": {"user": creds[0][:80], "ip": client_ip}})
-            return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="Fabulist"'})
-        users.clear_failures("user:" + creds[0])
-        request.state.user, request.state.role = creds[0], role
+                log.warning("failed sign-in", extra={"fields": {"user": creds[0][:80] if creds else "(token)", "ip": client_ip}})
+            return Response(status_code=401, headers={"WWW-Authenticate": 'Bearer realm="Fabulist"' if token else 'Basic realm="Fabulist"'})
+        if creds:
+            users.clear_failures("user:" + creds[0])
+        request.state.user, request.state.role, request.state.via_token = (who[0] if token else creds[0]), role, bool(token)
         if path.startswith("/api/") and not users.allowed(role, request.method, path):
             return JSONResponse({"detail": "Your role (%s) does not allow this action" % role}, status_code=403)
     if (request.method in ("POST", "PUT", "PATCH", "DELETE") and path.startswith("/api/")
+            and not getattr(request.state, "via_token", False)  # a bearer token is never sent by a browser on its own
             and request.headers.get("x-requested-with") != CSRF_HEADER):
         # Browsers resend Basic-auth credentials cross-site; a custom header can't be sent
         # cross-origin without a CORS preflight (which we never allow), so require it.

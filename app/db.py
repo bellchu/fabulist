@@ -79,6 +79,10 @@ SCHEMA = [
     """CREATE TABLE IF NOT EXISTS users (
          id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
          role TEXT NOT NULL, disabled BOOLEAN NOT NULL DEFAULT FALSE, created TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS api_tokens (
+         id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+         name TEXT NOT NULL, prefix TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+         created TEXT NOT NULL, expires TEXT NOT NULL, last_used TEXT)""",
     """CREATE TABLE IF NOT EXISTS integrations (
          id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, base_url TEXT NOT NULL,
          username TEXT NOT NULL DEFAULT '', target TEXT NOT NULL DEFAULT '', token_enc TEXT,

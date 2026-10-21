@@ -2,6 +2,7 @@
 import { h, mount, icon, api, guard, modal, field, requireValue, select, empty, badge, timeAgo, meter, setUnauthorizedHandler } from "./core.js";
 import { renderProject } from "./project.js";
 import { renderAdmin } from "./admin.js";
+import { renderAccount } from "./account.js";
 
 export const state = { meta: null, projects: [], me: null };
 
@@ -30,7 +31,9 @@ function shell(route) {
     h("div", { class: "user-chip" },
       state.me.role === "viewer" ? badge("Read-only", "amber") : null,
       isAdmin ? h("a", { class: "btn btn-ghost icon-btn", href: "#/admin/overview", title: "Setup", "aria-label": "Setup" }, icon("settings")) : null,
-      h("span", { class: "muted small", title: state.me.username === "anonymous" ? "Authentication is not configured on this deployment" : "" }, state.me.username === "anonymous" ? "Sign-in disabled" : state.me.username === state.me.role ? state.me.username : state.me.username + " · " + state.me.role),
+      state.me.username === "anonymous"
+        ? h("span", { class: "muted small", title: "Authentication is not configured on this deployment" }, "Sign-in disabled")
+        : h("a", { class: "muted small", href: "#/account", title: "Account and API tokens" }, state.me.username === state.me.role ? state.me.username : state.me.username + " · " + state.me.role),
       h("span", { class: "avatar", title: state.me.username }, (state.me.username || "?").slice(0, 2))));
   const nav = h("nav", { class: "context-bar", "aria-label": "Main" },
     h("a", { class: "waffle", href: "#/", title: "App launcher", "aria-label": "Home" }, h("span", {}, Array.from({ length: 9 }, () => h("i")))),
@@ -91,6 +94,7 @@ async function route() {
     const content = shell(parts);
     if (parts[0] === "p" && parts[1]) await renderProject(content, parts[1], parts[2] || "overview");
     else if (parts[0] === "admin" && state.me.role === "admin") await renderAdmin(content, parts[1] || "overview");
+    else if (parts[0] === "account") await renderAccount(content);
     else renderHome(content);
     if (refocus && ticket === rendering && location.hash === hash && (!document.activeElement || document.activeElement === document.body)) {
       document.querySelector("#app " + refocus)?.focus();
