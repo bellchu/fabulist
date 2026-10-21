@@ -123,6 +123,7 @@ async def auth_and_guards(request: Request, call_next):
                      or (request.client.host if request.client else ""))
         keys = ["ip:" + client_ip] + (["user:" + creds[0]] if creds else [])
         if any(users.throttled(k) for k in keys):
+            metrics.inc("fabulist_auth_failures_total", kind="throttled")
             return JSONResponse({"detail": "Too many failed sign-in attempts; try again in a few minutes"}, status_code=429,
                                 headers={"Retry-After": str(int(users.FAIL_WINDOW))})
         if token:
@@ -132,6 +133,7 @@ async def auth_and_guards(request: Request, call_next):
             role = await run_in_threadpool(users.authenticate, *creds) if creds else None
         if not role:
             if creds or token:
+                metrics.inc("fabulist_auth_failures_total", kind="token" if token else "basic")
                 for k in keys:
                     users.record_failure(k)
                 log.warning("failed sign-in", extra={"fields": {"user": creds[0][:80] if creds else "(token)", "ip": client_ip}})
@@ -199,6 +201,7 @@ def me(request: Request) -> Dict[str, Any]:
 async def database_unavailable(_request: Request, exc: Exception):
     # Postgres down, restarting, failing over or saturated: a short, retryable answer instead of a stack trace.
     log.warning("database unavailable", extra={"fields": {"error": type(exc).__name__}})
+    metrics.inc("fabulist_database_unavailable_total")
     return JSONResponse({"detail": "The database is temporarily unavailable. Please try again in a moment."},
                         status_code=503, headers={"Retry-After": "5"})
 

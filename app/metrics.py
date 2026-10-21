@@ -14,6 +14,9 @@ HELP = {
     "fabulist_llm_tokens_total": ("counter", "LLM tokens consumed, by direction."),
     "fabulist_tracker_items_total": ("counter", "Items pushed to issue trackers, by result."),
     "fabulist_http_request_duration_seconds": ("histogram", "HTTP request latency by route."),
+    "fabulist_auth_failures_total": ("counter", "Failed authentication attempts by kind (basic, token, throttled)."),
+    "fabulist_edit_conflicts_total": ("counter", "Saves refused because the item changed since it was opened."),
+    "fabulist_database_unavailable_total": ("counter", "Requests answered 503 because the database was unreachable."),
 }
 
 
@@ -57,10 +60,16 @@ def render() -> str:
                 lines.append("%s_bucket%s %g" % (name, _labels(labels, 'le="+Inf"'), h[-1]))
                 lines.append("%s_sum%s %g" % (name, _labels(labels), h[-2]))
                 lines.append("%s_count%s %g" % (name, _labels(labels), h[-1]))
-    totals = db.one("""SELECT (SELECT count(*) FROM projects) AS projects, (SELECT count(*) FROM documents) AS documents,
-        (SELECT count(*) FROM requirements) AS requirements, (SELECT count(*) FROM stories) AS stories,
-        (SELECT count(*) FROM runs WHERE status = 'running') AS running_runs""")
-    for key, value in totals.items():
+    # The scrape must survive a database outage (it is how we learn about one), so the inventory gauges are optional.
+    try:
+        totals = db.one("""SELECT (SELECT count(*) FROM projects) AS projects, (SELECT count(*) FROM documents) AS documents,
+            (SELECT count(*) FROM requirements) AS requirements, (SELECT count(*) FROM stories) AS stories,
+            (SELECT count(*) FROM runs WHERE status = 'running') AS running_runs""")
+    except Exception:
+        totals = None
+    lines += ["# HELP fabulist_database_up 1 when the database answered this scrape.", "# TYPE fabulist_database_up gauge",
+              "fabulist_database_up %d" % (1 if totals else 0)]
+    for key, value in (totals or {}).items():
         name = "fabulist_%s" % key
         lines += ["# HELP %s Current number of %s." % (name, key.replace("_", " ")), "# TYPE %s gauge" % name, "%s %d" % (name, value)]
     return "\n".join(lines) + "\n"

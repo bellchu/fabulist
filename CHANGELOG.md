@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Monitoring: `/metrics` keeps working during a database outage and reports `fabulist_database_up`; new counters for failed sign-ins/tokens, edit conflicts, database 503s and unpushed stories; new alerts `FabulistDatabaseUnavailable` (instead of a misleading "Fabulist is down") and `FabulistAuthFailureSpike`, with runbook entries.
 - Confluence publishing: a page deleted in Confluence is created again on the next publish (it used to fail with 404 forever); one edit conflict (409) is retried with the fresh version; a title collision says to rename the project or the page.
 - `scripts/deploy.sh` refuses to deploy from a branch other than `main`, with uncommitted or untracked changes, or when HEAD is not the latest `origin/main` (the image is built from the working tree).
 - Webhooks: every delivery carries `X-Fabulist-Delivery` (stable across retries) and `X-Fabulist-Timestamp`, and with a secret `X-Fabulist-Signature-V2` signs `timestamp.body`, so receivers can reject replays and deduplicate; the body-only `X-Fabulist-Signature` is unchanged. Receiver recipe in the README.
