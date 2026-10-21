@@ -283,3 +283,40 @@ table.table { width: 100%; border-collapse: collapse; background: var(--surface)
   .progress-line::after, .route-busy::after { width: 100%; animation: pulse 2s ease-in-out infinite !important; }
 }
 @keyframes pulse { 50% { opacity: .4; } }
+
+/* ---- print ------------------------------------------------------------------
+   Printing or saving a screen as PDF should give the content, on white, in the light palette: no navigation,
+   buttons or filters, tables that break cleanly across pages, and nothing clipped. */
+@media print {
+  /* Same selectors as the three theme blocks above so this wins, even when the person printing is in dark mode
+     (browsers drop backgrounds when printing, which would leave light text on white paper). */
+  :root, :root:not([data-theme="light"]), :root[data-theme="dark"] {
+  --bg: #f3f3f3; --surface: #ffffff; --surface-2: #fafaf9; --sunken: #f3f3f3;
+  --text: #181818; --text-2: #444444; --text-3: #696969;
+  --border: #e5e5e5; --border-strong: #c9c9c9;
+  --accent: #0176d3; --accent-hover: #014486; --accent-soft: #eef4ff; --accent-text: #014486; --on-accent: #fff;
+  --green: #2a7d45; --green-soft: #ebf7e6; --amber: #a05f04; --amber-soft: #fef1e1;
+  --red: #ba0517; --red-soft: #feded8; --blue: #016fc8; --blue-soft: #eef4ff;
+  --violet: #5867e8; --violet-soft: #f0f0fd; --neutral-soft: #ecebea;
+  --path-done: #2e844a; --path-current: #014486; --path-todo: #ecebea; --path-todo-hover: #dddbda;
+  --shadow: 0 2px 2px 0 rgba(0,0,0,.1); --shadow-lg: 0 2px 8px rgba(0,0,0,.16), 0 12px 32px rgba(0,0,0,.16);
+  --radius: .25rem; --radius-sm: .25rem;
+  --header-h: 48px; --nav-h: 40px;
+    color-scheme: light;
+  }
+  @page { margin: 14mm 12mm; }
+  body, .shell, .main, .content { background: #fff !important; color: #181818; }
+  .global-header, .context-bar, .skip-link, .crumbs, .tabs, .path-wrap, .route-busy, .toasts, .overlay, .modal, .drawer,
+  .toolbar, .runbox, .callout.info, .btn, button, select, input, textarea { display: none !important; }
+  .content { padding: 0; }
+  .card, .page-head, .stat { box-shadow: none; border: 1px solid #c9c9c9; }
+  .card { margin-bottom: 10px; }
+  .table-wrap { overflow: visible; }
+  thead { display: table-header-group; }
+  tr, .map-card, .story-card { break-inside: avoid; }
+  h1, h2, h3, h4, .card-head { break-after: avoid; }
+  .map { flex-wrap: wrap; overflow: visible; }
+  .map-col { flex: 1 1 44%; }
+  a { color: inherit; text-decoration: none; }
+  .badge, .chip, .meter, .meter > *, .dot, .typebar, .typebar > *, .step, .scorepill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+}
