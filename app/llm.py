@@ -2,6 +2,7 @@
 import re
 import time
 from typing import Any, Dict, List, Tuple
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -17,21 +18,36 @@ class _Retryable(Exception):
     pass
 
 
+HINTS = {401: "check the API key and the endpoint URL", 403: "the key may not have access to this model or endpoint",
+         404: "check the model name and the endpoint URL"}
+
+
+def _is_quota(resp: httpx.Response) -> bool:
+    text = resp.text.lower()
+    return "insufficient_quota" in text or ("quota" in text and "billing" in text)
+
+
 def _post(url: str, headers: dict, payload: dict, timeout: float) -> dict:
     """POST with bounded retries for transient failures (429/5xx/network)."""
+    host = urlsplit(url).hostname or url
     last = "unknown error"
     for attempt in range(3):
         try:
             resp = httpx.post(url, headers=headers, json=payload, timeout=timeout)
+            if resp.status_code == 429 and _is_quota(resp):
+                # Not transient: retrying only delays the message that tells the administrator what to fix.
+                raise LLMError("provider returned HTTP 429: %s (the account is out of quota; retrying will not help)" % _error_text(resp))
             if resp.status_code == 429 or resp.status_code >= 500:
-                raise _Retryable("provider returned HTTP %d" % resp.status_code)
+                detail = _error_text(resp)
+                raise _Retryable("provider returned HTTP %d%s" % (resp.status_code, ": " + detail if detail else ""))
             if resp.status_code >= 400:
-                raise LLMError("provider returned HTTP %d: %s" % (resp.status_code, _error_text(resp)))
+                hint = HINTS.get(resp.status_code)
+                raise LLMError("provider returned HTTP %d: %s%s" % (resp.status_code, _error_text(resp), " (%s)" % hint if hint else ""))
             return resp.json()
         except _Retryable as exc:
             last = str(exc)
         except httpx.HTTPError as exc:
-            last = "%s contacting provider" % type(exc).__name__
+            last = "cannot reach %s (%s): check the endpoint URL and network access" % (host, type(exc).__name__)
         if attempt < 2:
             time.sleep(1.5 * (2 ** attempt))
     raise LLMError(last)

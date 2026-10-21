@@ -624,3 +624,16 @@ def test_html_report_states_scope_and_date_for_exports_and_baselines(client):
     bid = client.get(api + "/baselines").json()[0]["id"]
     frozen = client.get(api + "/baselines/%s/export" % bid, params={"format": "html"}).text
     assert "Baseline v1" in frozen and "Release 1" in frozen and "frozen " in frozen and "Scope: approved only" in frozen
+
+
+def test_a_run_with_a_provider_that_needs_a_key_but_has_none_is_refused_at_the_start(client):
+    pid = client.post("/api/projects", json={"name": "Keys", "platform": "generic"}).json()["id"]
+    client.post("/api/projects/%s/documents/text" % pid, json={"name": "brd.md", "text": "# A\nThe system shall export invoices to CSV."})
+    anth = client.post("/api/admin/providers", json={"name": "Claude", "kind": "anthropic", "base_url": "https://api.anthropic.com", "model": "m"}).json()["id"]
+    r = client.post("/api/projects/%s/runs" % pid, json={"stage": "requirements", "provider_id": anth})
+    assert r.status_code == 400 and "no API key" in r.json()["detail"] and "AI providers" in r.json()["detail"]
+    assert client.get("/api/projects/%s/runs" % pid).json() == [], "no run was recorded"
+    # self-hosted OpenAI-compatible endpoints legitimately need no key
+    local = client.post("/api/admin/providers", json={"name": "Ollama", "kind": "openai", "base_url": "http://ollama:11434/v1", "model": "m"}).json()["id"]
+    assert client.post("/api/projects/%s/runs" % pid, json={"stage": "requirements", "provider_id": local}).status_code == 202
+    _wait(client, pid)
