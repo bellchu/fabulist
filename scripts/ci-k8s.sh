@@ -4,6 +4,8 @@
 # Needs only kubectl access (and git, tar). Sends the working tree (tracked + new, not ignored files).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Docker Hub intermittently refuses to pull on the node (digest/size validation); the AWS public mirror serves the same official image.
+PYTHON_IMAGE="${PYTHON_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim}"
 NS="fabulist-ci-$(date +%s)-$$"
 trap 'kubectl delete namespace "$NS" --wait=false >/dev/null 2>&1 || true' EXIT
 kubectl create namespace "$NS" >/dev/null
@@ -19,7 +21,7 @@ spec:
     image: pgvector/pgvector:pg16
     env: [{name: POSTGRES_USER, value: fabulist}, {name: POSTGRES_PASSWORD, value: fabulist}, {name: POSTGRES_DB, value: fabulist_test}]
   - name: py
-    image: python:3.12-slim
+    image: ${PYTHON_IMAGE}
     command: [sleep, "3600"]
     workingDir: /src
     volumeMounts: [{name: src, mountPath: /src}]

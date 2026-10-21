@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Browser test for personal API tokens (`tests/ui/tokens.py`): create, one-time reveal dialog, copy, prefix-only listing, use as a Bearer token, revoke. `scripts/ui-check-k8s.sh` now also starts a sign-in-required instance for named-account flows, and pulls the Python image from the AWS public mirror (Docker Hub intermittently refused the node's pull; override with `PYTHON_IMAGE`).
 - The stories list can be sorted the same way (ID, Story, Epic/feature, Priority, Points, Quality, Status); the story drawer's Next/Prev follows the sorted order.
 - The requirements table can be sorted by ID, Type, Section, Quality or Status (click a column header: ascending, descending, original order). The review drawer's Next/Prev and Approve & next follow the sorted order, so a reviewer can work through the lowest-quality or still-draft items first.
 - Large requirement lists stay responsive: ticking a row or "Select all" no longer rebuilds the whole table. Measured with 2,000 requirements: 327 ms -> 40 ms per tick, 272 ms -> 50 ms for select all.
