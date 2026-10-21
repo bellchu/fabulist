@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Stuck AI runs: Cancel now stops the provider retry loop (it used to wait for every remaining retry: 31 s with a 10 s timeout, over 6 min at the default) and the run ends as *cancelled*, not *failed*; a run with no progress for `STALE_RUN_MINUTES` (15) is marked stuck when someone starts another run, so a hung provider can no longer block a project until a restart; a cancelled or stuck run can never overwrite results if its thread finishes later; the run card says when there has been no progress for 3+ minutes. Additive schema change (`runs.updated`), so rolling back is safe.
 - Data portability: a full project archive (documents, requirements, stories, baselines, comments, audit history) can be downloaded from Project settings and imported from the project list as a new project, keys and links preserved. Additive; no schema change.
 - AI provider errors say what to fix: a rejected key, model or access names the setting to check; running out of quota fails immediately (it is no longer retried) and keeps the provider's explanation; an unreachable provider names the host; a provider that needs a key but has none is refused when you click Extract/Generate, not after the run starts.
 - First run: the Admin pages show a prominent warning when sign-in is not configured (anyone who can reach the address could change AI keys, integrations and users); Extract and Generate stay disabled with the reason shown until a BRD or requirements exist.

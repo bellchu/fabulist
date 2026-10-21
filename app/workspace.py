@@ -3,12 +3,13 @@ import json
 import logging
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
-from . import config, db, embeddings, exporters, history, integrations, metrics, parsing, pipeline, quality, settings
+from . import config, db, embeddings, exporters, history, integrations, llm, metrics, parsing, pipeline, quality, settings
 from .profiles import PLATFORMS
 
 log = logging.getLogger("fabulist")
@@ -252,16 +253,23 @@ def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str
     usage = {"in": 0, "out": 0}
 
     def progress(msg: str) -> None:
-        # Called between AI requests, so it doubles as the cancellation checkpoint.
+        # Called between AI requests, so it doubles as the cancellation checkpoint; also the run's heartbeat.
         with db.conn() as c:
-            row = c.execute("UPDATE runs SET progress=%s, tokens_in=%s, tokens_out=%s WHERE id=%s RETURNING cancel_requested",
-                            (msg[:200], usage["in"], usage["out"], run_id)).fetchone()
+            row = c.execute("UPDATE runs SET progress=%s, tokens_in=%s, tokens_out=%s, updated=%s WHERE id=%s RETURNING cancel_requested",
+                            (msg[:200], usage["in"], usage["out"], db.now(), run_id)).fetchone()
         if row and row["cancel_requested"]:
             raise RunCancelled()
 
+    def cancelled() -> None:
+        row = db.one("SELECT cancel_requested FROM runs WHERE id=%s", (run_id,))
+        if row and row["cancel_requested"]:
+            raise RunCancelled()
+
+    llm.set_cancel_check(cancelled)  # also checked inside the provider's retries and backoff
     try:
         _run_stage(run_id, pid, stage, provider_id, scope, started, usage, progress)
     finally:
+        llm.set_cancel_check(None)
         metrics.inc("fabulist_llm_tokens_total", usage["in"], direction="in")
         metrics.inc("fabulist_llm_tokens_total", usage["out"], direction="out")
 
@@ -289,6 +297,10 @@ def _run_stage(run_id: str, pid: str, stage: str, provider_id: str, scope: str, 
             sql = "INSERT INTO stories (id, project_id, run_id, seq, data) VALUES (%s,%s,%s,%s,%s)"
             params = [(db.new_id(), pid, run_id, i, json.dumps(x)) for i, x in enumerate(items)]
         with db.conn() as c:
+            # A run that was cancelled or marked stuck while its AI call hung must not replace results when it finally returns.
+            current = c.execute("SELECT status FROM runs WHERE id=%s FOR UPDATE", (run_id,)).fetchone()
+            if not current or current["status"] != "running":
+                raise RunCancelled()
             # Stories link to requirement keys, so re-extracting requirements resets the backlog too.
             c.execute("DELETE FROM stories WHERE project_id = %s", (pid,))
             if stage == "requirements":
@@ -302,13 +314,24 @@ def _run_stage(run_id: str, pid: str, stage: str, provider_id: str, scope: str, 
     except RunCancelled:
         metrics.inc("fabulist_runs_total", stage=stage, status="cancelled")
         db.execute("UPDATE runs SET status='cancelled', error='Cancelled; existing data was kept', progress='', "
-                   "duration_ms=%s WHERE id=%s", (int((time.monotonic() - started) * 1000), run_id))
+                   "duration_ms=%s WHERE id=%s AND status='running'", (int((time.monotonic() - started) * 1000), run_id))
     except Exception as exc:
         metrics.inc("fabulist_runs_total", stage=stage, status="failed")
         log.exception("run %s failed", run_id)
         msg = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else "Internal error (%s)" % type(exc).__name__
         db.execute("UPDATE runs SET status='failed', error=%s, progress='', tokens_in=%s, tokens_out=%s, duration_ms=%s "
-                   "WHERE id=%s", (msg[:500], usage["in"], usage["out"], int((time.monotonic() - started) * 1000), run_id))
+                   "WHERE id=%s AND status='running'", (msg[:500], usage["in"], usage["out"], int((time.monotonic() - started) * 1000), run_id))
+
+
+def _recover_stuck_runs(pid: str) -> None:
+    """A run whose AI provider stopped answering would block its project until a restart. One with no progress for
+    STALE_RUN_MINUTES is marked failed (and asked to stop), so a new run can start; if its thread ever wakes up it will
+    find it is no longer running and write nothing."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=config.STALE_RUN_MINUTES)).isoformat(timespec="milliseconds")
+    for r in db.rows("UPDATE runs SET status='failed', cancel_requested=TRUE, progress='', error=%s "
+                     "WHERE project_id=%s AND status='running' AND coalesce(updated, created) < %s RETURNING stage",
+                     ("Marked as stuck: no progress for %d minutes. The AI provider may have stopped responding; start a new run." % config.STALE_RUN_MINUTES, pid, cutoff)):
+        metrics.inc("fabulist_runs_total", stage=r["stage"], status="failed")
 
 
 @router.post("/api/projects/{pid}/runs", status_code=202)
@@ -323,6 +346,7 @@ def start_run(pid: str, body: RunIn, tasks: BackgroundTasks, request: Request):
         raise HTTPException(400, "The provider %s has no API key. Add one in Admin > AI providers." % profile["name"])
     if body.stage == "requirements" and not db.one("SELECT 1 AS x FROM documents WHERE project_id=%s LIMIT 1", (pid,)):
         raise HTTPException(400, "Add at least one BRD document first")
+    _recover_stuck_runs(pid)
     if db.one("SELECT 1 AS x FROM runs WHERE project_id=%s AND status='running'", (pid,)):
         raise HTTPException(409, "A run is already in progress for this project")
     rid = db.new_id()

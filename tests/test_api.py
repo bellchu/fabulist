@@ -637,3 +637,71 @@ def test_a_run_with_a_provider_that_needs_a_key_but_has_none_is_refused_at_the_s
     local = client.post("/api/admin/providers", json={"name": "Ollama", "kind": "openai", "base_url": "http://ollama:11434/v1", "model": "m"}).json()["id"]
     assert client.post("/api/projects/%s/runs" % pid, json={"stage": "requirements", "provider_id": local}).status_code == 202
     _wait(client, pid)
+
+
+def _running_run(pid, updated_minutes_ago=None, stage="requirements"):
+    """Insert a run row that is 'running' and last made progress the given number of minutes ago."""
+    from datetime import datetime, timedelta, timezone
+    from app import db
+    rid = db.new_id()
+    created = db.now()
+    updated = (datetime.now(timezone.utc) - timedelta(minutes=updated_minutes_ago)).isoformat(timespec="milliseconds") if updated_minutes_ago is not None else None
+    db.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, actor, created, updated) VALUES (%s,%s,'running',%s,'Offline heuristic','','t',%s,%s)",
+               (rid, pid, stage, created, updated))
+    return rid
+
+
+def test_a_run_with_no_progress_for_too_long_is_marked_stuck_and_no_longer_blocks_the_project(client, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "STALE_RUN_MINUTES", 15)
+    pid = client.post("/api/projects", json={"name": "Stuck", "platform": "generic"}).json()["id"]
+    client.post("/api/projects/%s/documents/text" % pid, json={"name": "brd.md", "text": "# A\nThe system shall export invoices to CSV."})
+    fresh = _running_run(pid, updated_minutes_ago=2)
+    r = client.post("/api/projects/%s/runs" % pid, json={"stage": "requirements"})
+    assert r.status_code == 409 and "already in progress" in r.json()["detail"], "a run that is making progress still blocks"
+    from app import db
+    db.execute("UPDATE runs SET updated=%s WHERE id=%s", ("2000-01-01T00:00:00.000+00:00", fresh))
+    r = client.post("/api/projects/%s/runs" % pid, json={"stage": "requirements"})
+    assert r.status_code == 202, r.text
+    _wait(client, pid)
+    old = next(x for x in client.get("/api/projects/%s/runs" % pid).json() if x["id"] == fresh)
+    assert old["status"] == "failed" and "stuck" in old["error"] and "15 minutes" in old["error"]
+
+
+def test_a_run_that_was_cancelled_or_marked_stuck_cannot_overwrite_results_when_its_thread_finally_finishes(client, monkeypatch):
+    from app import db, pipeline, workspace
+    pid = client.post("/api/projects", json={"name": "Zombie", "platform": "generic"}).json()["id"]
+    client.post("/api/projects/%s/documents/text" % pid, json={"name": "brd.md", "text": "# A\nThe system shall export invoices to CSV."})
+    keep = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall keep this requirement."}).json()
+    rid = _running_run(pid, updated_minutes_ago=0)
+
+    def slow_extract(docs, platform, profile, opts, progress, usage):
+        # while the AI call hung, an administrator's run was marked stuck/failed
+        db.execute("UPDATE runs SET status='failed', error='Marked as stuck', cancel_requested=FALSE WHERE id=%s", (rid,))
+        return [{"statement": "The system shall replace everything.", "type": "functional"}]
+    monkeypatch.setattr(pipeline, "extract_requirements", slow_extract)
+    providers = client.get("/api/admin/providers").json()["providers"]
+    workspace._execute_run(rid, pid, "requirements", providers[0]["id"], "all")
+    assert [r["statement"] for r in client.get("/api/projects/%s/requirements" % pid).json()] == [keep["statement"]], "existing results kept"
+    row = db.one("SELECT status, error FROM runs WHERE id=%s", (rid,))
+    assert row["status"] == "failed" and row["error"] == "Marked as stuck", "a late finish does not rewrite the status either"
+
+
+def test_cancelling_during_a_provider_timeout_ends_as_cancelled_not_failed(client, monkeypatch):
+    import httpx
+    from app import db, llm
+    pid = client.post("/api/projects", json={"name": "Cancel", "platform": "generic"}).json()["id"]
+    client.post("/api/projects/%s/documents/text" % pid, json={"name": "brd.md", "text": "# A\nThe system shall export invoices to CSV."})
+    prov = client.post("/api/admin/providers", json={"name": "Hang", "kind": "openai", "base_url": "https://llm.test/v1", "model": "m", "api_key": "k"}).json()["id"]
+    calls = []
+
+    def hang(url, headers=None, json=None, timeout=None):
+        calls.append(1)
+        db.execute("UPDATE runs SET cancel_requested=TRUE WHERE project_id=%s AND status='running'", (pid,))  # the user clicks Cancel
+        raise httpx.ReadTimeout("no answer")
+    monkeypatch.setattr(llm.httpx, "post", hang)
+    monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+    assert client.post("/api/projects/%s/runs" % pid, json={"stage": "requirements", "provider_id": prov}).status_code == 202
+    run = _wait(client, pid)
+    assert run["status"] == "cancelled" and "kept" in run["error"], run
+    assert len(calls) == 1, "no further attempts after the cancel"

@@ -193,3 +193,36 @@ def test_an_unreachable_provider_names_the_host_and_what_to_check(monkeypatch):
     with pytest.raises(llm.LLMError) as err:
         llm.complete(OPENAI, "s", "u", OPTS)
     assert "llm.test" in str(err.value) and "endpoint URL" in str(err.value) and "ConnectError" in str(err.value)
+
+
+def test_cancelling_stops_the_retry_loop_after_the_attempt_in_flight(monkeypatch):
+    class Cancelled(Exception):
+        pass
+    state = {"checks": 0}
+
+    def check():
+        state["checks"] += 1
+        if state["checks"] > 1:  # the first check (before attempt 1) passes; the user cancels while that attempt hangs
+            raise Cancelled()
+    calls = []
+
+    def hang(url, headers=None, json=None, timeout=None):
+        calls.append(1)
+        raise httpx.ReadTimeout("no answer")
+    monkeypatch.setattr(llm.httpx, "post", hang)
+    monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+    llm.set_cancel_check(check)
+    try:
+        with pytest.raises(Cancelled):
+            llm.complete(OPENAI, "s", "u", OPTS)
+    finally:
+        llm.set_cancel_check(None)
+    assert len(calls) == 1, "no second or third attempt after cancelling (each can take a full timeout)"
+
+
+def test_without_a_cancel_check_nothing_changes(monkeypatch):
+    llm.set_cancel_check(None)
+    monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+    fake = Fake([(503, {}), chat("ok")])
+    monkeypatch.setattr(llm.httpx, "post", fake)
+    assert llm.complete(OPENAI, "s", "u", OPTS)[0] == "ok" and len(fake.calls) == 2
