@@ -461,12 +461,22 @@ async function viewRequirements(body) {
   const renderTable = () => {
     const rows = visible();
     const all = h("input", { type: "checkbox", "aria-label": "Select all", checked: rows.length > 0 && rows.every((r) => selected.has(r.id)),
-      onchange: (e) => { rows.forEach((r) => (e.target.checked ? selected.add(r.id) : selected.delete(r.id))); renderTable(); renderBulk(); } });
+      onchange: (e) => {
+        rows.forEach((r) => (e.target.checked ? selected.add(r.id) : selected.delete(r.id)));
+        // touch the rows, don't rebuild them: rebuilding thousands of rows makes every click lag
+        tableBox.querySelectorAll("tbody tr.clickable").forEach((tr) => { tr.classList.toggle("selected", e.target.checked); tr.querySelector("input").checked = e.target.checked; });
+        renderBulk();
+      } });
     tableBox.replaceChildren(h("div", { class: "card table-wrap" }, h("table", { class: "table" },
       h("thead", {}, h("tr", {}, h("th", { class: "w-check" }, all), ...[["ID", ""], ["Type", "hide-sm"], ["Requirement", ""], ["Section", "hide-sm"], ["Quality", "hide-sm"], ["Status", ""]].map(([x, c]) => h("th", { class: c }, x)))),
       h("tbody", {}, rows.length ? rows.map((r) => h("tr", { class: "clickable" + (selected.has(r.id) ? " selected" : ""), onclick: () => reqDrawer(r, nav) },
         h("td", { onclick: (e) => e.stopPropagation() }, h("input", { type: "checkbox", "aria-label": "Select " + r.key, checked: selected.has(r.id),
-          onchange: (e) => { e.target.checked ? selected.add(r.id) : selected.delete(r.id); renderTable(); renderBulk(); } })),
+          onchange: (e) => {
+            e.target.checked ? selected.add(r.id) : selected.delete(r.id);
+            e.target.closest("tr").classList.toggle("selected", e.target.checked);
+            all.checked = rows.every((x) => selected.has(x.id));
+            renderBulk();
+          } })),
         h("td", { class: "mono nowrap" }, rowOpener(r.key)),
         h("td", { class: "hide-sm" }, badge(r.type, typeTone[r.type])),
         h("td", { class: "statement" }, r.statement,
