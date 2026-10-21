@@ -43,6 +43,15 @@ with sync_playwright() as p:
             page.wait_for_timeout(300)
             scan(page, f"{scheme}: {tab} review drawer")
             page.keyboard.press("Escape")
+            if tab == "stories":
+                page.get_by_role("button", name="List").click()
+                page.get_by_role("checkbox", name="Select all").check()  # the bulk bar is part of the page now
+                scan(page, f"{scheme}: stories list view with a selection")
+                page.get_by_role("button", name="Story map").click()
+        page.goto(f"{BASE}/#/p/{pid}/requirements")
+        page.reload()
+        page.get_by_role("checkbox", name="Select all").check()
+        scan(page, f"{scheme}: requirements list with a selection")
         ctx.close()
     browser.close()
 sys.exit(1 if failures else 0)

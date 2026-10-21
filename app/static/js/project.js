@@ -659,7 +659,21 @@ async function viewStories(body) {
     (!filters.storyStatus || s.status === filters.storyStatus) &&
     (!filters.storyReady || (filters.storyReady === "ready") === s.ready));
   const sorted = () => { const rows = visible(), by = STORY_SORTS[filters.storySort]; return by ? rows.sort((a, b) => filters.storyDir * by(a, b)) : rows; };
-  const render = () => { const rows = sorted(); box.replaceChildren(filters.storyView === "map" ? storyMap(rows) : storyTable(rows, render)); };
+  const selected = new Set();
+  const bulk = h("div", { class: "bulk-sticky" });
+  const renderBulk = () => bulk.replaceChildren(...(selected.size && filters.storyView === "list" ? [h("div", { class: "bulkbar" }, selected.size + " selected",
+    h("span", { class: "grow" }),
+    ...[["approved", "Approve"], ["draft", "Mark draft"], ["rejected", "Reject"]].map(([st, l]) =>
+      h("button", { class: "btn btn-sm", onclick: guard(async () => {
+        if (selected.size >= BULK_CONFIRM_AT && !(await confirmBox(l + " " + selected.size + " stories?", { okLabel: l, danger: st === "rejected" }))) return;
+        await api.post(base() + "/stories/bulk", { ids: [...selected], status: st }); toast(l + ": " + selected.size, "ok"); selected.clear(); await refresh();
+      }) }, l)),
+    h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); render(); } }, "Clear"))] : []));
+  const render = () => {
+    const rows = sorted();
+    box.replaceChildren(filters.storyView === "map" ? storyMap(rows) : storyTable(rows, render, { selected, changed: renderBulk }));
+    renderBulk();
+  };
   q.addEventListener("input", debounce(() => { filters.storyQ = q.value; render(); }));
   status.addEventListener("change", () => { filters.storyStatus = status.value; render(); });
   ready.addEventListener("change", () => { filters.storyReady = ready.value; render(); });
@@ -677,7 +691,7 @@ async function viewStories(body) {
     q, status, ready,
     count,
     h("button", { class: "btn", onclick: guard(estimateDialog) }, icon("sparkles"), "Estimate with AI"),
-    h("button", { class: "btn", onclick: () => storyDrawer(null) }, icon("plus"), "Add story")), box);
+    h("button", { class: "btn", onclick: () => storyDrawer(null) }, icon("plus"), "Add story")), bulk, box);
   render();
 }
 
@@ -756,10 +770,25 @@ function rowOpener(key, onclick) {
   return h("button", { type: "button", class: "row-open", "aria-label": "Open " + key, onclick }, key);
 }
 
-function storyTable(rows, redraw) {
-  return h("div", { class: "card table-wrap" }, h("table", { class: "table" },
-    h("thead", {}, h("tr", {}, [["ID", "", "key"], ["Story", "", "title"], ["Epic / feature", "hide-sm", "epic"], ["Priority", "hide-sm", "priority"], ["Pts", "hide-sm", "points"], ["Requirements", "hide-sm"], ["Quality", "hide-sm", "quality"], ["Status", "", "status"]].map(([x, c, k]) => sortHeader(x, c, k, "story", redraw)))),
-    h("tbody", {}, rows.map((s) => h("tr", { class: "clickable", onclick: () => storyDrawer(s) },
+function storyTable(rows, redraw, pick) {
+  const { selected, changed } = pick;
+  const all = h("input", { type: "checkbox", "aria-label": "Select all", checked: rows.length > 0 && rows.every((s) => selected.has(s.id)),
+    onchange: (e) => {
+      rows.forEach((s) => (e.target.checked ? selected.add(s.id) : selected.delete(s.id)));
+      // touch the rows, don't rebuild them: rebuilding thousands of rows makes every click lag
+      table.querySelectorAll("tbody tr.clickable").forEach((tr) => { tr.classList.toggle("selected", e.target.checked); tr.querySelector("input").checked = e.target.checked; });
+      changed();
+    } });
+  const table = h("div", { class: "card table-wrap" }, h("table", { class: "table" },
+    h("thead", {}, h("tr", {}, h("th", { class: "w-check" }, all), [["ID", "", "key"], ["Story", "", "title"], ["Epic / feature", "hide-sm", "epic"], ["Priority", "hide-sm", "priority"], ["Pts", "hide-sm", "points"], ["Requirements", "hide-sm"], ["Quality", "hide-sm", "quality"], ["Status", "", "status"]].map(([x, c, k]) => sortHeader(x, c, k, "story", redraw)))),
+    h("tbody", {}, rows.map((s) => h("tr", { class: "clickable" + (selected.has(s.id) ? " selected" : ""), onclick: () => storyDrawer(s) },
+      h("td", { onclick: (e) => e.stopPropagation() }, h("input", { type: "checkbox", "aria-label": "Select " + s.key, checked: selected.has(s.id),
+        onchange: (e) => {
+          e.target.checked ? selected.add(s.id) : selected.delete(s.id);
+          e.target.closest("tr").classList.toggle("selected", e.target.checked);
+          all.checked = rows.every((x) => selected.has(x.id));
+          changed();
+        } })),
       h("td", { class: "mono nowrap" }, rowOpener(s.key)),
       h("td", {}, h("b", {}, s.title), h("div", { class: "small muted" }, s.persona)),
       h("td", { class: "small hide-sm" }, s.epic, h("div", { class: "muted" }, s.feature)),
@@ -768,6 +797,7 @@ function storyTable(rows, redraw) {
       h("td", { class: "small mono hide-sm" }, s.requirement_ids.join(", ") || "–"),
       h("td", { class: "nowrap hide-sm" }, h("span", { class: "row" }, scorePill(s.quality_score), s.ready ? badge("Ready", "green") : null)),
       h("td", {}, h("div", { class: "row", style: { flexWrap: "wrap" } }, badge(s.status, statusTone[s.status]), talkBadge((ctx.talk || {})[s.id]))))))));
+  return table;
 }
 
 function storyDrawer(s, nav = storyNav) {
