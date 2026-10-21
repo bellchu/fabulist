@@ -37,6 +37,7 @@ async def lifespan(_app: FastAPI):
     # A restart kills in-process runs; don't leave them "running" forever.
     db.execute("UPDATE runs SET status='failed', error='Interrupted by server restart' WHERE status='running'")
     yield
+    workspace.shutdown_runs()
     db.close()
 
 
