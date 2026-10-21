@@ -53,3 +53,14 @@ def test_invalidate_during_a_load_is_not_overwritten_by_the_stale_result(client,
     taxonomy.classes()
     monkeypatch.setattr(db, "rows", real_rows)
     assert "Raced class" in [c["name"] for c in taxonomy.classes()]
+
+
+def test_invalidate_works_on_a_freshly_booted_machine(client, monkeypatch):
+    # time.monotonic() counts from boot: with under 30 s of uptime, "stale since 0.0" used to look fresh,
+    # so an invalidated cache kept serving old data (seen as flaky tests right after the Docker VM restarted).
+    import types
+    monkeypatch.setattr(taxonomy, "time", types.SimpleNamespace(monotonic=lambda: 5.0))
+    taxonomy.invalidate()
+    taxonomy.classes()  # warm the cache
+    client.post("/api/admin/taxonomy/classes", json={"name": "Fresh boot class", "keywords": "freshboot"})  # invalidates
+    assert "Fresh boot class" in [c["name"] for c in taxonomy.classes()]
