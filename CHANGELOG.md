@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Accessibility: tables that scroll sideways on narrow screens are keyboard-focusable (arrow keys scroll them) and labelled; the tab stop is removed when the table fits. Axe is clean on all 32 live pages (16 screens x desktop and phone).
 - Grafana dashboard: a *Reliability and security* row (database up/down, failed sign-ins and token attempts, edit conflicts and database 503s). A test now fails if any alert rule or dashboard panel references a metric the app does not expose.
 - Monitoring: `/metrics` keeps working during a database outage and reports `fabulist_database_up`; new counters for failed sign-ins/tokens, edit conflicts, database 503s and unpushed stories; new alerts `FabulistDatabaseUnavailable` (instead of a misleading "Fabulist is down") and `FabulistAuthFailureSpike`, with runbook entries.
 - Confluence publishing: a page deleted in Confluence is created again on the next publish (it used to fail with 404 forever); one edit conflict (409) is retried with the fresh version; a title collision says to rename the project or the page.

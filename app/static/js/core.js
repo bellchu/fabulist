@@ -318,6 +318,24 @@ export function download(url) {
   document.body.append(a); a.click(); a.remove();
 }
 
+// A region that scrolls sideways must be reachable by keyboard (WCAG 2.1.1), otherwise keyboard users can never read its
+// far columns. Only regions that really overflow get a tab stop, and they lose it again when the window widens.
+export function markScrollRegions(root = document) {
+  root.querySelectorAll(".table-wrap").forEach((el) => {
+    const scrolls = el.scrollWidth > el.clientWidth + 1;
+    if (scrolls && !el.dataset.scrollRegion) {
+      el.dataset.scrollRegion = "1";
+      el.tabIndex = 0;
+      el.setAttribute("role", "region");
+      const title = el.closest(".card")?.querySelector("h3")?.textContent?.trim();
+      el.setAttribute("aria-label", (title || "Table") + " (scrolls sideways)");
+    } else if (!scrolls && el.dataset.scrollRegion) {
+      delete el.dataset.scrollRegion;
+      el.removeAttribute("tabindex"); el.removeAttribute("role"); el.removeAttribute("aria-label");
+    }
+  });
+}
+
 // ---- change history -----------------------------------------------------
 
 function short(v) {

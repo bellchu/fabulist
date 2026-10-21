@@ -1,5 +1,5 @@
 // App shell, routing and the projects home view.
-import { h, mount, icon, api, guard, modal, field, requireValue, select, empty, badge, timeAgo, meter, setUnauthorizedHandler } from "./core.js";
+import { h, mount, icon, api, guard, modal, field, requireValue, select, empty, badge, timeAgo, meter, setUnauthorizedHandler, markScrollRegions } from "./core.js";
 import { renderProject } from "./project.js";
 import { renderAdmin } from "./admin.js";
 import { renderAccount } from "./account.js";
@@ -199,6 +199,12 @@ setUnauthorizedHandler(() => {
   signingIn = true;
   location.assign("/auth/login?next=" + encodeURIComponent(location.pathname + location.hash));
 });
+
+// Tables are re-rendered by filters and the window can be resized: keep scrollable regions keyboard-reachable.
+let scrollCheck = 0;
+const scheduleScrollCheck = () => { cancelAnimationFrame(scrollCheck); scrollCheck = requestAnimationFrame(() => markScrollRegions()); };
+new MutationObserver(scheduleScrollCheck).observe(document.body, { childList: true, subtree: true });
+window.addEventListener("resize", scheduleScrollCheck);
 
 window.addEventListener("hashchange", route);
 route();
