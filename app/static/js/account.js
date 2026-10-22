@@ -1,5 +1,5 @@
 // Account page: personal API tokens for automation (the secret is shown once).
-import { h, mount, icon, api, guard, toast, modal, confirmBox, badge, timeAgo, field, select, empty } from "./core.js";
+import { h, mount, icon, api, guard, toast, modal, confirmBox, badge, timeAgo, field, select, segmented, empty } from "./core.js";
 import { state, setCrumbs } from "./main.js";
 
 const rerender = () => window.dispatchEvent(new HashChangeEvent("hashchange"));
@@ -38,6 +38,20 @@ function newTokenDialog() {
   });
 }
 
+const THEME_KEY = "fabulist-theme";
+
+// Light, dark or follow the system. The saved choice is applied before paint by theme.js; this changes it live.
+function appearanceCard() {
+  const saved = () => { try { return localStorage.getItem(THEME_KEY) || ""; } catch (_) { return ""; } };
+  const apply = (v) => {
+    try { v ? localStorage.setItem(THEME_KEY, v) : localStorage.removeItem(THEME_KEY); } catch (_) { /* storage blocked: applies until reload */ }
+    v ? document.documentElement.setAttribute("data-theme", v) : document.documentElement.removeAttribute("data-theme");
+  };
+  return h("div", { class: "card", style: { marginTop: "16px" } }, h("div", { class: "card-head" }, h("h3", {}, "Appearance")),
+    h("div", { class: "card-body" }, field("Colour theme", segmented([["", "System"], ["light", "Light"], ["dark", "Dark"]], saved(), apply),
+      "System follows your device's light or dark setting. The choice is remembered in this browser.")));
+}
+
 export async function renderAccount(content) {
   setCrumbs("Account");
   let tokens = null;
@@ -55,7 +69,7 @@ export async function renderAccount(content) {
     mount(content, head, h("div", { class: "card" }, empty({ iconName: "lock", title: "Sign in with a named account",
       text: "API tokens belong to a named account. This deployment is not signed in, or you are using the bootstrap administrator.",
       action: state.me.role === "admin" && state.me.username !== "anonymous"
-        ? h("a", { class: "btn btn-primary", href: "#/admin/users" }, icon("plus"), "Create a named account") : null })));
+        ? h("a", { class: "btn btn-primary", href: "#/admin/users" }, icon("plus"), "Create a named account") : null })), appearanceCard());
     return;
   }
   mount(content, head, h("div", { class: "card" }, tokens.length
@@ -72,5 +86,5 @@ export async function renderAccount(content) {
           await api.del("/api/me/tokens/" + t.id); toast("Token revoked", "ok"); rerender();
         }) }, "Revoke")))))))
     : empty({ iconName: "lock", title: "No API tokens", text: "Create one for a script or integration that needs to call the Fabulist API.",
-      action: h("button", { class: "btn btn-primary", onclick: newTokenDialog }, icon("plus"), "New token") })));
+      action: h("button", { class: "btn btn-primary", onclick: newTokenDialog }, icon("plus"), "New token") })), appearanceCard());
 }
