@@ -172,6 +172,26 @@ docker run --rm -v "$PWD:/src" -w /src python:3.12-slim sh -c "pip install -q pi
 
 Everything the web app does is available over HTTP. The reference is built into the app at `/docs` (same sign-in; it works offline and under the Content Security Policy, unlike FastAPI's stock page, which loads its scripts from a public CDN), and the machine-readable description is at `/openapi.json`. Authenticate with a personal API token (`Authorization: Bearer fab_...`, created on the Account page), Basic credentials or a single-sign-on session; changes made with Basic credentials or a session also need `X-Requested-With: fabulist`.
 
+### Automation cookbook
+
+A script that takes a BRD to a backlog (shell and `curl`; `$TOKEN` is a personal API token, `$HOST` the address of the app):
+
+```sh
+api() { curl -fsS -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" "$@"; }
+
+status() { api "$HOST/api/projects/$PID/runs?limit=1" | jq -r '.[0].status'; }
+PID=$(api -X POST "$HOST/api/projects" -d '{"name":"Order to cash","platform":"salesforce"}' | jq -r .id)
+curl -fsS -H "Authorization: Bearer $TOKEN" -F "file=@brd.docx" "$HOST/api/projects/$PID/documents"
+api -X POST "$HOST/api/projects/$PID/runs" -d '{"stage":"requirements"}'            # 202: runs, or waits in the queue
+while [ "$(status)" = running ] || [ "$(status)" = queued ]; do sleep 10; done
+api -X POST "$HOST/api/projects/$PID/requirements/bulk" -d "{\"ids\":$(api "$HOST/api/projects/$PID/requirements" | jq '[.[].id]'),\"status\":\"approved\"}"
+api -X POST "$HOST/api/projects/$PID/runs" -d '{"stage":"stories"}'
+sleep 2; while [ "$(status)" = running ] || [ "$(status)" = queued ]; do sleep 10; done
+curl -fsS -H "Authorization: Bearer $TOKEN" "$HOST/api/projects/$PID/export?format=xlsx" -o backlog.xlsx
+```
+
+Existing requirements go in with `POST /api/projects/{id}/requirements/import-file` (multipart, `.csv` or `.xlsx`). A `429` carries `Retry-After` (seconds): wait that long and repeat the call. A `503` means the database is briefly unavailable and also carries `Retry-After`. To hear when a run ends instead of polling, add a webhook integration with "Also tell this webhook when an AI run finishes".
+
 ## Who can see a project
 
 By default every signed-in person sees every project. With named accounts, a project can instead be **private**: choose "Only people I choose" when creating it, or under Edit > Who can see this project. Only the people chosen, and administrators, can then see it, list it, open anything inside it, export it or search it; everyone else gets "not found" (the project does not announce that it exists). People keep their own role, so a chosen viewer is still read-only, and the person making the change always stays in. The check is one guard on every route that names a project, so routes added later are covered too. Changes to who can see a project appear in its audit trail. `GET/PUT /api/projects/{id}/access` and `GET /api/people` expose it to scripts.
