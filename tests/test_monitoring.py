@@ -68,3 +68,10 @@ def test_provider_throttling_is_graphed_and_alerted_on():
     panel = next(p for p in dash["panels"] if p["title"] == "AI provider retries by reason (5 min)")
     assert "fabulist_llm_retries_total" in panel["targets"][0]["expr"]
     assert "FabulistAIProviderThrottling" in MONITORING and "fabulist_llm_retries_total" in MONITORING.split("FabulistAIProviderThrottling", 1)[1][:400]
+
+
+def test_every_alert_has_a_runbook_row():
+    readme = open(os.path.join(REPO, "README.md")).read()
+    alerts = re.findall(r"- alert: (\w+)", MONITORING)
+    assert len(alerts) >= 10 and "FabulistRestarting" in alerts
+    assert [a for a in alerts if "| %s |" % a not in readme] == []
