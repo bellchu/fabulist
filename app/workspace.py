@@ -29,6 +29,12 @@ class ProjectIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     platform: str = "generic"
     description: str = Field(default="", max_length=2000)
+    visibility: str = "everyone"  # "members": only the people chosen under the project's access (and administrators) can see it
+
+
+class AccessIn(BaseModel):
+    visibility: str
+    members: List[str] = Field(default_factory=list, max_length=500)
 
 
 class ProjectPatch(BaseModel):
@@ -90,18 +96,61 @@ FROM projects p
 
 
 @router.post("/api/projects", status_code=201)
-def create_project(body: ProjectIn):
+def create_project(body: ProjectIn, request: Request):
     if body.platform not in PLATFORMS:
         raise HTTPException(400, "Unknown platform")
+    if body.visibility not in ("everyone", "members"):
+        raise HTTPException(400, "Unknown visibility")
     pid = db.new_id()
-    db.execute("INSERT INTO projects (id, name, platform, description, created) VALUES (%s,%s,%s,%s,%s)",
-               (pid, body.name.strip(), body.platform, body.description.strip(), db.now()))
+    who = history.actor(request)
+    with db.conn() as c:
+        c.execute("INSERT INTO projects (id, name, platform, description, created, visibility) VALUES (%s,%s,%s,%s,%s,%s)",
+                  (pid, body.name.strip(), body.platform, body.description.strip(), db.now(), body.visibility))
+        if body.visibility == "members" and who != "anonymous":  # whoever makes a private project is its first member
+            c.execute("INSERT INTO project_members (project_id, username, added_by, created) VALUES (%s,%s,%s,%s)", (pid, who, who, db.now()))
     return _project(pid)
 
 
 @router.get("/api/projects")
-def list_projects(archived: bool = False):
-    return db.rows(PROJECT_COUNTS + " WHERE p.archived IS %s NULL ORDER BY p.created DESC" % ("NOT" if archived else ""))
+def list_projects(request: Request, archived: bool = False):
+    sql = PROJECT_COUNTS + " WHERE p.archived IS %s NULL" % ("NOT" if archived else "")
+    args: List[Any] = []
+    if getattr(request.state, "role", "admin") != "admin":  # administrators see everything; everyone else the open projects and their own
+        sql += " AND (p.visibility = 'everyone' OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.username = %s))"
+        args.append(history.actor(request))
+    return db.rows(sql + " ORDER BY p.created DESC", args)
+
+
+@router.get("/api/people")
+def people() -> List[Dict[str, str]]:
+    """Named accounts, for choosing who can see a project (names and roles only)."""
+    return db.rows("SELECT username, role FROM users WHERE disabled IS NOT TRUE ORDER BY username")
+
+
+@router.get("/api/projects/{pid}/access")
+def get_access(pid: str):
+    project = _project(pid)
+    return {"visibility": project["visibility"], "members": [r["username"] for r in db.rows("SELECT username FROM project_members WHERE project_id=%s ORDER BY username", (pid,))]}
+
+
+@router.put("/api/projects/{pid}/access")
+def set_access(pid: str, body: AccessIn, request: Request):
+    _project(pid)
+    if body.visibility not in ("everyone", "members"):
+        raise HTTPException(400, "Unknown visibility")
+    who = history.actor(request)
+    members = sorted({m.strip() for m in body.members if m.strip()} | ({who} if body.visibility == "members" and who != "anonymous" else set()))
+    unknown = [m for m in members if m != who and not db.one("SELECT 1 AS x FROM users WHERE username=%s", (m,))]
+    if unknown:
+        raise HTTPException(400, "No such account: %s" % ", ".join(unknown[:5]))
+    with db.conn() as c:
+        c.execute("UPDATE projects SET visibility=%s WHERE id=%s", (body.visibility, pid))
+        c.execute("DELETE FROM project_members WHERE project_id=%s", (pid,))
+        for m in members:
+            c.execute("INSERT INTO project_members (project_id, username, added_by, created) VALUES (%s,%s,%s,%s)", (pid, m, who, db.now()))
+        history.record(c, pid, "project", pid, "", "access changed", who,
+                       "Visible to everyone" if body.visibility == "everyone" else "Private to %s" % ", ".join(members), {"visibility": body.visibility, "members": members})
+    return get_access(pid)
 
 
 @router.get("/api/projects/{pid}")

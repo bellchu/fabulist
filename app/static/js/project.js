@@ -1,7 +1,7 @@
 // Project workspace: Overview, Sources, Requirements, Stories, Traceability, Export.
 import {
   h, mount, icon, api, guard, toast, modal, confirmBox, drawer, badge, statusTone, typeTone, scorePill, meter, issueIcon,
-  issueList, empty, timeAgo, fmt, duration, debounce, field, requireValue, select, linesInput, readLines, tagsInput, segmented, download, historyList,
+  issueList, empty, timeAgo, fmt, duration, debounce, field, requireValue, select, linesInput, readLines, tagsInput, segmented, download, historyList, accessPicker,
 } from "./core.js";
 import { state, setCrumbs } from "./main.js";
 
@@ -42,8 +42,9 @@ function header(p) {
   const kv = (label, value, cls = "") => h("div", { class: cls }, h("div", { class: "object-label" }, label), h("div", {}, value));
   return h("div", { class: "page-head" },
     h("span", { class: "object-icon project" }, icon("folder")),
-    h("div", { class: "grow" }, h("div", { class: "object-label" }, "Project"), h("h1", {}, p.name)),
-    h("div", { class: "row" }, writer(h("button", { class: "btn", onclick: editProjectDialog }, "Edit")),
+    h("div", { class: "grow" }, h("div", { class: "object-label" }, "Project"), h("h1", {}, p.name),
+      p.visibility === "members" ? h("div", { class: "small" }, badge("Private", "amber"), " ", h("span", { class: "muted" }, "Only chosen people and administrators can see this project.")) : null),
+    h("div", { class: "row" }, writer(h("button", { class: "btn", onclick: guard(editProjectDialog) }, "Edit")),
       h("a", { class: "btn", href: "#/p/" + p.id + "/export" }, "Export")),
     h("div", { class: "row wrap", style: { flexBasis: "100%", gap: "32px", paddingLeft: "44px" } },
       kv("Target platform", state.meta.platforms[p.platform] || p.platform),
@@ -97,14 +98,17 @@ function tabBar(p, active) {
       label, counts[id] !== undefined ? h("span", { class: "count" }, counts[id]) : null)));
 }
 
-function editProjectDialog() {
+async function editProjectDialog() {
   const p = ctx.project;
+  const [access, people] = await Promise.all([api.get(base() + "/access"), state.me.username === "anonymous" ? [] : api.get("/api/people")]);
+  const picker = people.length ? accessPicker(people, access.visibility, access.members) : null;
   const name = h("input", { type: "text", value: p.name, maxlength: "120" });
   const platform = select(Object.entries(state.meta.platforms), p.platform);
   const desc = h("textarea", { rows: 3, value: p.description });
   const close = modal({
     title: "Project settings",
     body: h("div", { class: "stack" }, field("Name", name), field("Target platform", platform), field("Description", desc),
+      picker ? field("Who can see this project", picker.el) : null,
       h("div", { class: "callout small" }, h("div", { class: "grow" }, h("b", {}, "Take your data with you. "),
         "A full archive holds the documents, requirements, stories, baselines, comments and audit history, and can be imported into any Fabulist."),
         h("button", { class: "btn btn-sm", onclick: () => download(base() + "/archive.json") }, icon("download"), "Download archive")),
@@ -115,6 +119,11 @@ function editProjectDialog() {
         }) }, "Archive project"))),
     actions: [{ label: "Save", kind: "btn-primary", onClick: async () => {
       await api.patch(base(), { name: name.value, platform: platform.value, description: desc.value });
+      if (picker) {
+        const chosen = picker.value();
+        const same = chosen.visibility === access.visibility && [...chosen.members].sort().join() === [...access.members].sort().join();
+        if (!same) await api.put(base() + "/access", chosen);  // only when the choice changed
+      }
       toast("Project updated", "ok"); rerender();
     } }],
   });
