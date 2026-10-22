@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- `deploy.sh` now scans the freshly built image and refuses to roll it out when it has fixable HIGH/CRITICAL vulnerabilities (`SKIP_IMAGE_SCAN=1` is the emergency override).
 - `scripts/scan-image-k8s.sh` scans the deployed image (or any image) with Trivy on the cluster for fixable HIGH/CRITICAL vulnerabilities in OS and Python packages, complementing `pip-audit`. The image running now is clean (Debian 13.7, 0 findings); the script exits 1 on a vulnerable image (checked against an old Python 3.8 image: 61 findings).
 - Repository settings (owner-approved): `main` is protected against force-push and deletion with linear history required, merged branches are deleted automatically, and Dependabot vulnerability alerts are on. Documented in CONTRIBUTING.
 - Keyboard test now also covers dialogs: a form dialog and a confirmation take focus, trap Tab, close on Escape and return focus to the opener, and Enter on the confirm button completes the action.

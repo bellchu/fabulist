@@ -77,6 +77,12 @@ git ls-files -z | COPYFILE_DISABLE=1 tar --null -T - -cf - | kubectl -n "$BUILD_
 kubectl -n "$BUILD_NS" exec build -- /kaniko/executor --context=dir:///workspace --dockerfile=/workspace/Dockerfile \
   --destination="$IMAGE" --insecure --build-arg APP_VERSION="$(git rev-parse --short HEAD)"
 
+# Do not roll out an image with fixable HIGH/CRITICAL vulnerabilities (rebuilding picks up patched base layers).
+# SKIP_IMAGE_SCAN=1 is the emergency override, for example when the scanner's database cannot be downloaded.
+if [ -z "${SKIP_IMAGE_SCAN:-}" ]; then
+  scripts/scan-image-k8s.sh "$IMAGE" || { echo "Refusing to deploy $IMAGE: image scan failed (SKIP_IMAGE_SCAN=1 overrides)." >&2; exit 1; }
+fi
+
 sed -e "s|IMAGE|${IMAGE}|" -e "s|FABULIST_HOST|${FABULIST_HOST}|" deploy/k8s/app.yaml | kubectl apply -f -
 sed -e "s|IMAGE|${IMAGE}|" deploy/k8s/audit.yaml | kubectl apply -f -
 kubectl -n "$NS" rollout status deploy/fabulist --timeout=240s

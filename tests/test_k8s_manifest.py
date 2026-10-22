@@ -26,3 +26,10 @@ def test_only_the_ingress_controller_and_prometheus_reach_the_app_and_only_this_
     assert "kubernetes.io/metadata.name: ingress" in policy and "kubernetes.io/metadata.name: observability" in policy
     assert "podSelector: {}" in policy  # postgres: same-namespace pods only (app, backup, audit)
     assert "networkpolicy.yaml" in open(os.path.join(os.path.dirname(APP_PATH), "..", "..", "scripts", "deploy.sh")).read()
+
+
+def test_deploy_scans_the_image_before_rolling_it_out_and_has_an_override():
+    deploy = open(os.path.join(os.path.dirname(APP_PATH), "..", "..", "scripts", "deploy.sh")).read()
+    scan, apply = deploy.index("scan-image-k8s.sh"), deploy.index("deploy/k8s/app.yaml | kubectl apply")
+    assert scan < apply, "the scan must run before the new image is applied"
+    assert "SKIP_IMAGE_SCAN" in deploy
