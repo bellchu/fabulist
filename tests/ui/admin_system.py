@@ -20,7 +20,7 @@ with sync_playwright() as p:
     page.goto(BASE + "/#/admin/overview")
     page.wait_for_selector("[aria-label=System]")
     text = page.locator("[aria-label=System]").inner_text()
-    for label in ("Version", "Database", "AI runs now", "Memory"):
+    for label in ("Version", "Database", "AI runs running", "Memory"):
         check(label in text, "the system row has %s" % label)
     check("MiB" in text and "running" in text and "waiting" in text and "up " in text, "with readable sizes, counts and uptime (%r)" % text.replace("\n", " | "))
     browser.close()
