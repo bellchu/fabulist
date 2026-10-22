@@ -46,6 +46,13 @@ spec:
           annotations:
             summary: Fabulist is running but cannot reach its database (users get 503s)
             runbook: "README.md#runbook: check postgres-0 and its volume; the app reconnects by itself when the database returns"
+        - alert: FabulistMemoryNearLimit
+          expr: fabulist_memory_limit_bytes > 0 and fabulist_process_resident_memory_bytes / fabulist_memory_limit_bytes > 0.85
+          for: 10m
+          labels: {severity: warning, team: fabulist}
+          annotations:
+            summary: Fabulist is using over 85% of its memory limit and will be killed (OOM) if it grows
+            runbook: "README.md#runbook: look for very large projects or exports in progress, then raise the pod memory limit"
         - alert: FabulistAuthFailureSpike
           expr: sum(increase(fabulist_auth_failures_total[10m])) > 50
           for: 5m

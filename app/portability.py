@@ -5,9 +5,10 @@ Not included, because they belong to this installation: the AI run log, reposito
 """
 import json
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterator, List, Tuple
 
-from fastapi import APIRouter, Body, HTTPException, Request, Response
+from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 from . import db, embeddings, history, parsing, pipeline
 from .profiles import PLATFORMS
@@ -26,28 +27,49 @@ class ArchiveError(ValueError):
 
 # ---- export ---------------------------------------------------------------
 
-def build(pid: str) -> Dict[str, Any]:
+def _documents(pid: str) -> Iterator[Dict[str, Any]]:
+    """The project's documents in upload order, read a few at a time: a project with a thousand BRDs does not fit in memory as one list."""
+    ids = [r["id"] for r in db.rows("SELECT id FROM documents WHERE project_id=%s ORDER BY created, id", (pid,))]
+    for i in range(0, len(ids), 20):
+        batch = {r["id"]: r for r in db.rows("SELECT id, filename, text, created, source, path FROM documents WHERE id = ANY(%s)", (ids[i:i + 20],))}
+        for did in ids[i:i + 20]:
+            if did in batch:
+                yield {k: batch[did][k] for k in ("filename", "text", "created", "source", "path")}
+
+
+def stream(pid: str) -> Tuple[str, Iterator[str]]:
+    """(project name, the archive as JSON text in pieces). Exporting a 167 MB project used to peak at 5x that in memory (dict, string and
+    response body at once); streamed, only a few documents are held at a time."""
     project = db.one("SELECT name, platform, description FROM projects WHERE id=%s", (pid,))
     if not project:
         raise HTTPException(404, "Project not found")
+    dump = lambda value: json.dumps(value, default=str)  # noqa: E731
     items = lambda table: [{"id": r["id"], "seq": r["seq"], "status": r["status"], "data": r["data"]}  # noqa: E731
                            for r in db.rows("SELECT id, seq, status, data FROM %s WHERE project_id=%%s ORDER BY seq" % table, (pid,))]
-    return {
-        "format": FORMAT, "version": VERSION, "exported_at": db.now(), "project": dict(project),
-        "documents": db.rows("SELECT filename, text, created, source, path FROM documents WHERE project_id=%s ORDER BY created, id", (pid,)),
-        "requirements": items("requirements"), "stories": items("stories"),
-        "baselines": db.rows("SELECT version, name, note, scope, actor, snapshot, created FROM baselines WHERE project_id=%s ORDER BY version", (pid,)),
-        "comments": db.rows("SELECT item_type, item_id, author, body, resolved, resolved_by, created FROM comments WHERE project_id=%s ORDER BY created, id", (pid,)),
-        "history": db.rows("SELECT item_type, item_id, item_key, action, actor, summary, changes, created FROM history WHERE project_id=%s ORDER BY n", (pid,)),
-    }
+    rest = (
+        ("requirements", lambda: items("requirements")), ("stories", lambda: items("stories")),
+        ("baselines", lambda: db.rows("SELECT version, name, note, scope, actor, snapshot, created FROM baselines WHERE project_id=%s ORDER BY version", (pid,))),
+        ("comments", lambda: db.rows("SELECT item_type, item_id, author, body, resolved, resolved_by, created FROM comments WHERE project_id=%s ORDER BY created, id", (pid,))),
+        ("history", lambda: db.rows("SELECT item_type, item_id, item_key, action, actor, summary, changes, created FROM history WHERE project_id=%s ORDER BY n", (pid,))),
+    )
+
+    def pieces() -> Iterator[str]:
+        yield '{"format": %s, "version": %d, "exported_at": %s, "project": %s, "documents": [' % (dump(FORMAT), VERSION, dump(db.now()), dump(dict(project)))
+        for n, doc in enumerate(_documents(pid)):
+            yield ("" if n == 0 else ", ") + dump(doc)
+        yield "]"
+        for key, load in rest:
+            yield ', "%s": %s' % (key, dump(load()))
+        yield "}"
+
+    return project["name"], pieces()
 
 
 @router.get("/api/projects/{pid}/archive.json")
 def export_archive(pid: str):
-    archive = build(pid)
-    slug = "".join(ch if ch.isalnum() else "-" for ch in archive["project"]["name"].lower()).strip("-") or "project"
-    return Response(json.dumps(archive, default=str), media_type="application/json",
-                    headers={"Content-Disposition": 'attachment; filename="%s-archive.json"' % slug})
+    name, pieces = stream(pid)
+    slug = "".join(ch if ch.isalnum() else "-" for ch in name.lower()).strip("-") or "project"
+    return StreamingResponse(pieces, media_type="application/json", headers={"Content-Disposition": 'attachment; filename="%s-archive.json"' % slug})
 
 
 # ---- import ---------------------------------------------------------------

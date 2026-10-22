@@ -877,3 +877,26 @@ def test_viewers_can_search_the_brds_and_comment_but_nothing_else(client, monkey
                        ("/runs", {"stage": "requirements"}), ("/baselines", {"name": "x"}), ("/requirements/bulk", {"ids": [req["id"]], "status": "approved"})):
         assert client.post(base + path, json=body, auth=vera).status_code == 403, path
     assert client.patch(base + "/requirements/" + req["id"], json={"status": "approved"}, auth=vera).status_code == 403
+
+
+def test_an_extraction_that_is_over_the_limit_is_refused_up_front_not_started_and_failed(client):
+    pid = _project_for_estimates(client)  # one document, three sections
+    client.put("/api/admin/settings", json={"max_chunks_per_run": 2})
+    r = client.post("/api/projects/%s/runs" % pid, json={"stage": "requirements", "scope": "all"})
+    assert r.status_code == 400 and "3 sections" in r.json()["detail"] and "limit of 2" in r.json()["detail"], r.text
+    assert client.get("/api/projects/%s/runs" % pid).json() == [], "no run row is created for a request that can never succeed"
+    client.put("/api/admin/settings", json={"max_chunks_per_run": 3})
+    assert client.post("/api/projects/%s/runs" % pid, json={"stage": "requirements", "scope": "all"}).status_code == 202
+
+
+def test_listing_documents_counts_chunks_per_document_and_the_lookup_is_indexed(client):
+    from app import db
+    pid = client.post("/api/projects", json={"name": "Many", "platform": "generic"}).json()["id"]
+    api = "/api/projects/%s" % pid
+    client.post(api + "/documents/text", json={"name": "one.md", "text": "# A\nThe system shall do a thing for the buyer."})
+    client.post(api + "/documents/text", json={"name": "two.md", "text": "# A\nThe system shall do one.\n\n# B\nThe system shall do two."})
+    docs = {d["filename"]: d for d in client.get(api + "/documents").json()}
+    assert docs["one.md"]["chunks"] >= 1 and docs["two.md"]["chunks"] >= 1 and docs["one.md"]["chars"] > 0
+    # the per-document count and the cascade on delete look chunks up by document: without this index each is a scan of every chunk
+    defs = [r["indexdef"] for r in db.rows("SELECT indexdef FROM pg_indexes WHERE tablename = 'chunks'")]
+    assert any(d.endswith("(document_id)") for d in defs), "chunks needs an index on document_id: %s" % defs
