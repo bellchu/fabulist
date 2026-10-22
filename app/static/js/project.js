@@ -135,10 +135,17 @@ function runPanel(stage) {
   const whichOptions = [];
   if (fresh > 0) whichOptions.push(["new", "New BRDs only (" + fresh + "): adds to your requirements"]);
   if (ctx.project.requirements > 0 || fresh === 0) whichOptions.push(["reset", "All BRDs: start over (replaces requirements)"]);
-  const which = isReq && !readOnly() && ctx.project.documents > 0 ? select(whichOptions, whichOptions[0][0], { "aria-label": "BRDs to read" }) : null;
+  // Which requirements a story run writes for: the ones no story covers yet (added to the stories that exist), or all of them starting over.
+  const uncovered = isReq ? 0 : ctx.project.requirements_uncovered;
+  const storyOptions = [];
+  if (uncovered > 0) storyOptions.push(["uncovered", "Requirements without stories (" + uncovered + "): adds stories"]);
+  if (ctx.project.stories > 0 || uncovered === 0) storyOptions.push(["all", "All requirements: start over (replaces stories)"]);
+  const which = readOnly() ? null
+    : isReq && ctx.project.documents > 0 ? select(whichOptions, whichOptions[0][0], { "aria-label": "BRDs to read" })
+    : !isReq && ctx.project.requirements > 0 ? select(storyOptions, storyOptions[0][0], { "aria-label": "Requirements to write stories for" }) : null;
   const mode = () => (which ? which.value : "all");
   const verb = () => (running ? "Running…" : queued ? "Queued…" : isReq ? (mode() === "new" ? "Extract new BRDs" : ctx.project.requirements ? "Re-extract" : "Extract")
-    : (ctx.project.stories ? "Regenerate" : "Generate"));
+    : (mode() === "uncovered" ? "Generate for new requirements" : ctx.project.stories ? "Regenerate" : "Generate"));
   const startLabel = h("span", {}, verb());
   if (which) which.addEventListener("change", () => { startLabel.textContent = verb(); });
   // Say why a run cannot start instead of failing after the click.
@@ -146,7 +153,7 @@ function runPanel(stage) {
     : (ctx.project.requirements === 0 ? "Extract or add requirements first." : "");
   const start = guard(async () => {
     // Say what the run will ask of the AI provider before it does: a big project means many requests, hours and real cost.
-    const est = await api.get(base() + "/runs/estimate?stage=" + stage + "&scope=" + (isReq ? "all" : scope.value) + "&documents=" + mode());
+    const est = await api.get(base() + "/runs/estimate?stage=" + stage + "&scope=" + (isReq ? "all" : scope.value) + (isReq ? "&documents=" : "&stories_for=") + mode());
     if (est.over_limit) {
       modal({ title: "Too large for one run",
         body: h("p", {}, est.too_big ? est.too_big : "This run needs " + est.requests + " AI requests, above the limit of " + est.limit + ". "
@@ -154,21 +161,25 @@ function runPanel(stage) {
             : "Raise “Max sections per run” in Admin → Generation settings" + (isReq ? ", or split the documents." : ", or generate from approved requirements only (choose it next to the button)."))), actions: [] });
       return;
     }
+    const addingStories = !isReq && mode() === "uncovered";
     const adding = isReq && mode() === "new", batched = isReq && mode() !== "all";
     const total = adding ? est.new_documents : est.batch_documents + est.remaining_documents;
-    const batch = batched ? "This run reads " + est.batch_documents + " of the " + total + (adding ? " new" : "") + " BRD" + (total === 1 ? "" : "s") + " ("
+    const storyBatch = addingStories ? "This run writes stories for " + est.batch_requirements + " of the " + (est.batch_requirements + est.remaining_requirements) + " requirements without a story ("
+      + est.requests + " feature-area group" + (est.requests === 1 ? "" : "s") + ")" + (est.remaining_requirements ? "; " + est.remaining_requirements + " more will be left for the next run" : "")
+      + ". Your existing stories are not changed. " : "";
+    const batch = addingStories ? storyBatch : batched ? "This run reads " + est.batch_documents + " of the " + total + (adding ? " new" : "") + " BRD" + (total === 1 ? "" : "s") + " ("
       + est.requests + " sections)" + (est.remaining_documents ? "; " + est.remaining_documents + " more will be left for the next run" : "") + ". "
       + (adding ? "Your existing requirements are not changed. " : "") : "";
     const big = est.requests >= LARGE_RUN;
     const cost = big ? "This run will make about " + est.requests + " AI requests"
       + (est.seconds ? " (roughly " + (est.seconds >= 90 ? Math.round(est.seconds / 60) + " minutes" : est.seconds + " seconds") + (est.tokens ? " and " + fmt(est.tokens) + " tokens" : "") + ")" : "")
       + ". " + est.basis + " " : "";
-    const hasData = !adding && (isReq ? ctx.project.requirements > 0 || ctx.project.stories > 0 : ctx.project.stories > 0);
+    const hasData = !adding && !addingStories && (isReq ? ctx.project.requirements > 0 || ctx.project.stories > 0 : ctx.project.stories > 0);
     const replace = hasData ? (isReq ? "Re-extracting replaces all requirements and the current backlog, including your edits."
       : "Regenerating replaces the current stories, including your edits.") : "";
     if ((big || hasData) && !(await confirmBox((batch + cost + replace).trim() + (big && !hasData ? " Continue?" : ""),
       { okLabel: hasData ? (isReq ? "Re-extract" : "Regenerate") : (isReq ? "Extract" : "Generate"), danger: hasData }))) return;
-    await api.post(base() + "/runs", { stage, scope: scope.value, documents: mode() });
+    await api.post(base() + "/runs", { stage, scope: scope.value, documents: isReq ? mode() : "all", stories_for: isReq ? "all" : mode() });
     toast(isReq ? "Extraction started" : "Story generation started");
     rerender();
   });
