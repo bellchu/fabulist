@@ -100,3 +100,21 @@ def test_a_run_marked_stuck_is_reported_too(client, monkeypatch):
     _wait_for(sent, 2)
     stuck = [s for s in sent if s[1]["run"]["id"] == hung]
     assert len(stuck) == 1 and stuck[0][1]["run"]["status"] == "failed" and "stuck" in stuck[0][1]["run"]["error"]
+
+
+def test_stuck_runs_are_found_without_anyone_starting_another_run(client, monkeypatch):
+    """The sweeper (a background task, once a minute) marks hung runs in every project and reports them."""
+    from app import config, db, workspace
+    from tests.test_api import _running_run
+    sent = _capture(monkeypatch)
+    monkeypatch.setattr(config, "STALE_RUN_MINUTES", 15)
+    client.post("/api/admin/integrations", json=dict(HOOK, notify_runs=True))
+    pids = [client.post("/api/projects", json={"name": "Hung %d" % i, "platform": "generic"}).json()["id"] for i in range(2)]
+    hung = [_running_run(p, updated_minutes_ago=2) for p in pids]
+    db.execute("UPDATE runs SET updated=%s WHERE id = ANY(%s)", ("2000-01-01T00:00:00.000+00:00", hung))
+    live = _running_run(client.post("/api/projects", json={"name": "Fine", "platform": "generic"}).json()["id"], updated_minutes_ago=1)
+    assert workspace.recover_all_stuck_runs() == 2
+    _wait_for(sent, 2)
+    assert sorted(s[1]["run"]["id"] for s in sent) == sorted(hung)
+    assert db.one("SELECT status FROM runs WHERE id=%s", (live,))["status"] == "running", "a run that is making progress is left alone"
+    assert workspace.recover_all_stuck_runs() == 0

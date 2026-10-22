@@ -609,16 +609,23 @@ def estimate_run(pid: str, stage: str, scope: str = "all", documents: str = "all
                  "over_limit": requests > int(opts["max_chunks_per_run"]), "seconds": seconds, "tokens": tokens, "basis": basis}, **extra)
 
 
-def _recover_stuck_runs(pid: str) -> None:
+def recover_all_stuck_runs() -> int:
+    """The same recovery for every project (the background sweeper); returns how many runs were marked."""
+    return _recover_stuck_runs(None)
+
+
+def _recover_stuck_runs(pid: Optional[str]) -> int:
     """A run whose AI provider stopped answering would block its project until a restart. One with no progress for
     STALE_RUN_MINUTES is marked failed (and asked to stop), so a new run can start; if its thread ever wakes up it will
     find it is no longer running and write nothing."""
     cutoff = _stale_cutoff()
-    for r in db.rows("UPDATE runs SET status='failed', cancel_requested=TRUE, progress='', error=%s "
-                     "WHERE project_id=%s AND status='running' AND coalesce(updated, created) < %s RETURNING id, stage",
-                     ("Marked as stuck: no progress for %d minutes. The AI provider may have stopped responding; start a new run." % config.STALE_RUN_MINUTES, pid, cutoff)):
+    marked = db.rows("UPDATE runs SET status='failed', cancel_requested=TRUE, progress='', error=%s "
+                     "WHERE (%s::text IS NULL OR project_id=%s) AND status='running' AND coalesce(updated, created) < %s RETURNING id, stage",
+                     ("Marked as stuck: no progress for %d minutes. The AI provider may have stopped responding; start a new run." % config.STALE_RUN_MINUTES, pid, pid, cutoff))
+    for r in marked:
         metrics.inc("fabulist_runs_total", stage=r["stage"], status="failed")
         integrations.announce_run(r["id"])
+    return len(marked)
 
 
 @router.post("/api/projects/{pid}/runs", status_code=202)

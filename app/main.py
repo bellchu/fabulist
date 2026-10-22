@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import secrets
@@ -37,13 +38,29 @@ def recover_runs_after_restart() -> None:
     workspace.resume_waiting_runs()
 
 
+SWEEP_SECONDS = 60
+
+
+async def sweep_stuck_runs() -> None:
+    """A hung AI call is otherwise only noticed when someone starts another run in that project: look every minute, so the run is failed,
+    its slot is freed and the people who asked to be told are told."""
+    while True:
+        await asyncio.sleep(SWEEP_SECONDS)
+        try:
+            await run_in_threadpool(workspace.recover_all_stuck_runs)
+        except Exception:  # noqa: BLE001 - a database blip must not end the sweeper
+            log.warning("stuck-run sweep failed", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     db.init()
     settings.seed()
     taxonomy.seed()
     recover_runs_after_restart()
+    sweeper = asyncio.create_task(sweep_stuck_runs())
     yield
+    sweeper.cancel()
     workspace.shutdown_runs()
     db.close()
 

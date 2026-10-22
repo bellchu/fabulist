@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Hung runs are now found by a once-a-minute sweeper instead of only when someone starts another run in the same project: a run with no progress for `STALE_RUN_MINUTES` is failed, its slot is freed, and opted-in webhooks hear about it. Test: `tests/test_run_notifications.py`.
 - A run that is marked stuck (no progress for `STALE_RUN_MINUTES`) is reported to opted-in webhooks as `run.finished` with status `failed` and the "stuck" error, like any other failed run. (It is noticed when someone starts another run in that project.)
 - **Run notifications.** An AI run takes minutes to hours and nothing told anyone it had finished. A webhook integration can now opt in ("Also tell this webhook when an AI run finishes") to a second event, `run.finished`: project, stage, status (done, failed, cancelled), number of items, the error if there was one, who started it, tokens and duration, with the same delivery id, timestamp and signature headers as backlog pushes. Delivery is on its own thread with the existing retries, so a slow or broken receiver never holds a run slot or fails a run (it is logged). Webhooks that did not opt in, and every tracker, hear nothing new. Tests: `tests/test_run_notifications.py`.
 - Dependencies: fastapi 0.143.2 to 0.148.0, starlette 1.8.0 to 1.9.0, pyflakes 3.2.0 to 4.0.3 (Dependabot's first three proposals, taken together because fastapi and starlette move in step). Quality gate, browser suite and image scan pass on the cluster.
