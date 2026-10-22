@@ -248,6 +248,7 @@ in-cluster on first deploy. They are never stored in the repository.
   guard). The clone connects to the address that passed the check (no second DNS lookup) and never follows HTTP redirects, so a public host cannot bounce it to an internal one. Git runs with file and ssh protocols disabled, and tokens are passed via the
   environment, not process arguments.
 - Personal identifiers are masked before text is sent to external AI providers (configurable).
+- **Keep the origin behind your proxy.** Throttling and the rate limit tell clients apart by address, taken from `CF-Connecting-IP` behind Cloudflare (`TRUST_CF_CONNECTING_IP`) or from `X-Forwarded-For` (`TRUSTED_PROXY_HOPS`). Those headers are only as trustworthy as the path: if the ingress also answers requests that did not come through the proxy, a client can send its own and dodge the per-address limits (per-user limits and sign-in itself are not affected). Check from outside with `curl -H 'Host: <your host>' https://<origin address>/healthz`: a `200` means the origin is directly reachable. Fix it at the edge, not in the app: allow only Cloudflare's published address ranges to reach the ingress (firewall or ingress allow-list), or use authenticated origin pulls.
 
 ## Operations
 
