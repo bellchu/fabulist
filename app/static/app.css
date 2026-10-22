@@ -27,6 +27,19 @@
     color-scheme: dark;
   }
 }
+/* The same colours for an explicit choice on the Account page (the block above is for "follow my system"). tests/test_theme.py keeps them equal. */
+:root[data-theme="dark"] {
+  --bg: #161616; --surface: #222222; --surface-2: #2a2a2a; --sunken: #1b1b1b;
+  --text: #eeeeee; --text-2: #c9c9c9; --text-3: #a0a0a0;
+  --border: #3a3a3a; --border-strong: #4d4d4d;
+  --accent: #1b96ff; --accent-hover: #78b0fd; --accent-soft: #0b2b4f; --accent-text: #aacbff; --on-accent: #00172e; /* white on #1b96ff is only 3:1 */
+  --green: #45c65a; --green-soft: #0e2a15; --amber: #fe9339; --amber-soft: #3a2205;
+  --red: #fe5c4c; --red-soft: #3e0c08; --blue: #1b96ff; --blue-soft: #0b2b4f;
+  --violet: #9a9cf7; --violet-soft: #1e1f45; --neutral-soft: #333333;
+  --path-done: #2e844a; --path-current: #1b96ff; --path-todo: #333333; --path-todo-hover: #454545;
+  --shadow: none; --shadow-lg: 0 12px 32px rgba(0,0,0,.6);
+  color-scheme: dark;
+}
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
