@@ -5,11 +5,13 @@
 
 Run with scripts/load-test-k8s.sh. Exit status is non-zero when a budget below is missed."""
 import io
+import json
 import os
 import statistics
 import sys
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
 
@@ -20,6 +22,7 @@ BRDS_EACH = int(os.environ.get("BRDS_EACH", 20))
 VOLUME_BRDS = int(os.environ.get("VOLUME_BRDS", 1100))
 BRD_KB = int(os.environ.get("BRD_KB", 30))
 VOLUME_KB = int(os.environ.get("VOLUME_KB", 10))
+LLM_LATENCY = float(os.environ.get("LLM_LATENCY", 0.25))  # seconds the fake AI provider takes per request (a real one takes 5-60 s)
 budget_misses = []
 METRICS_TOKEN = os.environ.get("METRICS_TOKEN", "")
 
@@ -92,12 +95,20 @@ def timed(client, timings, label, method, url, **kw):
         return None
 
 
-def monitor(stop, timings):
-    """What a bystander experiences while the others work: a health probe and an ordinary read every half second."""
+def monitor(stop, timings, runs=None):
+    """What a bystander experiences while the others work: a health probe and an ordinary read every half second. With `runs`, also
+    samples how many AI runs are running and queued (from the app's own gauges)."""
     with httpx.Client(base_url=BASE, headers=H, timeout=15) as c:
         while not stop.is_set():
             timed(c, timings, "bystander /healthz", "GET", "/healthz")
             timed(c, timings, "bystander GET projects", "GET", "/api/projects")
+            if runs is not None:
+                try:
+                    text = c.get("/metrics", headers={"Authorization": "Bearer " + METRICS_TOKEN}).text
+                    get = lambda name: int(next(line.split()[1] for line in text.splitlines() if line.startswith(name + " ")))  # noqa: E731
+                    runs.append((get("fabulist_running_runs"), get("fabulist_queued_runs")))
+                except Exception:  # noqa: BLE001
+                    pass
             time.sleep(0.5)
 
 
@@ -133,17 +144,19 @@ def burst():
                 for name, data in files:
                     timed(c, timings, "upload BRD", "POST", f"/api/projects/{pid}/documents", files={"file": (name, data, "application/octet-stream")})
                 uploaded = time.time() - started
-                retries = 0
+                retries, submitted = 0, time.time()
                 while True:
                     r = timed(c, timings, "start extraction", "POST", f"/api/projects/{pid}/runs", json={"stage": "requirements", "scope": "all"})
                     if r is not None and r.status_code == 202:
                         break
-                    retries += 1
-                    time.sleep(3)  # the real Retry-After is 60 s; shortened so the test finishes
-                waited = time.time() - started - uploaded
+                    retries += 1  # only a full queue (429) sends anyone away
+                    time.sleep(3)
+                waited = 0.0
                 while True:
                     runs = c.get(f"/api/projects/{pid}/runs").json()
-                    if runs and runs[0]["status"] != "running":
+                    if runs and runs[0]["status"] == "queued":
+                        waited = time.time() - submitted
+                    if runs and runs[0]["status"] not in ("running", "queued"):
                         break
                     time.sleep(1)
                 results[i] = dict(pid=pid, uploaded=uploaded, retries=retries, waited_for_slot=waited, total=time.time() - started, status=runs[0]["status"], items=runs[0]["item_count"])
@@ -174,8 +187,8 @@ def burst():
     print()
     bystander.report()
     ups = [r["uploaded"] for r in results.values()]
-    print("\nper requester: uploads of %d BRDs took %.0f-%.0f s (median %.0f s); extraction waited for a slot %.0f-%.0f s; retries total %d" % (
-        BRDS_EACH, min(ups), max(ups), statistics.median(ups), min(r["waited_for_slot"] for r in results.values()), max(r["waited_for_slot"] for r in results.values()),
+    print("\nper requester: uploads of %d BRDs took %.0f-%.0f s (median %.0f s); extraction queued for a slot up to %.0f s (min %.0f s); turned away (429) %d times" % (
+        BRDS_EACH, min(ups), max(ups), statistics.median(ups), max(r["waited_for_slot"] for r in results.values()), min(r["waited_for_slot"] for r in results.values()),
         sum(r["retries"] for r in results.values())))
     outcome = {}
     for r in results.values():
@@ -199,6 +212,101 @@ def burst():
     budget(set(bystander.status.get("bystander /healthz", {})) <= {200}, "no health probe failed %s" % bystander.status.get("bystander /healthz"))
     _, peak, limit = memory("after the burst")
     budget(limit == 0 or peak < limit * 0.85, "memory peak stayed under 85%% of the container limit (peak %d MiB of %d MiB)" % (peak, limit))
+
+
+class FakeAI(BaseHTTPRequestHandler):
+    """An OpenAI-compatible endpoint that answers every request, after a delay."""
+    served, lock = 0, threading.Lock()
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        time.sleep(LLM_LATENCY)
+        with FakeAI.lock:
+            FakeAI.served += 1
+        reply = json.dumps([{"statement": "The system shall record every change with the user and time.", "type": "functional", "actors": ["Auditor"]}])
+        body = json.dumps({"choices": [{"message": {"content": reply}}], "usage": {"prompt_tokens": 40, "completion_tokens": 20}}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+def slowai():
+    """20 requesters each submit BRDs and start extraction with an AI provider that takes LLM_LATENCY per request: how the 4-slot pool and the
+    queue behave when runs are not instant."""
+    brds = int(os.environ.get("SLOW_BRDS_EACH", 2))
+    print("\n== slow AI: %d requesters x %d BRDs, provider latency %.2f s per request" % (REQUESTERS, brds, LLM_LATENCY))
+    server = ThreadingHTTPServer(("127.0.0.1", 9100), FakeAI)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    with httpx.Client(base_url=BASE, headers=H, timeout=30) as c:
+        c.put("/api/admin/settings", json={"max_chunks_per_run": 2000})
+        prov = c.post("/api/admin/providers", json={"name": "Fake AI", "kind": "openai", "base_url": "http://127.0.0.1:9100/v1", "model": "m", "api_key": "k"}).json()["id"]
+        c.post(f"/api/admin/providers/{prov}/default", json={})
+    timings, bystander, stop = Timings(), Timings(), threading.Event()
+    results, errors, barrier, samples = {}, [], threading.Barrier(REQUESTERS + 1), []
+
+    def requester(i):
+        try:
+            with httpx.Client(base_url=BASE, headers=H, timeout=120) as c:
+                pid = c.post("/api/projects", json={"name": "Slow %02d" % i, "platform": "generic"}).json()["id"]
+                for k in range(brds):
+                    c.post(f"/api/projects/{pid}/documents/text", json={"name": "brd-%d" % k, "text": brd_text("S%02d-%d" % (i, k), BRD_KB)})
+                barrier.wait()
+                t0 = time.time()
+                r = timed(c, timings, "start extraction", "POST", f"/api/projects/{pid}/runs", json={"stage": "requirements", "scope": "all"})
+                first = r.json()["status"] if r is not None and r.status_code == 202 else "refused"
+                start = None
+                while True:
+                    run = c.get(f"/api/projects/{pid}/runs").json()[0]
+                    if run["status"] == "running" and start is None:
+                        start = time.time()
+                    if run["status"] not in ("running", "queued"):
+                        break
+                    time.sleep(0.5)
+                results[i] = dict(first=first, queued_for=(start or time.time()) - t0, ran_for=time.time() - (start or t0), total=time.time() - t0,
+                                  status=run["status"], items=run["item_count"], requests=run.get("requests") or 0)
+        except Exception as exc:  # noqa: BLE001
+            errors.append("requester %d: %r" % (i, exc))
+            barrier.abort()
+
+    threads = [threading.Thread(target=requester, args=(i,)) for i in range(REQUESTERS)]
+    mon = threading.Thread(target=monitor, args=(stop, bystander, samples))
+    mon.start()
+    [t.start() for t in threads]
+    try:
+        barrier.wait()
+    except threading.BrokenBarrierError:
+        pass
+    t0 = time.time()
+    [t.join() for t in threads]
+    stop.set()
+    mon.join()
+    wall = time.time() - t0
+    total_requests = sum(r["requests"] for r in results.values())
+    print("all %d runs finished %.0f s after the burst; the provider served %d requests (%.1f requests/s with %d run slots)" % (len(results), wall, FakeAI.served, FakeAI.served / wall, 4))
+    waits = sorted(r["queued_for"] for r in results.values())
+    print("time waiting in the queue: min %.0f s, median %.0f s, max %.0f s; first answers: %s" % (waits[0], statistics.median(waits), waits[-1],
+          {k: sum(1 for r in results.values() if r["first"] == k) for k in ("running", "queued", "refused")}))
+    print("run durations once started: median %.0f s, max %.0f s" % (statistics.median(r["ran_for"] for r in results.values()), max(r["ran_for"] for r in results.values())))
+    peak_running, peak_queued = max((r for r, _ in samples), default=0), max((q for _, q in samples), default=0)
+    print("sampled every 0.5 s: at most %d runs running at once, up to %d waiting in the queue" % (peak_running, peak_queued))
+    timings.report()
+    print()
+    bystander.report()
+    server.shutdown()
+    print("budgets:")
+    budget(peak_running <= 4, "never more than 4 runs running at once (peak %d)" % peak_running)
+    budget(peak_queued >= REQUESTERS - 4 - 1, "the rest waited in the queue (peak %d waiting of %d requesters)" % (peak_queued, REQUESTERS))
+    budget(not errors, "no requester crashed %s" % errors[:2])
+    budget(len(results) == REQUESTERS and all(r["status"] == "done" and r["items"] > 0 for r in results.values()), "every run finished with requirements")
+    budget(all(r["first"] in ("running", "queued") for r in results.values()), "nobody was turned away: every start was accepted (running or queued)")
+    budget(sum(1 for r in results.values() if r["first"] == "running") == 4, "exactly 4 starts were answered 'running', the other %d 'queued'" % (REQUESTERS - 4))
+    budget(total_requests == FakeAI.served, "every AI request a run made reached the provider exactly once (%d recorded, %d served)" % (total_requests, FakeAI.served))
+    budget(max(bystander.lat.get("bystander /healthz", [99])) < 5, "the health probe stayed responsive while 20 runs worked and queued")
 
 
 def volume():
@@ -280,8 +388,8 @@ def volume():
 
 
 if __name__ == "__main__":
-    which = sys.argv[1:] or ["burst", "volume"]
+    which = sys.argv[1:] or ["burst", "slowai", "volume"]
     for name in which:
-        {"burst": burst, "volume": volume}[name]()
+        {"burst": burst, "slowai": slowai, "volume": volume}[name]()
     print("\n%s" % ("LOAD TEST OK" if not budget_misses else "LOAD TEST: %d budget(s) missed: %s" % (len(budget_misses), budget_misses)))
     sys.exit(1 if budget_misses else 0)

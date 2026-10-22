@@ -335,6 +335,7 @@ def _run_stage(run_id: str, pid: str, stage: str, provider_id: str, scope: str, 
                    "WHERE id=%s AND status='running'", (msg[:500], usage["in"], usage["out"], int((time.monotonic() - started) * 1000), run_id))
 
 
+_ADMISSION_LOCK = 7_240_001  # arbitrary application key for pg_advisory_xact_lock: serialises run admission across requests
 _pool_lock = threading.Lock()
 _pool: Optional[Tuple[int, ThreadPoolExecutor]] = None
 
@@ -432,21 +433,25 @@ def start_run(pid: str, body: RunIn, request: Request):
                             ("Too many requirement groups (%d) for one run (limit %d). Raise 'Max sections per run' in Admin > Generation settings, "
                              "or generate from approved requirements only." % (needed, limit)))
     _recover_stuck_runs(pid)
-    if db.one("SELECT 1 AS x FROM runs WHERE project_id=%s AND status IN ('running', 'queued')", (pid,)):
-        raise HTTPException(409, "A run is already in progress for this project")
-    busy = db.one("SELECT count(*) AS n FROM runs WHERE status='running' AND coalesce(updated, created) >= %s", (_stale_cutoff(),))["n"]
-    waiting = db.one("SELECT count(*) AS n FROM runs WHERE status='queued'")["n"]
-    # Runs that stopped making progress do not count as busy: they are recovered above. A full pool queues the run instead of turning
-    # people away (with a real AI provider a run takes minutes to hours, so "try again later" is no answer); the queue itself is bounded.
-    status = "running" if busy < config.MAX_CONCURRENT_RUNS else "queued"
-    if status == "queued" and waiting >= config.MAX_QUEUED_RUNS:
-        metrics.inc("fabulist_runs_total", stage=body.stage, status="rejected")
-        raise HTTPException(429, "%d AI runs are in progress and the queue is full (%d waiting). Try again in a few minutes." % (busy, waiting),
-                            headers={"Retry-After": "60"})
     rid = db.new_id()
-    db.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, actor, created) "
-               "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-               (rid, pid, status, body.stage, profile["name"], profile["model"], history.actor(request), db.now()))
+    # Admission is one atomic step under a database lock: twenty people starting at the same instant must not all see "a free slot"
+    # (each count would be taken before any of the others had inserted its row, labelling waiting runs "running").
+    with db.conn() as c:
+        c.execute("SELECT pg_advisory_xact_lock(%s)", (_ADMISSION_LOCK,))
+        if c.execute("SELECT 1 AS x FROM runs WHERE project_id=%s AND status IN ('running', 'queued')", (pid,)).fetchone():
+            raise HTTPException(409, "A run is already in progress for this project")
+        busy = c.execute("SELECT count(*) AS n FROM runs WHERE status='running' AND coalesce(updated, created) >= %s", (_stale_cutoff(),)).fetchone()["n"]
+        waiting = c.execute("SELECT count(*) AS n FROM runs WHERE status='queued'").fetchone()["n"]
+        # Runs that stopped making progress do not count as busy (recovered above). A full pool queues the run instead of turning people
+        # away (with a real AI provider a run takes minutes to hours, so "try again later" is no answer); the queue itself is bounded, and
+        # first come, first served: nobody jumps ahead of a run that is already waiting.
+        status = "running" if busy < config.MAX_CONCURRENT_RUNS and not waiting else "queued"
+        if status == "queued" and waiting >= config.MAX_QUEUED_RUNS:
+            metrics.inc("fabulist_runs_total", stage=body.stage, status="rejected")
+            raise HTTPException(429, "%d AI runs are in progress and the queue is full (%d waiting). Try again in a few minutes." % (busy, waiting),
+                                headers={"Retry-After": "60"})
+        c.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, actor, created) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                  (rid, pid, status, body.stage, profile["name"], profile["model"], history.actor(request), db.now()))
     _run_pool().submit(_execute_run, rid, pid, body.stage, profile["id"], body.scope)
     return {"id": rid, "status": status}
 

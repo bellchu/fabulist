@@ -769,6 +769,35 @@ def test_ai_runs_use_their_own_bounded_pool_and_extra_runs_wait_in_a_queue(clien
     _wait(client, pids[3])
 
 
+def test_many_simultaneous_starts_never_label_more_runs_running_than_there_are_slots(client, monkeypatch):
+    import threading
+    from app import config, db, pipeline
+    monkeypatch.setattr(config, "MAX_CONCURRENT_RUNS", 3)
+    release = threading.Event()
+    monkeypatch.setattr(pipeline, "extract_requirements", lambda *a, **k: (release.wait(20), [{"statement": "The system shall export invoices to CSV.", "type": "functional"}])[1])
+    pids = []
+    for i in range(12):
+        pid = client.post("/api/projects", json={"name": "Race %d" % i, "platform": "generic"}).json()["id"]
+        client.post("/api/projects/%s/documents/text" % pid, json={"name": "brd.md", "text": "# A\nThe system shall do a."})
+        pids.append(pid)
+    answers, gate = [], threading.Barrier(len(pids))
+
+    def start(pid):
+        gate.wait()  # all twelve at the same instant
+        answers.append(client.post("/api/projects/%s/runs" % pid, json={"stage": "requirements"}).json()["status"])
+    try:
+        threads = [threading.Thread(target=start, args=(p,)) for p in pids]
+        [t.start() for t in threads]
+        [t.join(30) for t in threads]
+        assert sorted(answers) == ["queued"] * 9 + ["running"] * 3, answers
+        counts = {r["status"]: r["n"] for r in db.rows("SELECT status, count(*) AS n FROM runs GROUP BY status")}
+        assert counts == {"running": 3, "queued": 9}, "the database agrees: only as many 'running' as there are slots (%s)" % counts
+    finally:
+        release.set()
+    for p in pids:
+        assert _wait(client, p)["status"] == "done"
+
+
 def test_a_queued_run_can_be_cancelled_before_it_starts_and_never_runs(client, monkeypatch):
     import threading
     from app import config, pipeline
