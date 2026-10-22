@@ -325,3 +325,23 @@ def test_a_reply_that_is_not_json_is_asked_again_twice_before_the_run_gives_up(m
     monkeypatch.setattr(llm.httpx, "post", Fake([junk, junk, junk]))
     with pytest.raises(ValueError, match="did not return valid JSON"):
         pipeline._ask(OPENAI, OPTS, "sys", "prompt", {"in": 0, "out": 0})
+
+
+def test_retries_are_counted_by_reason_so_a_throttling_provider_is_visible(monkeypatch):
+    from app import metrics
+    metrics._counters.clear()
+    monkeypatch.setattr(llm, "_sleep", lambda s: None)
+    monkeypatch.setattr(llm.httpx, "post", Fake([(429, {"error": {"message": "slow"}}, {"Retry-After": "1"}), (503, {}), (500, {}), chat("ok")]))
+    assert llm.complete(OPENAI, "s", "u", OPTS)[0] == "ok"
+    counts = {dict(labels)["reason"]: v for (name, labels), v in metrics._counters.items() if name == "fabulist_llm_retries_total"}
+    assert counts == {"rate_limited": 1, "server_error": 2}, counts
+
+    def refuse(url, headers=None, json=None, timeout=None):
+        raise httpx.ConnectError("refused")
+    metrics._counters.clear()
+    monkeypatch.setattr(llm.config, "LLM_MAX_ATTEMPTS", 3)
+    monkeypatch.setattr(llm.httpx, "post", refuse)
+    with pytest.raises(llm.LLMError):
+        llm.complete(OPENAI, "s", "u", OPTS)
+    counts = {dict(labels)["reason"]: v for (name, labels), v in metrics._counters.items() if name == "fabulist_llm_retries_total"}
+    assert counts == {"unreachable": 2}, "two retries after the first failed attempt (the last attempt is a failure, not a retry): %s" % counts

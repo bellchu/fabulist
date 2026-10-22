@@ -53,6 +53,13 @@ spec:
           annotations:
             summary: Fabulist is using over 85% of its memory limit and will be killed (OOM) if it grows
             runbook: "README.md#runbook: look for very large projects or exports in progress, then raise the pod memory limit"
+        - alert: FabulistAIProviderThrottling
+          expr: sum(increase(fabulist_llm_retries_total{reason=~"rate_limited|server_error"}[15m])) > 100
+          for: 10m
+          labels: {severity: warning, team: fabulist}
+          annotations:
+            summary: The AI provider keeps rate-limiting or failing requests (runs still finish, but slowly)
+            runbook: "README.md#runbook: check the provider's status and quota; lower MAX_RUN_AI_CALLS or the AI requests in parallel per run"
         - alert: FabulistRunQueueBacklog
           expr: fabulist_queued_runs > 20
           for: 30m
@@ -597,6 +604,31 @@ data:
          "expr": "fabulist_queued_runs",
          "refId": "B",
          "legendFormat": "waiting for a slot"
+        }
+       ]
+      },
+      {
+       "type": "timeseries",
+       "title": "AI provider retries by reason (5 min)",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 0,
+        "y": 46,
+        "w": 24,
+        "h": 7
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "sum by (reason) (increase(fabulist_llm_retries_total[5m]))",
+         "refId": "A",
+         "legendFormat": "{{reason}}"
         }
        ]
       },

@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from . import config
+from . import config, metrics
 
 
 class LLMError(RuntimeError):
@@ -116,10 +116,13 @@ def _post(url: str, headers: dict, payload: dict, timeout: float) -> dict:
             return resp.json()
         except _Retryable as exc:
             last = str(exc)
+            reason = "rate_limited" if limited else "server_error"
         except httpx.HTTPError as exc:
             last = "cannot reach %s (%s): check the endpoint URL and network access" % (host, type(exc).__name__)
+            reason = "unreachable"
         _check_cancelled()  # the attempt that just failed may have been the one the user was waiting on
         if attempt < attempts - 1:
+            metrics.inc("fabulist_llm_retries_total", reason=reason)  # visible to operators even though the retry hides it from users
             wait = _backoff(attempt, asked)
             if limited:
                 _note_rate_limit(host, wait)

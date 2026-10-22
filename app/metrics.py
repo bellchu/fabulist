@@ -17,6 +17,7 @@ HELP = {
     "fabulist_auth_failures_total": ("counter", "Failed authentication attempts by kind (basic, token, throttled)."),
     "fabulist_edit_conflicts_total": ("counter", "Saves refused because the item changed since it was opened."),
     "fabulist_ai_busy_total": ("counter", "Interactive AI requests refused because too many were already in flight."),
+    "fabulist_llm_retries_total": ("counter", "AI provider requests that had to be repeated, by reason (rate_limited, server_error, unreachable)."),
     "fabulist_database_unavailable_total": ("counter", "Requests answered 503 because the database was unreachable."),
 }
 
