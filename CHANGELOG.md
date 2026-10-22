@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- The README cookbook's request sequence is now run as a test (`tests/test_cookbook_flow.py`): a personal API token takes a BRD through upload, extraction, bulk approval, story generation and Excel export.
 - README: an automation cookbook (create a project, upload a BRD, run, wait, approve, generate stories, export; how to treat 429 and 503). A test checks every route it names exists in the API description.
 - **The client address can no longer be chosen by the client.** Sign-in throttling per address and the new rate limit took the *left-most* `X-Forwarded-For` entry, which is whatever the client claimed: sending a different value with each request dodged the per-address throttle. One helper (`app/netaddr.py`) now returns Cloudflare's `CF-Connecting-IP` when `TRUST_CF_CONNECTING_IP` is on (the default, as before), else the entry `TRUSTED_PROXY_HOPS` (default 1) from the right, which is the address the nearest proxy saw, else the peer. Per-user throttling was never affected. If the origin can be reached without going through Cloudflare, set `TRUST_CF_CONNECTING_IP=0`. Tests: `tests/test_client_address.py`.
 - `scripts/ci-k8s.sh` takes `PYTEST_ARGS="tests/test_api.py -k name"` to run part of the suite and `REPEAT=N` to run it N times on the cluster, for chasing a test that fails now and then (the stuck-run test that failed once passed 30 of 30 runs on its own, so its cause is an interaction with other tests).
