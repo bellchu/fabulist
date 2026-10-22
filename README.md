@@ -243,6 +243,7 @@ in-cluster on first deploy. They are never stored in the repository.
   Fabulist's user list, so admins control access even with SSO.
 - HTTP Basic sign-in with named users and roles remains available for API clients and as
   break-glass access. Repeated failed sign-ins are throttled per user and per client address.
+  Named users change their own password on the **Account** page (`POST /api/me/password`: current password required, 12 characters minimum).
 - **API tokens** for automation: each named user can create personal tokens on the **Account** page
   (shown once, stored as a SHA-256 hash, 1-365 day lifetime, at most 20 each). Send
   `Authorization: Bearer fab_...`; the token acts with its owner's current role and stops working when it

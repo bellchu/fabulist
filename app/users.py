@@ -20,7 +20,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from . import audit, config, db
 
 _COMMENT_PATH = re.compile(r"^/api/projects/[^/]+/comments(/[^/]+/resolve)?$")
-_OWN_TOKEN_PATH = re.compile(r"^/api/me/tokens(/[^/]+)?$")  # every role manages its own tokens
+_OWN_TOKEN_PATH = re.compile(r"^/api/me/(tokens(/[^/]+)?|password)$")  # every role manages its own tokens and password
 _SEARCH_PATH = re.compile(r"^/api/projects/[^/]+/search$")  # a read that happens to be a POST (the query is in the body)
 ROLES = {"admin": "Administrator", "analyst": "Business analyst", "viewer": "Viewer (read-only)"}
 _N, _R, _P = 2 ** 14, 8, 1
@@ -30,6 +30,7 @@ _cache_lock = threading.Lock()
 router = APIRouter(prefix="/api/admin/users")
 me_router = APIRouter(prefix="/api/me/tokens")
 admin_tokens_router = APIRouter(prefix="/api/admin/tokens")
+account_router = APIRouter(prefix="/api/me")
 
 
 def _scrypt(password: str, salt: bytes, n: int, r: int, p: int) -> bytes:
@@ -317,6 +318,29 @@ def revoke_my_token(tid: str, request: Request):
         raise HTTPException(404, "Token not found")
     db.execute("DELETE FROM api_tokens WHERE id=%s", (tid,))
     audit.record(request, "token revoked", row["name"], current(request)["username"])
+
+
+@account_router.post("/password")
+def change_own_password(request: Request, body: Dict[str, Any] = Body(...)):
+    """A named account changes its own password, proving it knows the current one. (The caller is already signed in with that password, so the
+    sign-in throttle covers guessing it.) Not for the bootstrap login (set in the deployment) and not for a bearer token: a leaked token must not
+    be able to take the account over."""
+    if getattr(request.state, "via_token", False):
+        raise HTTPException(403, "Change your password while signed in with your password, not with a token")
+    username = current(request)["username"]
+    row = db.one("SELECT id, password_hash FROM users WHERE username=%s", (username,))
+    if not row:
+        raise HTTPException(400, "Only named accounts have a password to change here; the bootstrap login is set in the deployment")
+    old, new = str(body.get("current_password") or ""), str(body.get("new_password") or "")
+    if not verify_password(old, row["password_hash"]):
+        raise HTTPException(403, "The current password is wrong")
+    _validate_password(new)
+    if new == old:
+        raise HTTPException(400, "Choose a password different from the current one")
+    db.execute("UPDATE users SET password_hash=%s WHERE id=%s", (hash_password(new), row["id"]))
+    forget(username)
+    audit.record(request, "password changed", username, "by the account holder")
+    return {"ok": True}
 
 
 @admin_tokens_router.get("")

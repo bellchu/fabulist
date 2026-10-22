@@ -52,6 +52,24 @@ function appearanceCard() {
       "System follows your device's light or dark setting. The choice is remembered in this browser.")));
 }
 
+// Named accounts that sign in with a password can change it here (SSO accounts have none, and tokens must not be able to).
+function passwordCard() {
+  const field_ = (label, name, auto) => field(label, h("input", { type: "password", name, autocomplete: auto, "aria-label": label }));
+  const current = field_("Current password", "current", "current-password");
+  const next = field_("New password", "new", "new-password");
+  const again = field_("New password again", "again", "new-password");
+  const val = (box) => box.querySelector("input").value;
+  return h("div", { class: "card", style: { marginTop: "16px" } }, h("div", { class: "card-head" }, h("h3", {}, "Password")),
+    h("div", { class: "card-body stack" }, current, next, again,
+      h("div", { class: "muted small" }, "At least 12 characters. Your browser will ask you to sign in again with the new password."),
+      h("div", {}, h("button", { class: "btn btn-primary", onclick: guard(async () => {
+        if (val(next) !== val(again)) throw new Error("The new password and its repetition are different");
+        await api.post("/api/me/password", { current_password: val(current), new_password: val(next) });
+        toast("Password changed. Sign in again with the new one when your browser asks.", "ok");
+        [current, next, again].forEach((b) => { b.querySelector("input").value = ""; });
+      }) }, "Change password"))));
+}
+
 export async function renderAccount(content) {
   setCrumbs("Account");
   let tokens = null;
@@ -86,5 +104,5 @@ export async function renderAccount(content) {
           await api.del("/api/me/tokens/" + t.id); toast("Token revoked", "ok"); rerender();
         }) }, "Revoke")))))))
     : empty({ iconName: "lock", title: "No API tokens", text: "Create one for a script or integration that needs to call the Fabulist API.",
-      action: h("button", { class: "btn btn-primary", onclick: newTokenDialog }, icon("plus"), "New token") })), appearanceCard());
+      action: h("button", { class: "btn btn-primary", onclick: newTokenDialog }, icon("plus"), "New token") })), state.me.sso ? null : passwordCard(), appearanceCard());
 }
