@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- The Documents card on the Sources tab had its table touching the heading (the earlier spacing rule only covered a table that is a direct sibling of the heading; this one sits in a wrapper). Found in a visual pass; browser test `tests/ui/card_spacing.py` measures the gap.
 - The requirement mix legend on a project's Overview lists only the kinds that are there (it listed "business 0, constraint 0 ..." for every kind). Found in a visual pass over a project with a full workflow; browser test `tests/ui/overview_mix.py`.
 - A screen reader now hears where a navigation led: a polite live region (outside the part of the page that is rebuilt on every route) announces the new page title when the address changes, and says nothing for a redraw of the same screen. Extends `tests/ui/page_titles.py`.
 - **Every screen has its own page title.** The browser tab said "Fabulist" on every screen, so history, tab lists and screen readers could not tell the pages apart (WCAG 2.4.2, Page Titled). Titles are now "Requirements · Order to cash · Fabulist", "Generation settings · Administration · Fabulist", "Projects · Fabulist", and so on. Browser test: `tests/ui/page_titles.py`.
