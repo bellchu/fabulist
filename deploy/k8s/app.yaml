@@ -50,9 +50,12 @@ spec:
           readinessProbe:
             httpGet: {path: /healthz, port: 8000}
             periodSeconds: 5
+          startupProbe:                            # schema upgrades and backfills run before the server answers; give them 5 minutes, not 75 s
+            httpGet: {path: /livez, port: 8000}
+            periodSeconds: 5
+            failureThreshold: 60
           livenessProbe:
             httpGet: {path: /livez, port: 8000}   # not /healthz: a database outage must not restart the app
-            initialDelaySeconds: 15
             periodSeconds: 20
           resources:
             requests: {cpu: 100m, memory: 256Mi}

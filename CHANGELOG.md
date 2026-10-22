@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- A big schema upgrade can no longer be killed halfway: the app runs its schema upgrade and backfills before it answers, and the liveness probe (15 s delay plus three misses, about 75 s) would restart it in a loop on a large database. A startup probe now allows 5 minutes before liveness takes over. Test: `tests/test_k8s_manifest.py`.
 - A database outage no longer restarts the app. The pod's liveness probe called `/healthz`, which queries Postgres, so a database blip of about a minute made Kubernetes kill the app, taking every running AI run with it, although the app itself reconnects by itself. Liveness is now `/livez` (the process answers, no database), and `/healthz` stays the readiness probe (503 takes the pod out of rotation until the database is back). Both are open to the platform and left out of the request metrics. Tests: `tests/test_api.py`, `tests/test_k8s_manifest.py`.
 - A test (`tests/test_scripts.py`) fails when a script feeds a heredoc to `kubectl exec` without `-i`, the mistake that made the restore drill's checks do nothing.
 - Fixed the restore drill's own check: its final step (the app on the restored database) ran without `kubectl exec -i`, so its Python never received any input and the step passed without checking anything. It now fails when the restored copy is wrong (verified by expecting a wrong project name: exit 1, "FAIL: project missing") and passes on a good one.
