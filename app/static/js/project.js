@@ -15,8 +15,10 @@ let ctx = null;
 let pollTimer = null;
 
 const rerender = () => window.dispatchEvent(new HashChangeEvent("hashchange"));
-// Reviewers (the viewer role) read and take part in discussions; the server refuses everything else, so the UI does not offer it.
-const readOnly = () => state.me.role === "viewer";
+// Reviewers (the viewer role) read and take part in discussions, and an archived project is frozen: the server refuses
+// every other change, so the UI does not offer it.
+const frozen = () => Boolean(ctx && ctx.project && ctx.project.archived);
+const readOnly = () => state.me.role === "viewer" || frozen();
 const writer = (el) => (readOnly() ? null : el);
 const base = () => "/api/projects/" + ctx.pid;
 
@@ -382,7 +384,8 @@ async function viewSources(body) {
         : empty({ iconName: "file", title: "No BRDs yet", text: "Upload or paste at least one business requirements document." })),
     h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Ask the BRDs"),
       h("span", { class: "muted small" }, "Answers come only from retrieved BRD passages, with numbered citations")),
-      h("div", { class: "card-body" }, h("div", { class: "row wrap" }, q, writer(h("button", { class: "btn btn-primary", onclick: ask }, icon("sparkles"), "Ask")),
+      h("div", { class: "card-body" }, h("div", { class: "row wrap" }, q, state.me.role === "viewer" ? null : h("button", { class: "btn btn-primary", onclick: ask }, icon("sparkles"), "Ask"),  // asking is allowed on an archived project (a read), not for viewers (AI budget)
+        
         h("button", { class: "btn", onclick: search }, icon("search"), "Find passages")), results)));
 }
 
@@ -397,7 +400,7 @@ function discussionSection(itemId) {
         h("div", { class: "row small" }, h("b", {}, c.author), h("span", { class: "muted" }, timeAgo(c.created)),
           c.resolved ? badge("Resolved" + (c.resolved_by ? " by " + c.resolved_by : ""), "green") : null,
           h("span", { class: "right row" },
-            h("button", { class: "btn btn-sm btn-ghost", onclick: guard(async () => { await api.post(base() + "/comments/" + c.id + "/resolve"); load(); }) },
+            frozen() ? null : h("button", { class: "btn btn-sm btn-ghost", onclick: guard(async () => { await api.post(base() + "/comments/" + c.id + "/resolve"); load(); }) },
               c.resolved ? "Reopen" : "Resolve"),
             !readOnly() && (state.me.role === "admin" || state.me.username === c.author) ? h("button", { class: "btn btn-sm btn-ghost btn-danger", "aria-label": "Delete comment",
               onclick: guard(async () => { await api.del(base() + "/comments/" + c.id); load(); }) }, icon("trash")) : null)),
@@ -412,7 +415,8 @@ function discussionSection(itemId) {
   body.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) post(); });
   load();
   return h("div", { class: "card card-body stack", style: { gap: "8px" } }, h("div", { class: "row" }, icon("chat"), h("b", {}, "Discussion")), list,
-    body, h("div", { class: "row" }, h("button", { class: "btn btn-sm btn-primary", onclick: post }, "Post"), h("span", { class: "muted small" }, "Ctrl/⌘ + Enter to post")));
+    frozen() ? h("div", { class: "muted small" }, "This project is archived: the discussion is closed.")
+      : [body, h("div", { class: "row" }, h("button", { class: "btn btn-sm btn-primary", onclick: post }, "Post"), h("span", { class: "muted small" }, "Ctrl/⌘ + Enter to post"))]);
 }
 
 function historySection(itemId) {
