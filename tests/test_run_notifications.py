@@ -84,3 +84,19 @@ def test_the_choice_can_be_changed_and_is_ignored_for_trackers(client):
     assert client.put("/api/admin/integrations/%s" % made["id"], json=dict(HOOK)).json()["notify_runs"] is False
     jira = client.post("/api/admin/integrations", json={"kind": "jira", "name": "J", "base_url": "https://x.atlassian.net", "token": "t", "notify_runs": True}).json()
     assert jira["notify_runs"] is False
+
+
+def test_a_run_marked_stuck_is_reported_too(client, monkeypatch):
+    from app import config, db
+    from tests.test_api import _running_run
+    sent = _capture(monkeypatch)
+    monkeypatch.setattr(config, "STALE_RUN_MINUTES", 15)
+    client.post("/api/admin/integrations", json=dict(HOOK, notify_runs=True))
+    pid = client.post("/api/projects", json={"name": "Hung", "platform": "generic"}).json()["id"]
+    client.post("/api/projects/%s/documents/text" % pid, json={"name": "b.md", "text": BRD})
+    hung = _running_run(pid, updated_minutes_ago=2)
+    db.execute("UPDATE runs SET updated=%s WHERE id=%s", ("2000-01-01T00:00:00.000+00:00", hung))
+    client.post("/api/projects/%s/runs" % pid, json={"stage": "requirements"})  # starting another run is what notices the hung one
+    _wait_for(sent, 2)
+    stuck = [s for s in sent if s[1]["run"]["id"] == hung]
+    assert len(stuck) == 1 and stuck[0][1]["run"]["status"] == "failed" and "stuck" in stuck[0][1]["run"]["error"]

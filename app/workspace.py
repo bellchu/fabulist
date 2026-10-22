@@ -615,9 +615,10 @@ def _recover_stuck_runs(pid: str) -> None:
     find it is no longer running and write nothing."""
     cutoff = _stale_cutoff()
     for r in db.rows("UPDATE runs SET status='failed', cancel_requested=TRUE, progress='', error=%s "
-                     "WHERE project_id=%s AND status='running' AND coalesce(updated, created) < %s RETURNING stage",
+                     "WHERE project_id=%s AND status='running' AND coalesce(updated, created) < %s RETURNING id, stage",
                      ("Marked as stuck: no progress for %d minutes. The AI provider may have stopped responding; start a new run." % config.STALE_RUN_MINUTES, pid, cutoff)):
         metrics.inc("fabulist_runs_total", stage=r["stage"], status="failed")
+        integrations.announce_run(r["id"])
 
 
 @router.post("/api/projects/{pid}/runs", status_code=202)
