@@ -43,7 +43,8 @@ Large inputs are incremental: `documents` = all / new / reset and `stories_for` 
 |---|---|
 | Browser → app | Cloudflare / ingress TLS, HSTS, CSP, `X-Requested-With` on writes (CSRF), sign-in with throttling, idle timeout. |
 | App → AI provider | Keys encrypted at rest and never returned; personal-data masking before text leaves; timeouts, bounded retries, per-user fair use of interactive calls. |
-| App → trackers, repositories, webhooks | Tokens encrypted; outbound URLs must be https; webhook payloads optionally signed (HMAC). |
+| App → trackers, webhooks | Only administrators set the URLs (https required), tokens encrypted, webhook payloads optionally signed (HMAC). Internal addresses are allowed on purpose: an on-premises Jira or an in-cluster model server is a normal setup, so protect the admin role accordingly. |
+| App → BRD repositories | Anyone who can add a repository supplies the URL, so it is refused if it resolves to a private, loopback, link-local or cluster-internal address (SSRF guard, re-checked at every sync). |
 | Uploads | Size limits, decompression-bomb limits, page limits, limited parse concurrency. |
 | Pod → cluster | Non-root, read-only root filesystem, no capabilities, no service-account token, NetworkPolicy (only the ingress and Prometheus reach the app; only this namespace reaches Postgres). |
 | Supply chain | Pinned dependencies, weekly audit, image scan gate in `deploy.sh`, Dependabot. |
