@@ -32,6 +32,7 @@ DEFAULTS: Dict[str, Any] = {
     "ai_concurrency": 4,  # sections (or story batches) a run asks the AI about at once
     "rag_top_k": config.RAG_TOP_K,
     "redact_pii": True,
+    "domain": "medical product distribution",  # told to the AI: the business the requirements and stories are for
     "embed_provider_id": "",  # "" = offline hash embeddings
     "embed_model": "",
 }
@@ -103,6 +104,8 @@ def update_settings(patch: Dict[str, Any]) -> Dict[str, Any]:
                 if not p or p["kind"] != "openai":
                     raise SettingsError("Embeddings require an OpenAI-compatible provider")
             clean[key] = value
+        elif key == "domain":
+            clean[key] = " ".join(str(value or "").split())[:120] or DEFAULTS["domain"]  # one line: it goes into the AI's instructions
         else:
             clean[key] = str(value or "").strip()[:200]
     with db.conn() as c:
