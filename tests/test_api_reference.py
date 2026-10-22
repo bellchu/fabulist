@@ -21,6 +21,7 @@ def test_the_openapi_document_groups_and_describes_every_operation(client):
     tags = {t["name"] for t in spec["tags"]}
     assert {"Projects", "Requirements", "Stories", "Documents", "Runs", "Administration", "Account"} <= tags, tags
     assert all(op.get("summary") and op["summary"][0].isupper() and "_" not in op["summary"] for _p, _m, op in ops), "summaries are sentences, not function names"
+    assert all(op["summary"] == op["summary"][:1] + op["summary"][1:].lower() for _p, _m, op in ops), "in sentence case, not Title Case"
     by_path = {(m.upper(), p): op for p, m, op in ops}
     assert by_path[("POST", "/api/projects/{pid}/runs")]["tags"] == ["Runs"] and by_path[("GET", "/api/projects")]["tags"] == ["Projects"]
     assert by_path[("GET", "/api/admin/users")]["tags"] == ["Administration"] and by_path[("GET", "/api/me/tokens")]["tags"] == ["Account"]

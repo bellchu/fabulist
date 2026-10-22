@@ -1,9 +1,10 @@
 /* API reference page: uses the app's colour tokens (app.css), so it follows light and dark mode. */
-body.docs { background: var(--bg); color: var(--text); margin: 0; font-family: inherit; }
+body.docs { overflow-y: auto; }  /* colours and the font come from app.css (a font-family here would override its font stack) */
 .docs-top { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
 .docs-main { max-width: 1000px; margin: 0 auto; padding: 16px 16px 48px; }
 .docs-main h1 { margin: 8px 0 12px; }
 .docs-intro { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 16px; margin-bottom: 16px; line-height: 1.55; }
+.docs-intro p { margin: 12px 0; }
 .docs-intro code, .docs-op code, .docs-schema code { font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; background: var(--sunken); padding: 1px 5px; border-radius: 3px; }
 .docs-tools { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .docs-filter-label { font-size: 13px; color: var(--text-2); }

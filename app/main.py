@@ -121,6 +121,8 @@ def custom_openapi() -> Dict[str, Any]:
         for op in item.values():
             op["tags"] = [_tag_for(path)]
             used.add(op["tags"][0])
+            summary = op.get("summary", "")
+            op["summary"] = summary[:1] + summary[1:].lower()  # "Start Run" (from the function name) reads better as a sentence
     spec["tags"] = [{"name": t, "description": TAG_DESCRIPTIONS.get(t, "")} for t in TAG_DESCRIPTIONS if t in used]
     app.openapi_schema = spec
     return spec

@@ -70,7 +70,7 @@ function operation(path, method, op) {
 
 function render() {
   document.getElementById("intro").replaceChildren(...String(spec.info.description || "").split(/\n\s*\n/).map((para) =>
-    h("p", {}, ...para.split(/(`[^`]+`|\*\*[^*]+\*\*)/).filter(Boolean).map((part) => part.startsWith("`") ? h("code", {}, part.slice(1, -1)) : part.startsWith("**") ? h("strong", {}, part.slice(2, -2)) : part))));
+    h("p", {}, ...para.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/).filter(Boolean).map((part) => part.startsWith("`") ? h("code", {}, part.slice(1, -1)) : part.startsWith("**") ? h("strong", {}, part.slice(2, -2)) : part.startsWith("*") && part.length > 2 ? h("em", {}, part.slice(1, -1)) : part))));
   const byTag = new Map((spec.tags || []).map((t) => [t.name, { desc: t.description, ops: [] }]));
   for (const [path, item] of Object.entries(spec.paths)) {
     for (const [method, op] of Object.entries(item)) {
