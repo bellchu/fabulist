@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- A dialog with something typed in it no longer vanishes on a stray click outside it or an Escape: it asks "Close without saving?" (Discard / Cancel) and Cancel keeps the dialog and the text. An untouched dialog, read-only dialogs and the dialog's own Cancel button still close at once. (Drawers already asked.) Browser test: `tests/ui/dialog_discard.py`.
 - Permanently deleting a project is now in the administrative trail (name, project id, and how many BRDs, requirements and stories went). A project's own audit trail is deleted with it, so until now nothing recorded that a project, with all its history, had existed and been removed.
 - New alert `FabulistRestarting` (the app container restarted twice or more in an hour): each restart fails the AI runs in progress, and the OOM kills found by the load tests would otherwise only be noticed by someone looking at the pod. The runbook has its row, a test now fails if any alert lacks one, and the `FabulistDown` row's garbled sentence is fixed.
 - A big schema upgrade can no longer be killed halfway: the app runs its schema upgrade and backfills before it answers, and the liveness probe (15 s delay plus three misses, about 75 s) would restart it in a loop on a large database. A startup probe now allows 5 minutes before liveness takes over. Test: `tests/test_k8s_manifest.py`.
