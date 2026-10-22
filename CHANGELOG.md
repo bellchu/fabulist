@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- A test (`tests/test_scripts.py`) fails when a script feeds a heredoc to `kubectl exec` without `-i`, the mistake that made the restore drill's checks do nothing.
 - Fixed the restore drill's own check: its final step (the app on the restored database) ran without `kubectl exec -i`, so its Python never received any input and the step passed without checking anything. It now fails when the restored copy is wrong (verified by expecting a wrong project name: exit 1, "FAIL: project missing") and passes on a good one.
 - `scripts/restore-drill-k8s.sh` runs the backup/restore drill on the cluster (the existing one needs local Docker): it seeds a database through the app, dumps it as the nightly CronJob does, restores it into a fresh database with the documented flags, and checks the row counts of nine tables (including the new administrative trail and settings) and, on the restored copy, that the app starts and still finds the project, the semantic-search passage, the baseline and the trail. It is the new `restore` stage of `scripts/release-check-k8s.sh`.
 - Found by looking at the Activity page: the new "Administrative changes" table sat glued under its heading (tables right under a card heading now get 10 px of room, everywhere), a provider with no model read "mock, model -" in the trail, and the empty runs card said "No activity yet" next to a list of changes (now "No runs yet").
