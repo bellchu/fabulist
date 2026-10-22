@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Pod hardening: the app container now runs with a read-only root filesystem (writable `/tmp` emptyDir only), all Linux capabilities dropped, the default seccomp profile and no service-account token; the pod gets a 60 s termination grace period so in-flight generation runs can stop cleanly. Verified that repository cloning works under these settings.
 - The Account page, shown to the bootstrap administrator (who has no named account and so cannot create API tokens), now links straight to Users & roles to create one.
 - The build version (the git commit it was built from) is shown in a footer on every page, so support requests can quote it exactly.
 - Security reporting: GitHub private vulnerability reporting is enabled and SECURITY.md points to it. The Cloudflare edge no longer sends `Strict-Transport-Security: max-age=0`: it now sends `max-age=15552000` (6 months, no preload, not `includeSubDomains` because several unproxied imbell.com hosts do not serve valid HTTPS).
