@@ -831,15 +831,56 @@ def test_a_queued_run_can_be_cancelled_before_it_starts_and_never_runs(client, m
     assert client.get("/api/projects/%s/runs" % pids[1]).json()[0]["status"] == "cancelled"
 
 
-def test_runs_that_were_waiting_when_the_server_restarted_are_failed_with_a_clear_message(client):
+def test_runs_that_were_waiting_when_the_server_restarted_are_picked_up_again_in_order(client):
     from app import db, main
     pid = client.post("/api/projects", json={"name": "Waiting", "platform": "generic"}).json()["id"]
+    client.post("/api/projects/%s/documents/text" % pid, json={"name": "brd.md", "text": "# A\nThe system shall export invoices to CSV on request."})
+    default = next(p for p in client.get("/api/admin/providers").json()["providers"] if p["is_default"])
     rid = db.new_id()
-    db.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, actor, created) VALUES (%s,%s,'queued','requirements','Offline heuristic','','t',%s)",
-               (rid, pid, db.now()))
+    db.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, actor, created, provider_id, run_scope, run_documents) "
+               "VALUES (%s,%s,'queued','requirements','Offline heuristic','','t',%s,%s,'all','new')", (rid, pid, db.now(), default["id"]))
+    stuck = db.new_id()  # a row from before runs remembered how to start: nothing to resume it with
+    db.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, actor, created) VALUES (%s,%s,'queued','requirements','x','','t',%s)", (stuck, pid, db.now()))
+    old = db.new_id()
+    db.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, actor, created, updated) VALUES (%s,%s,'running','requirements','x','','t',%s,%s)", (old, pid, db.now(), db.now()))
     main.recover_runs_after_restart()
-    row = db.one("SELECT status, error FROM runs WHERE id=%s", (rid,))
-    assert row["status"] == "failed" and "restart" in row["error"] and "start" in row["error"].lower()
+    assert db.one("SELECT status FROM runs WHERE id=%s", (old,))["status"] == "failed", "a run that was executing died with the server"
+    row = db.one("SELECT status, error FROM runs WHERE id=%s", (stuck,))
+    assert row["status"] == "failed" and "restart" in row["error"], "a waiting run that cannot be resumed says so"
+    for _ in range(100):
+        row = db.one("SELECT status, item_count FROM runs WHERE id=%s", (rid,))
+        if row["status"] not in ("queued", "running"):
+            break
+        time.sleep(0.1)
+    assert row["status"] == "done" and row["item_count"] == 1, "the waiting run was started by the new server: %s" % row
+    assert len(client.get("/api/projects/%s/requirements" % pid).json()) == 1
+
+
+def test_two_servers_cannot_both_execute_the_same_run(client, monkeypatch):
+    import threading
+    from app import db, pipeline, workspace
+    pid = client.post("/api/projects", json={"name": "Claim", "platform": "generic"}).json()["id"]
+    client.post("/api/projects/%s/documents/text" % pid, json={"name": "brd.md", "text": "# A\nThe system shall do a thing for the buyer."})
+    default = next(p for p in client.get("/api/admin/providers").json()["providers"] if p["is_default"])
+    rid = db.new_id()
+    db.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, actor, created, provider_id, run_scope, run_documents) "
+               "VALUES (%s,%s,'queued','requirements','Offline heuristic','','t',%s,%s,'all','all')", (rid, pid, db.now(), default["id"]))
+    calls, gate = [], threading.Barrier(2)
+    real = pipeline.extract_requirements
+
+    def counting(*a, **k):
+        calls.append(1)
+        return real(*a, **k)
+    monkeypatch.setattr(pipeline, "extract_requirements", counting)
+
+    def go():
+        gate.wait()
+        workspace._execute_run(rid, pid, "requirements", default["id"], "all", "all")
+    threads = [threading.Thread(target=go) for _ in range(2)]
+    [t.start() for t in threads]
+    [t.join(20) for t in threads]
+    assert calls == [1], "the run was executed exactly once, however many servers were handed it (%d)" % len(calls)
+    assert db.one("SELECT status FROM runs WHERE id=%s", (rid,))["status"] == "done"
 
 
 def test_a_stuck_run_does_not_hold_a_slot_forever(client, monkeypatch):

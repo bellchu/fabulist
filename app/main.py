@@ -30,9 +30,10 @@ SECURITY_HEADERS = {
 
 
 def recover_runs_after_restart() -> None:
-    """A restart kills in-process runs and empties the in-memory queue; don't leave either "running" or "waiting" forever."""
+    """A restart kills the runs this server was executing, which cannot be resumed (they would start over and spend the AI cost again), and
+    empties its in-memory queue, which can: runs that were only waiting for a slot are started again, in order."""
     db.execute("UPDATE runs SET status='failed', error='Interrupted by server restart' WHERE status='running'")
-    db.execute("UPDATE runs SET status='failed', progress='', error='The server restarted while this run was waiting; start it again.' WHERE status='queued'")
+    workspace.resume_waiting_runs()
 
 
 @asynccontextmanager
