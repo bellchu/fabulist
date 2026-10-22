@@ -256,6 +256,10 @@ What to turn when it is not enough: more concurrent AI runs (`MAX_CONCURRENT_RUN
 | FabulistRestarting | The app restarted twice or more in an hour; each restart fails the runs that were executing. `kubectl -n fabulist describe pod -l app=fabulist` shows the last state (`OOMKilled` means the memory limit: see FabulistMemoryNearLimit) and `kubectl -n fabulist logs deploy/fabulist --previous` the last words. Repeated liveness failures mean the process hangs: look for a stuck thread pool in the logs. |
 | FabulistBackupMissing | `kubectl -n fabulist get jobs` and the `fabulist-backup` job logs; make sure the backups volume has space. |
 
+## Architecture
+
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how the pieces fit, the design decisions and why, the trust boundaries and what happens when something fails.
+
 ## Contributing
 
 See `CONTRIBUTING.md` for the branch, test and release workflow, `SECURITY.md` for reporting vulnerabilities and `CHANGELOG.md` for notable changes.
