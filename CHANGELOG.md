@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- A browser with JavaScript turned off now sees "Fabulist needs JavaScript ..." instead of a blank page (styled with a class, since the Content Security Policy blocks inline style attributes). Test in `tests/test_security_headers.py`.
 (New entries go here; they move under a dated heading when a release is marked.)
 
 ## 2026-10-22

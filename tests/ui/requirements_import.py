@@ -34,6 +34,8 @@ with sync_playwright() as p:
 
     file.set_input_files({"name": "again.csv", "mimeType": "text/csv", "buffer": GOOD})
     page.wait_for_selector("text=2 already there, skipped")
+    page.wait_for_timeout(600)  # the table is redrawn after the notice: count it once it has settled
+    page.wait_for_selector("tr.clickable")
     check(page.locator("tr.clickable").count() == 2, "importing the same file again adds nothing")
 
     import io
