@@ -3,11 +3,12 @@ import csv
 import io
 import json
 import re
+import time
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Request, Response
 
-from . import audit, config, db, embeddings, exporters, llm, settings, taxonomy
+from . import audit, config, db, embeddings, exporters, llm, metrics, settings, taxonomy
 from .fairuse import ai_fair_use
 
 router = APIRouter(prefix="/api/admin")
@@ -29,7 +30,13 @@ def overview() -> Dict[str, Any]:
     by_provider = db.rows("""SELECT provider, model, count(*) AS runs, coalesce(sum(tokens_in + tokens_out), 0) AS tokens
         FROM runs WHERE created >= to_char(now() - interval '30 days', 'YYYY-MM-DD')
         GROUP BY provider, model ORDER BY runs DESC LIMIT 10""")
-    return {"totals": totals, "last_30_days": window, "by_provider": by_provider,
+    busy = db.one("SELECT count(*) FILTER (WHERE status = 'running') AS running, count(*) FILTER (WHERE status = 'queued') AS queued, "
+                  "pg_database_size(current_database()) AS size FROM runs")
+    rss, limit = metrics.memory_now()
+    system = {"version": config.VERSION, "uptime_seconds": int(time.time() - metrics.STARTED_AT), "database_bytes": busy["size"],
+              "runs_running": busy["running"], "runs_queued": busy["queued"], "max_concurrent_runs": config.MAX_CONCURRENT_RUNS,
+              "max_queued_runs": config.MAX_QUEUED_RUNS, "memory_bytes": rss, "memory_limit_bytes": limit}
+    return {"totals": totals, "last_30_days": window, "by_provider": by_provider, "system": system,
             "default_provider": next((p for p in settings.list_providers() if p["is_default"]), None),
             "encryption_configured": bool(config.SETTINGS_KEY), "embed_dim": config.EMBED_DIM}
 

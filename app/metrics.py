@@ -1,5 +1,6 @@
 """Minimal Prometheus metrics (text exposition format) without extra dependencies."""
 import threading
+import time
 from typing import Dict, List, Tuple
 
 from . import db
@@ -46,6 +47,15 @@ def _labels(pairs: Tuple[Tuple[str, str], ...], extra: str = "") -> str:
     if extra:
         parts.append(extra)
     return "{%s}" % ",".join(parts) if parts else ""
+
+
+STARTED_AT = time.time()
+
+
+def memory_now() -> Tuple[int, int]:
+    """(resident bytes, container limit in bytes or 0) for the admin Overview."""
+    values = {name: v for name, _, v in _memory()}
+    return values["fabulist_process_resident_memory_bytes"], values["fabulist_memory_limit_bytes"]
 
 
 def _memory() -> List[Tuple[str, str, int]]:
