@@ -143,3 +143,11 @@ def test_the_app_runs_as_a_role_that_cannot_change_the_schema():
     import re
     assert re.search(r"- name: MIGRATION_DATABASE_URL.*?key: MIGRATION_DATABASE_URL\s+optional: true", APP, re.S), "optional: an install without the second login still starts"
     assert "CREATE ROLE fabulist_app" in deploy and "NOSUPERUSER" in deploy and "MIGRATION_DATABASE_URL" in deploy
+
+
+def test_the_app_pod_has_more_memory_than_the_load_test_proved_enough():
+    import re
+    prod = int(re.search(r"limits: \{memory: (\d+)Mi\}", APP).group(1))
+    load = open(os.path.join(os.path.dirname(APP_PATH), "..", "..", "scripts", "load-test-k8s.sh")).read()
+    assert "limits: {memory: 1Gi}" in load, "the load test measures at 1 GiB"
+    assert prod >= 1536, prod
