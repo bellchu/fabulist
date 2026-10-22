@@ -68,12 +68,20 @@ with sync_playwright() as p:
     select = page.get_by_label("Requirements to write stories for")
     check(select.locator("option").count() == 1 and "start over" in select.inner_text(), "everything is covered: only 'start over' remains")
 
-    api.put(f"{BASE}/api/admin/settings", data={"max_chunks_per_run": 200}, headers=H)  # all three groups fit again, so starting over is possible
+    # starting over works within the same limit (2 groups of the 3): the first batch replaces everything, the rest have no story
     page.get_by_role("button", name="Regenerate").click()
     page.wait_for_selector(".modal")
     check(page.get_by_text("replaces the current stories").count() == 1 or page.get_by_text("Regenerating replaces").count() == 1, "starting over warns that stories are replaced")
+    check(page.get_by_text("writes stories for 2 of the 3 requirements").count() == 1 and page.get_by_text("1 more will be left").count() == 1, "and says it writes a batch and how many remain")
     page.get_by_role("button", name="Cancel").click()
     check(len(stories()) == 3, "cancelling the warning changed nothing")
+    page.get_by_role("button", name="Regenerate").click()
+    page.wait_for_selector(".modal")
+    page.locator(".modal").get_by_role("button", name="Regenerate").click()
+    finished_runs(3)
+    page.reload()
+    page.wait_for_selector(".runbox")
+    check(len(stories()) == 2 and "without stories (1)" in page.get_by_label("Requirements to write stories for").inner_text(), "start over replaced the stories with the first batch (2) and one requirement has none again")
     api.put(f"{BASE}/api/admin/settings", data={"max_chunks_per_run": 200}, headers=H)
     browser.close()
 sys.exit(1 if failures else 0)

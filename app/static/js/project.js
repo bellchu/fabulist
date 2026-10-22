@@ -139,7 +139,7 @@ function runPanel(stage) {
   const uncovered = isReq ? 0 : ctx.project.requirements_uncovered;
   const storyOptions = [];
   if (uncovered > 0) storyOptions.push(["uncovered", "Requirements without stories (" + uncovered + "): adds stories"]);
-  if (ctx.project.stories > 0 || uncovered === 0) storyOptions.push(["all", "All requirements: start over (replaces stories)"]);
+  if (ctx.project.stories > 0 || uncovered === 0) storyOptions.push(["reset", "All requirements: start over (replaces stories)"]);
   const which = readOnly() ? null
     : isReq && ctx.project.documents > 0 ? select(whichOptions, whichOptions[0][0], { "aria-label": "BRDs to read" })
     : !isReq && ctx.project.requirements > 0 ? select(storyOptions, storyOptions[0][0], { "aria-label": "Requirements to write stories for" }) : null;
@@ -161,12 +161,12 @@ function runPanel(stage) {
             : "Raise “Max sections per run” in Admin → Generation settings" + (isReq ? ", or split the documents." : ", or generate from approved requirements only (choose it next to the button)."))), actions: [] });
       return;
     }
-    const addingStories = !isReq && mode() === "uncovered";
+    const addingStories = !isReq && mode() !== "all";
     const adding = isReq && mode() === "new", batched = isReq && mode() !== "all";
     const total = adding ? est.new_documents : est.batch_documents + est.remaining_documents;
-    const storyBatch = addingStories ? "This run writes stories for " + est.batch_requirements + " of the " + (est.batch_requirements + est.remaining_requirements) + " requirements without a story ("
+    const storyBatch = addingStories ? "This run writes stories for " + est.batch_requirements + " of the " + (est.batch_requirements + est.remaining_requirements) + " requirements" + (mode() === "uncovered" ? " without a story" : "") + " ("
       + est.requests + " feature-area group" + (est.requests === 1 ? "" : "s") + ")" + (est.remaining_requirements ? "; " + est.remaining_requirements + " more will be left for the next run" : "")
-      + ". Your existing stories are not changed. " : "";
+      + ". " + (mode() === "uncovered" ? "Your existing stories are not changed. " : "") : "";
     const batch = addingStories ? storyBatch : batched ? "This run reads " + est.batch_documents + " of the " + total + (adding ? " new" : "") + " BRD" + (total === 1 ? "" : "s") + " ("
       + est.requests + " sections)" + (est.remaining_documents ? "; " + est.remaining_documents + " more will be left for the next run" : "") + ". "
       + (adding ? "Your existing requirements are not changed. " : "") : "";
@@ -174,7 +174,7 @@ function runPanel(stage) {
     const cost = big ? "This run will make about " + est.requests + " AI requests"
       + (est.seconds ? " (roughly " + (est.seconds >= 90 ? Math.round(est.seconds / 60) + " minutes" : est.seconds + " seconds") + (est.tokens ? " and " + fmt(est.tokens) + " tokens" : "") + ")" : "")
       + ". " + est.basis + " " : "";
-    const hasData = !adding && !addingStories && (isReq ? ctx.project.requirements > 0 || ctx.project.stories > 0 : ctx.project.stories > 0);
+    const hasData = !adding && !(addingStories && mode() === "uncovered") && (isReq ? ctx.project.requirements > 0 || ctx.project.stories > 0 : ctx.project.stories > 0);
     const replace = hasData ? (isReq ? "Re-extracting replaces all requirements and the current backlog, including your edits."
       : "Regenerating replaces the current stories, including your edits.") : "";
     if ((big || hasData) && !(await confirmBox((batch + cost + replace).trim() + (big && !hasData ? " Continue?" : ""),
