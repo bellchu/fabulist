@@ -77,7 +77,7 @@ after=$(sql restored 5433 "$COUNTS"); echo "restored: $after"
 [ "$before" = "$after" ] || { echo "FAIL: row counts differ" >&2; exit 1; }
 echo "== the app on the restored database"
 start_app restored 8001 5433
-kubectl -n "$NS" exec drill -c app -- python - <<'PY'
+kubectl -n "$NS" exec -i drill -c app -- python - <<'PY'
 import json, urllib.request
 base = "http://127.0.0.1:8001"
 def api(method, path, body=None):
