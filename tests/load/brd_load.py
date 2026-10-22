@@ -589,6 +589,8 @@ def volume():
             timed(c, after, "GET requirements (list)", "GET", f"/api/projects/{pid}/requirements")
             timed(c, after, "GET projects (home)", "GET", "/api/projects")
             timed(c, after, "GET comments", "GET", f"/api/projects/{pid}/comments")
+            timed(c, after, "GET search (all projects)", "GET", "/api/search?q=shall&limit=50")
+            timed(c, after, "GET search (no match: scans all)", "GET", "/api/search?q=zzqxnomatch")  # the worst case: nothing stops the scan early
             timed(c, after, "GET runs/estimate stories", "GET", f"/api/projects/{pid}/runs/estimate?stage=stories&scope=all")
         r = c.get(f"/api/projects/{pid}/requirements")
         print("requirements payload: %.1f MB for %d requirements" % (len(r.content) / 1048576, len(r.json())))
@@ -605,6 +607,8 @@ def volume():
     p95 = lambda label: sorted(ops.lat.get(label, [999]))[-1]  # noqa: E731  (3 samples: the max is the honest number)
     budget(p95("GET documents (list)") < 3, "listing %d documents answers within 3 s (%.2f s)" % (VOLUME_BRDS, p95("GET documents (list)")))
     budget(p95("GET projects (home)") < 2, "the project list answers within 2 s (%.2f s)" % p95("GET projects (home)"))
+    budget(max(after.lat.get("GET search (no match: scans all)", [999])) < 2, "and when nothing matches, so every requirement is read (%.2f s)" % max(after.lat.get("GET search (no match: scans all)", [999])))
+    budget(max(after.lat.get("GET search (all projects)", [999])) < 2, "searching the words of %d requirements across projects answers within 2 s (%.2f s)" % (added, max(after.lat.get("GET search (all projects)", [999]))))
     budget(p95("POST search") < 3, "passage search over %d BRDs answers within 3 s (%.2f s)" % (VOLUME_BRDS, p95("POST search")))
     budget(one.status_code == 400, "reading everything in one run is refused up front when it cannot fit the limit")
     budget(first["batch_documents"] >= 1 and first["requests"] <= first["limit"] and not first["over_limit"], "a batch of new BRDs always fits the section limit")
