@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Keyboard: after sorting a table with Enter/Space, focus stays on the column header (it used to fall to the page, so a keyboard or screen-reader user had to Tab back to sort again). Browser test: `tests/ui/keyboard.py` (drawer focus trap and focus return, sorting, selection, bulk bar, all without a mouse).
 - When a sign-in lapses (HTTP 401), the page says "Your sign-in has expired. Reload the page to sign in again." instead of the bare "Not authenticated".
 - Clearer failures: when the network drops or the server is down, pages say "Can't reach the server. Check your connection and try again." instead of the browser's "Failed to fetch", and the error screen has a **Retry** button next to "Back to projects". (A failed save already kept the drawer and the user's edits; that is now covered by a test.) Browser test: `tests/ui/error_states.py`.
 - Archived projects get a read-only UI too: edit, run, add, baseline and push controls and the discussion composer are not offered (they only produced "archived and read-only" errors), drawer fields are read-only, and Restore stays. Asking the BRDs and passage search remain available, as the server allows. Browser test: `tests/ui/archived_project.py`.
