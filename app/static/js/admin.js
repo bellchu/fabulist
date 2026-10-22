@@ -176,7 +176,7 @@ async function viewSettings(content) {
   const num = (key, step) => h("input", { type: "number", value: v[key], step: step || "1", min: s.limits[key][0], max: s.limits[key][1] });
   const inputs = {
     temperature: num("temperature", "0.05"), max_output_tokens: num("max_output_tokens"), timeout_seconds: num("timeout_seconds"),
-    chunk_chars: num("chunk_chars", "500"), max_chunks_per_run: num("max_chunks_per_run"), rag_top_k: num("rag_top_k"),
+    chunk_chars: num("chunk_chars", "500"), max_chunks_per_run: num("max_chunks_per_run"), ai_concurrency: num("ai_concurrency"), rag_top_k: num("rag_top_k"),
     embed_model: h("input", { type: "text", value: v.embed_model, placeholder: "e.g. text-embedding-3-small" }),
   };
   let redact = v.redact_pii;
@@ -213,7 +213,8 @@ async function viewSettings(content) {
     card("Document processing", "How BRDs are split before being sent to the model.",
       h("div", { class: "form-grid" },
         field("Section size (characters)", inputs.chunk_chars, "Sections follow BRD headings, then split at this size. " + limit("chunk_chars")),
-        field("Max sections per run", inputs.max_chunks_per_run, "Guards cost on very large BRDs. " + limit("max_chunks_per_run")))),
+        field("Max sections per run", inputs.max_chunks_per_run, "Guards cost on very large BRDs. " + limit("max_chunks_per_run")),
+        field("AI requests in parallel per run", inputs.ai_concurrency, "Sections a run asks the AI about at once; 1 is one at a time. All runs together never exceed MAX_RUN_AI_CALLS (default 8). " + limit("ai_concurrency")))),
     card("Retrieval (RAG)", "Related BRD passages from pgvector are added as context when writing stories.",
       h("div", { class: "form-grid" },
         field("Passages per request", inputs.rag_top_k, "0 disables retrieval. " + limit("rag_top_k")),

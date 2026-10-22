@@ -118,7 +118,8 @@ def verify(secret: str, body: bytes, headers, tolerance=300) -> bool:
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL` | single sign-on (Okta, Entra ID, Google, Keycloak, Salesforce...) | off |
 | `OIDC_USERNAME_CLAIM`, `OIDC_SCOPES` | claim used as username; requested scopes | `email`; `openid email profile` |
 | `OIDC_AUTO_PROVISION_ROLE` | role for first-time SSO users (empty = only pre-registered users) | empty |
-| `DB_POOL_MAX`, `DB_POOL_TIMEOUT` | database connections per process, and seconds a request waits for one before getting a retryable 503 | `10`, `10` |
+| `DB_POOL_MAX`, `DB_POOL_TIMEOUT` | database connections per process, and seconds a request waits for one before getting a retryable 503 | `20`, `10` |
+| `MAX_RUN_AI_CALLS` | background AI calls in flight at once across all runs (each run asks `ai_concurrency` sections at a time, a generation setting, default 4) | `8` |
 | `PUSH_BUDGET_SECONDS` | a tracker push stops after this long and reports how many stories remain (push again to continue; nothing is duplicated). Keep it under the proxy timeout | `60` |
 | `SESSION_IDLE_MINUTES` | sign SSO users out after this much inactivity (activity extends the session, up to its 8 h cap); `0` disables | `30` |
 | `ALLOW_PRIVATE_REPO_HOSTS` | allow repository URLs on private networks (internal Git) | `false` |

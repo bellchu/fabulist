@@ -29,6 +29,7 @@ DEFAULTS: Dict[str, Any] = {
     "timeout_seconds": config.LLM_TIMEOUT,
     "chunk_chars": config.CHUNK_CHARS,
     "max_chunks_per_run": config.MAX_CHUNKS_PER_RUN,
+    "ai_concurrency": 4,  # sections (or story batches) a run asks the AI about at once
     "rag_top_k": config.RAG_TOP_K,
     "redact_pii": True,
     "embed_provider_id": "",  # "" = offline hash embeddings
@@ -36,7 +37,7 @@ DEFAULTS: Dict[str, Any] = {
 }
 NUMERIC_LIMITS = {
     "temperature": (0.0, 1.0), "max_output_tokens": (256, 64000), "timeout_seconds": (10, 600),
-    "chunk_chars": (1000, 50000), "max_chunks_per_run": (1, 2000), "rag_top_k": (0, 20),
+    "chunk_chars": (1000, 50000), "max_chunks_per_run": (1, 2000), "rag_top_k": (0, 20), "ai_concurrency": (1, 16),
 }
 
 

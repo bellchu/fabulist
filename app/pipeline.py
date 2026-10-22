@@ -5,6 +5,8 @@ reviewed requirements into epics/features/stories linked back to those IDs.
 """
 import json
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import embeddings, llm, quality, taxonomy
@@ -204,21 +206,58 @@ def normalize_story(raw: Any, fallback: Optional[Dict[str, str]] = None) -> Opti
     }
 
 
+_usage_lock = threading.Lock()
+
+
+def _count(usage: Usage, u: Dict[str, int]) -> None:
+    with _usage_lock:  # sections are asked in parallel: += on a shared dict is not atomic
+        usage["in"] += u["in"]
+        usage["out"] += u["out"]
+        usage["requests"] = usage.get("requests", 0) + 1
+
+
+def _in_order(count: int, work: Callable[[int], Any], workers: int, progress: Progress, describe: Callable[[int], str]) -> List[Any]:
+    """[work(i) for i in range(count)], with up to `workers` calls in flight, results in order. `progress(describe(i))` is called here, in
+    the calling thread, as each result is awaited in order, so it is still the run's heartbeat and its cancellation checkpoint. The first
+    failure (in order) or a cancel drops the work not yet started and is raised."""
+    if workers <= 1 or count <= 1:
+        results = []
+        for i in range(count):
+            progress(describe(i))
+            results.append(work(i))
+        return results
+    cancel = llm.get_cancel_check()
+
+    def task(i: int) -> Any:
+        llm.set_cancel_check(cancel)  # the cancel hook is per thread; also what marks this as a background call
+        return work(i)
+    pool = ThreadPoolExecutor(max_workers=min(workers, count), thread_name_prefix="ai")
+    futures = [pool.submit(task, i) for i in range(count)]
+    try:
+        results = []
+        for i, future in enumerate(futures):
+            progress(describe(i))
+            results.append(future.result())
+        return results
+    except BaseException:
+        for future in futures:
+            future.cancel()
+        raise
+    finally:
+        pool.shutdown(wait=True)  # calls already in flight finish (or notice the cancel); nothing new starts
+
+
 def _ask(profile: Dict[str, Any], opts: Dict[str, Any], system: str, prompt: str, usage: Usage) -> List[Any]:
     if opts.get("redact_pii", True):
         prompt = llm.redact(prompt)
     text, u = llm.complete(profile, system, prompt, opts)
-    usage["in"] += u["in"]
-    usage["out"] += u["out"]
-    usage["requests"] = usage.get("requests", 0) + 1
+    _count(usage, u)
     try:
         return parse_json_array(text)
     except (ValueError, json.JSONDecodeError):
         text, u = llm.complete(profile, system, "Your previous reply was not valid JSON. Return ONLY the JSON "
                                                  "array for this input.\n\n" + prompt, opts)
-        usage["in"] += u["in"]
-        usage["out"] += u["out"]
-        usage["requests"] += 1
+        _count(usage, u)
         try:
             return parse_json_array(text)
         except (ValueError, json.JSONDecodeError):
@@ -272,14 +311,17 @@ def extract_requirements(documents: List[Dict[str, Any]], platform: str, profile
                          % (len(work), opts["max_chunks_per_run"]))
     out: List[Dict[str, Any]] = []
     seen: Dict[str, Dict[str, Any]] = {}
-    for i, (doc, sec) in enumerate(work, 1):
-        progress("Reading section %d of %d: %s" % (i, len(work), sec["heading"][:60]))
+    context = _platform_context(platform)
+
+    def read(i: int) -> List[Any]:
+        doc, sec = work[i]
         if profile["kind"] == "mock":
-            raw = mock_requirements(sec)
-        else:
-            prompt = "%s\n\nDocument: %s\nSection: %s > %s\n\nBRD text:\n%s" % (
-                _platform_context(platform), doc["filename"], sec["epic"], sec["heading"], sec["text"])
-            raw = _ask_at("Section %d of %d (%s)" % (i, len(work), sec["heading"][:60]), profile, opts, REQ_SYSTEM, prompt, usage)
+            return mock_requirements(sec)
+        prompt = "%s\n\nDocument: %s\nSection: %s > %s\n\nBRD text:\n%s" % (context, doc["filename"], sec["epic"], sec["heading"], sec["text"])
+        return _ask_at("Section %d of %d (%s)" % (i + 1, len(work), sec["heading"][:60]), profile, opts, REQ_SYSTEM, prompt, usage)
+    workers = 1 if profile["kind"] == "mock" else int(opts.get("ai_concurrency", 1))
+    answers = _in_order(len(work), read, workers, progress, lambda i: "Reading section %d of %d: %s" % (i + 1, len(work), work[i][1]["heading"][:60]))
+    for (doc, sec), raw in zip(work, answers):
         for r in raw:
             req = normalize_requirement(r, sec, doc["filename"])
             if not req:
@@ -387,16 +429,21 @@ def generate_stories(reqs: List[Dict[str, Any]], project_id: str, platform: str,
         raise ValueError("Too many requirement groups (%d) for one run (limit %d). Raise 'Max sections per run' in Admin > Generation "
                          "settings, or generate from approved requirements only." % (len(batches), int(opts["max_chunks_per_run"])))
     raw: List[Dict[str, Any]] = []
-    for i, (epic, section, items) in enumerate(batches, 1):
-        progress("Writing stories %d of %d: %s" % (i, len(batches), section[:60]))
+    platform_context = _platform_context(platform)
+
+    def write(i: int) -> List[Any]:
+        epic, section, items = batches[i]
         lines = "\n".join("%s [%s] %s" % (r["key"], r["type"], r["statement"]) for r in items)
         related = []
         if int(opts.get("rag_top_k", 0)) > 0:
             related = embeddings.search(project_id, " ".join(r["statement"] for r in items)[:1500], int(opts["rag_top_k"]))
         context = ("\n\nRelated BRD context (for consistency only):\n" + "\n---\n".join(h["text"][:600] for h in related)) if related else ""
-        prompt = "%s%s\n\nEpic: %s\nFeature area: %s\n\nRequirements:\n%s" % (
-            _platform_context(platform), context, epic, section, lines)
-        for s in _ask_at("Story group %d of %d (%s)" % (i, len(batches), section[:60]), profile, opts, STORY_SYSTEM, prompt, usage):
+        prompt = "%s%s\n\nEpic: %s\nFeature area: %s\n\nRequirements:\n%s" % (platform_context, context, epic, section, lines)
+        return _ask_at("Story group %d of %d (%s)" % (i + 1, len(batches), section[:60]), profile, opts, STORY_SYSTEM, prompt, usage)
+    answers = _in_order(len(batches), write, int(opts.get("ai_concurrency", 1)), progress,
+                        lambda i: "Writing stories %d of %d: %s" % (i + 1, len(batches), batches[i][1][:60]))
+    for (epic, section, _items), stories in zip(batches, answers):
+        for s in stories:
             if isinstance(s, dict):
                 s.setdefault("epic", epic)
                 s.setdefault("feature", section)
