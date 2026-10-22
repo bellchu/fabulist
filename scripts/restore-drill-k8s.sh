@@ -100,4 +100,23 @@ PY
 echo "== the weekly restore-check job script, against this dump (as the CronJob runs it)"
 kubectl -n "$NS" exec -i drill -c checker -- sh -c 'cat > /tmp/restore-check-job.sh' < scripts/restore-check-job.sh
 kubectl -n "$NS" exec drill -c checker -- env BACKUP_DIR=/backups MAX_AGE_SECONDS=3600 SCRATCH_PORT=5434 sh /tmp/restore-check-job.sh
+echo "== backup retention: 7 days of dumps and the Sunday of each of the last 5 weeks"
+kubectl -n "$NS" exec -i drill -c checker -- sh -c 'cat > /tmp/backup-prune-job.sh' < scripts/backup-prune-job.sh
+kubectl -n "$NS" exec drill -c checker -- sh -c '
+  mkdir -p /tmp/prune && cd /tmp/prune
+  today=$(date -u +%s)
+  mk() { d=$(date -u -d "@$((today - $1 * 86400))" +%Y%m%d); touch -d "@$((today - $1 * 86400))" "fabulist-$d-023000.dump"; }
+  for n in $(seq 0 60); do mk $n; done   # one dump for each of the last 61 days
+  before=$(ls | wc -l)
+  BACKUP_DIR=/tmp/prune sh /tmp/backup-prune-job.sh >/dev/null
+  left=$(ls | wc -l)
+  recent=$(for n in 0 1 2 3 4 5 6 7; do d=$(date -u -d "@$((today - n * 86400))" +%Y%m%d); ls fabulist-$d-* 2>/dev/null; done | wc -l)
+  [ "$recent" = 8 ] || { echo "FAIL: dumps of the last week were pruned ($recent of 8 left)" >&2; exit 1; }
+  sundays=$(for n in $(seq 8 35); do d=$(date -u -d "@$((today - n * 86400))" +%u); [ "$d" = 7 ] && echo x; done | wc -l)
+  [ "$left" = "$((8 + sundays))" ] || { echo "FAIL: $left dumps left; expected the last 8 days plus $sundays Sundays" >&2; exit 1; }
+  old=$(ls | while read f; do d=${f#fabulist-}; d=${d%%-*}; s=$(date -u -d "$d" +%u); echo $s; done | sort -u)
+  # everything older than a week that is left was made on a Sunday, and nothing is older than 35 days
+  for f in $(ls); do d=${f#fabulist-}; d=${d%%-*}; age=$(( (today - $(stat -c %Y $f)) / 86400 )); [ "$age" -le 7 ] || [ "$(date -u -d "$d" +%u)" = 7 ] || { echo "FAIL: $f is $age days old and not a Sunday dump" >&2; exit 1; }; [ "$age" -le 35 ] || { echo "FAIL: $f is older than 35 days" >&2; exit 1; }; done
+  echo "retention ok: $before dumps, $left kept (last week all kept, older ones only Sundays up to 35 days)"
+'
 echo "restore drill passed"

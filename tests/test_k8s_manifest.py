@@ -161,3 +161,9 @@ def test_the_weekly_restore_check_cannot_touch_the_real_data():
     assert "restore-check.yaml" in deploy and "restore-check-job.sh" in deploy
     monitoring = open(os.path.join(os.path.dirname(APP_PATH), "monitoring.yaml")).read()
     assert "FabulistRestoreCheckFailed" in monitoring and "fabulist-restore-check" in monitoring
+
+
+def test_backup_retention_is_a_tested_script_not_an_inline_find():
+    backup = open(os.path.join(os.path.dirname(APP_PATH), "backup.yaml")).read()
+    assert "sh /job/backup-prune-job.sh" in backup and "fabulist-job-scripts" in backup and "-mtime +7 -delete" not in backup
+    assert "backup-prune-job.sh" in open(os.path.join(os.path.dirname(APP_PATH), "..", "..", "scripts", "restore-drill-k8s.sh")).read(), "the drill tests it"

@@ -44,15 +44,18 @@ spec:
                   f=/backups/fabulist-$(date -u +%Y%m%d-%H%M%S).dump;
                   pg_dump -h postgres.fabulist.svc.cluster.local -U fabulist -d fabulist -Fc -f "$f.part";
                   mv "$f.part" "$f";
-                  find /backups -name 'fabulist-*.dump' -mtime +7 -delete;
-                  ls -lh /backups
+                  sh /job/backup-prune-job.sh
               resources:
                 requests: {cpu: 50m, memory: 64Mi}
                 limits: {memory: 512Mi}
               volumeMounts:
                 - name: backups
                   mountPath: /backups
+                - {name: job, mountPath: /job}
           volumes:
             - name: backups
               persistentVolumeClaim:
                 claimName: fabulist-backups
+            - name: job
+              configMap:
+                name: fabulist-job-scripts
