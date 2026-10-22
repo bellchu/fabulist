@@ -63,7 +63,7 @@ def test_webhooks_that_did_not_opt_in_hear_nothing(client, monkeypatch):
     sent = _capture(monkeypatch)
     client.post("/api/admin/integrations", json=HOOK)
     _run(client)
-    _wait_for(sent, 1)
+    time.sleep(0.5)  # a notification, if one were going to be sent, goes out on a thread right after the run ends
     assert sent == []
 
 
@@ -118,3 +118,4 @@ def test_stuck_runs_are_found_without_anyone_starting_another_run(client, monkey
     assert sorted(s[1]["run"]["id"] for s in sent) == sorted(hung)
     assert db.one("SELECT status FROM runs WHERE id=%s", (live,))["status"] == "running", "a run that is making progress is left alone"
     assert workspace.recover_all_stuck_runs() == 0
+    db.execute("UPDATE runs SET status='failed' WHERE id=%s", (live,))  # the fixture waits for 'running' rows at teardown (30 s if one never ends)
