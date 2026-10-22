@@ -130,7 +130,7 @@ function renderHome(content, keepView = false) {
     h("div", { class: "grow" }, h("div", { class: "object-label" }, archivedList ? "Archived projects" : "Projects"), h("h1", {}, archivedList ? "Archived" : "All projects"),
       h("p", { class: "sub" }, list.length + (list.length === 1 ? " item" : " items") + (archivedList
         ? " · Read-only. Open a project to restore it." : " · Each project turns BRDs into reviewed requirements and a traceable backlog."))),
-    h("div", { class: "row" }, toggle, state.me.role === "viewer" ? null : importButton(), h("button", { class: "btn btn-primary", onclick: newProjectDialog }, "New")));
+    h("div", { class: "row" }, toggle, state.me.role === "viewer" ? null : importButton(), state.me.role === "viewer" ? null : h("button", { class: "btn btn-primary", onclick: newProjectDialog }, "New")));
   if (!list.length) {
     mount(content, head, h("div", { class: "card" }, archivedList
       ? empty({ iconName: "folder", title: "No archived projects", text: "Archived projects are kept read-only, with their audit trail, until an administrator deletes them." })
