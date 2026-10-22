@@ -25,11 +25,13 @@ CSRF_HEADER = "fabulist"
 SECURITY_HEADERS = {
     # All scripts and styles are served from /static; inline style properties are set via CSSOM only.
     "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-                               "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+                               "connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Cross-Origin-Opener-Policy": "same-origin",    # a window opened from another site gets no handle on this one
+    "Cross-Origin-Resource-Policy": "same-origin",  # other sites cannot embed its data or files
 }
 
 
