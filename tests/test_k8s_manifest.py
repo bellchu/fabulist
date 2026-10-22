@@ -129,3 +129,10 @@ def test_a_database_outage_does_not_restart_the_app():
     live = APP.split("livenessProbe:")[1].split("resources:")[0]
     ready = APP.split("readinessProbe:")[1].split("livenessProbe:")[0]
     assert "/livez" in live and "/healthz" in ready
+
+
+def test_a_slow_schema_upgrade_is_not_killed_by_the_liveness_probe():
+    startup = APP.split("startupProbe:")[1].split("livenessProbe:")[0]
+    period = int(startup.split("periodSeconds:")[1].split()[0])
+    failures = int(startup.split("failureThreshold:")[1].split()[0])
+    assert "/livez" in startup and period * failures >= 300
