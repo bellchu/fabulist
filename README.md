@@ -34,6 +34,8 @@ IDs → human review → epics, features and stories → requirements traceabili
    **Refine with AI** proposes an improved version of a story that fixes its issues; you
    review a before/after comparison before applying it. **Estimate with AI** proposes relative
    story points with a rationale for each unestimated story. Long AI runs can be cancelled.
+   Stories that already exist elsewhere (a Jira CSV export, another Fabulist's Stories export) come in with **Import file**
+   on the Stories tab (CSV or Excel; a Title or Summary column is needed; checked first, repeats skipped).
    Before a large run (20 or more AI requests) the app says how many requests it will make, with a time and token
    estimate learned from your own finished runs, and asks for confirmation; a run over the configured limit is refused up
    front with what to change.

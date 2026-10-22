@@ -568,18 +568,23 @@ const SORTS = {
 };
 
 // Requirements that already exist in a spreadsheet: pick a .csv or .xlsx (a column called Requirement or Statement is needed).
-function importRequirementsButton() {
-  const file = h("input", { type: "file", accept: ".csv,.xlsx", class: "hidden", "aria-label": "Requirements file (CSV or Excel)" });
+function importFileButton(kind) {  // kind: "requirement" or "story"
+  const plural = kind === "story" ? "stories" : "requirements";
+  const file = h("input", { type: "file", accept: ".csv,.xlsx", class: "hidden", "aria-label": (kind === "story" ? "Stories" : "Requirements") + " file (CSV or Excel)" });
   file.addEventListener("change", guard(async () => {
     const chosen = file.files[0];
     if (!chosen) return;
     const fd = new FormData(); fd.append("file", chosen);
-    const r = await api.upload(base() + "/requirements/import-file", fd);
-    toast("Imported " + r.created + " requirement" + (r.created === 1 ? "" : "s") + (r.duplicates_skipped ? " (" + r.duplicates_skipped + " already there, skipped)" : ""), "ok");
+    const r = await api.upload(base() + "/" + plural + "/import-file", fd);
+    toast("Imported " + r.created + " " + (r.created === 1 ? kind : plural) + (r.duplicates_skipped ? " (" + r.duplicates_skipped + " already there, skipped)" : ""), "ok");
     rerender();
   }));
-  return h("span", {}, file, h("button", { class: "btn", title: "Add requirements from a CSV or Excel file: a column called Requirement or Statement is needed; Type, Epic, Section, Source ID, Actors and Status are used when present", onclick: () => { file.value = ""; file.click(); } }, icon("upload"), "Import file"));
+  const hint = kind === "story"
+    ? "Add stories from a CSV or Excel file (a Jira export works): a column called Title or Summary is needed; Narrative or Description, Epic, Feature, Persona, Priority, Story points, Acceptance criteria, Requirement IDs and Status are used when present"
+    : "Add requirements from a CSV or Excel file: a column called Requirement or Statement is needed; Type, Epic, Section, Source ID, Actors and Status are used when present";
+  return h("span", {}, file, h("button", { class: "btn", title: hint, onclick: () => { file.value = ""; file.click(); } }, icon("upload"), "Import file"));
 }
+const importRequirementsButton = () => importFileButton("requirement");
 
 async function viewRequirements(body) {
   const [reqs, talk] = await Promise.all([api.get(base() + "/requirements"), api.get(base() + "/comments")]);
@@ -782,7 +787,7 @@ async function viewStories(body) {
   if (!stories.length) {
     mount(body, h("div", { class: "card" }, empty({ iconName: "map", title: "No stories yet",
       text: reqs.length ? "Generate stories from your reviewed requirements." : "Extract and review requirements first.",
-      action: writer(h("button", { class: "btn", onclick: () => storyDrawer(null) }, icon("plus"), "Add manually")) })));
+      action: writer(h("span", { class: "row" }, importFileButton("story"), h("button", { class: "btn", onclick: () => storyDrawer(null) }, icon("plus"), "Add manually"))) })));
     return;
   }
   const box = h("div");
@@ -828,6 +833,7 @@ async function viewStories(body) {
     q, status, ready,
     count,
     writer(h("button", { class: "btn", onclick: guard(estimateDialog) }, icon("sparkles"), "Estimate with AI")),
+    writer(importFileButton("story")),
     writer(h("button", { class: "btn", onclick: () => storyDrawer(null) }, icon("plus"), "Add story"))), bulk, box);
   render();
 }

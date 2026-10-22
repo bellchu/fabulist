@@ -1090,6 +1090,96 @@ def _csv_rows(text: str) -> List[Dict[str, Any]]:
         raise HTTPException(400, "The file could not be read as CSV (%s)" % exc)
 
 
+_STORY_COLUMNS = {
+    "title": "title", "summary": "title", "story": "title",
+    "narrative": "narrative", "description": "narrative", "user story": "narrative",
+    "epic": "epic", "epic name": "epic", "epic link": "epic", "feature": "feature",
+    "persona": "persona", "role": "persona", "priority": "priority",
+    "story points": "story_points", "points": "story_points", "estimate": "story_points",
+    "acceptance criteria": "acceptance_criteria", "acceptance": "acceptance_criteria", "criteria": "acceptance_criteria",
+    "requirement ids": "requirement_ids", "requirements": "requirement_ids", "requirement": "requirement_ids",
+    "labels": "labels", "status": "status"}
+
+
+@router.post("/api/projects/{pid}/stories/import")
+def import_stories(pid: str, request: Request, body: Dict[str, Any] = Body(...)):
+    """Add stories from CSV text (a Jira export, a spreadsheet, or Fabulist's own Stories export). Same rules as the requirement import."""
+    _project(pid)
+    return _import_story_rows(pid, _csv_rows(str(body.get("csv") or "")), history.actor(request), "CSV")
+
+
+@router.post("/api/projects/{pid}/stories/import-file")
+def import_stories_file(pid: str, request: Request, file: UploadFile = File(...)):
+    """The same from an uploaded .csv or .xlsx file (the sheet called Stories, else the first)."""
+    _project(pid)
+    data = file.file.read(config.MAX_UPLOAD_BYTES + 1)
+    if len(data) > config.MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "File too large")
+    name = (file.filename or "").lower()
+    if name.endswith(".xlsx"):
+        with _document_slot():
+            try:
+                rows = parsing.xlsx_rows(data, "Stories")
+            except parsing.ParseError as exc:
+                raise HTTPException(400, str(exc))
+        return _import_story_rows(pid, rows, history.actor(request), "Excel")
+    if name.endswith(".csv"):
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = data.decode("latin-1")
+        return _import_story_rows(pid, _csv_rows(text), history.actor(request), "CSV")
+    raise HTTPException(400, "Choose a .csv or .xlsx file")
+
+
+def _import_story_rows(pid: str, rows: List[Dict[str, Any]], who: str, origin: str) -> Dict[str, int]:
+    """Needs a title column; validated first, nothing imported if any row is wrong; a title already in the project is skipped, not doubled."""
+    if not rows:
+        raise HTTPException(400, "The file has no rows. The first row must name the columns, with at least one called Title or Summary.")
+    columns = {h: _STORY_COLUMNS[re.sub(r"[\s_]+", " ", h.strip().lower())] for h in rows[0] if h and re.sub(r"[\s_]+", " ", h.strip().lower()) in _STORY_COLUMNS}
+    if "title" not in columns.values():
+        raise HTTPException(400, "No Title or Summary column found in the first row")
+    if len(rows) > MAX_IMPORT_ROWS:
+        raise HTTPException(400, "At most %d rows per import; split the file" % MAX_IMPORT_ROWS)
+    seen = {pipeline._norm_key(r["title"]) for r in db.rows("SELECT data->>'title' AS title FROM stories WHERE project_id=%s", (pid,))}
+    fresh: List[Tuple[Dict[str, Any], str]] = []
+    errors: List[str] = []
+    skipped = 0
+    for line, row in enumerate(rows, 2):
+        raw: Dict[str, Any] = {}
+        for header, field_name in columns.items():
+            value = (row.get(header) or "").strip()
+            if field_name == "acceptance_criteria":
+                raw[field_name] = [v for v in value.split("\n") if v.strip()]
+            elif field_name in ("requirement_ids", "labels"):
+                raw[field_name] = [v for v in re.split(r"[;,\s]+", value) if v.strip()]
+            elif value:
+                raw[field_name] = value
+        status = str(raw.pop("status", "draft")).lower()
+        item = pipeline.normalize_story(raw)
+        if status not in STORY_STATUSES:
+            errors.append("line %d: status must be draft, approved or rejected" % line)
+        elif item is None:
+            errors.append("line %d: the title is missing" % line)
+        elif pipeline._norm_key(item["title"]) in seen:
+            skipped += 1
+        else:
+            seen.add(pipeline._norm_key(item["title"]))
+            fresh.append((item, status))
+    if errors:
+        raise HTTPException(400, "Nothing was imported. " + "; ".join(errors[:10]) + ("; and %d more" % (len(errors) - 10) if len(errors) > 10 else ""))
+    with db.conn() as c:
+        seq = c.execute("SELECT coalesce(max(seq), -1) + 1 AS n FROM stories WHERE project_id=%s", (pid,)).fetchone()["n"]
+        for item, status in fresh:
+            new = db.new_id()
+            c.execute("INSERT INTO stories (id, project_id, run_id, seq, status, data) VALUES (%s,%s,'manual',%s,%s,%s)", (new, pid, seq, status, json.dumps(item)))
+            history.record(c, pid, "story", new, history.item_key("story", seq), "created", who, _label(item))
+            seq += 1
+        if fresh:
+            history.record(c, pid, "project", pid, "", "imported", who, "%d stories from %s" % (len(fresh), origin))
+    return {"created": len(fresh), "duplicates_skipped": skipped}
+
+
 def _import_rows(pid: str, rows: List[Dict[str, Any]], who: str, origin: str) -> Dict[str, int]:
     """Needs a statement column; everything is validated first and nothing is imported if any row is wrong. A statement that already exists
     in the project is skipped, not doubled."""
