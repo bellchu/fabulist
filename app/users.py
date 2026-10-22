@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from fastapi import APIRouter, Body, HTTPException, Request
 
-from . import config, db
+from . import audit, config, db
 
 _COMMENT_PATH = re.compile(r"^/api/projects/[^/]+/comments(/[^/]+/resolve)?$")
 _OWN_TOKEN_PATH = re.compile(r"^/api/me/tokens(/[^/]+)?$")  # every role manages its own tokens
@@ -189,7 +189,7 @@ def list_users():
 
 
 @router.post("", status_code=201)
-def create_user(body: Dict[str, Any] = Body(...)):
+def create_user(request: Request, body: Dict[str, Any] = Body(...)):
     username = str(body.get("username") or "").strip()
     role = str(body.get("role") or "analyst")
     password = str(body.get("password") or "")
@@ -205,11 +205,12 @@ def create_user(body: Dict[str, Any] = Body(...)):
     uid = db.new_id()
     db.execute("INSERT INTO users (id, username, password_hash, role, disabled, created) VALUES (%s,%s,%s,%s,FALSE,%s)",
                (uid, username, hash_password(password), role, db.now()))
+    audit.record(request, "user created", username, "role " + role)
     return _public(db.one("SELECT * FROM users WHERE id=%s", (uid,)))
 
 
 @router.patch("/{uid}")
-def update_user(uid: str, body: Dict[str, Any] = Body(...)):
+def update_user(uid: str, request: Request, body: Dict[str, Any] = Body(...)):
     row = db.one("SELECT * FROM users WHERE id=%s", (uid,))
     if not row:
         raise HTTPException(404, "User not found")
@@ -223,16 +224,23 @@ def update_user(uid: str, body: Dict[str, Any] = Body(...)):
         pw_hash = hash_password(str(body["password"]))
     db.execute("UPDATE users SET role=%s, disabled=%s, password_hash=%s WHERE id=%s", (role, disabled, pw_hash, uid))
     forget(row["username"])
+    if role != row["role"]:
+        audit.record(request, "role changed", row["username"], "%s to %s" % (row["role"], role), {"role": {"from": row["role"], "to": role}})
+    if disabled != row["disabled"]:
+        audit.record(request, "user disabled" if disabled else "user enabled", row["username"])
+    if body.get("password"):
+        audit.record(request, "password reset", row["username"])
     return _public(db.one("SELECT * FROM users WHERE id=%s", (uid,)))
 
 
 @router.delete("/{uid}", status_code=204)
-def delete_user(uid: str):
+def delete_user(uid: str, request: Request):
     row = db.one("SELECT username FROM users WHERE id=%s", (uid,))
     if not row:
         raise HTTPException(404, "User not found")
     db.execute("DELETE FROM users WHERE id=%s", (uid,))
     forget(row["username"])
+    audit.record(request, "user deleted", row["username"])
 
 
 def current(request: Request) -> Dict[str, str]:

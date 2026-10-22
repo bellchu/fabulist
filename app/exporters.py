@@ -69,6 +69,12 @@ def history_csv(entries: List[Dict[str, Any]]) -> Output:
                                   json.dumps(e["changes"], ensure_ascii=False, sort_keys=True)] for e in entries])
 
 
+def admin_audit_csv(entries: List[Dict[str, Any]]) -> Output:
+    return _csv(["When", "By", "Action", "Target", "Summary", "Changes"],
+                [[e["created"], e["actor"], e["action"], e["target"], e["summary"],
+                  json.dumps(e["changes"], ensure_ascii=False, sort_keys=True)] for e in entries])
+
+
 def stories_csv(stories: List[Item], reqs: List[Item]) -> Output:
     return _csv(STORY_COLUMNS, [[_cell(s, c) for c in STORY_COLUMNS] for s in stories])
 

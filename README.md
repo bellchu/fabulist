@@ -95,6 +95,11 @@ def verify(secret: str, body: bytes, headers, tolerance=300) -> bool:
 - **Users & roles**: named accounts (scrypt-hashed passwords) with admin, analyst or viewer
   roles enforced on the server. The deployment's bootstrap account is a break-glass admin.
 - **Overview / Activity**: usage, token counts, failure rate and a log of every run.
+- **Administrative changes** (Activity page; `GET /api/admin/audit`, `/api/admin/audit.csv`): an append-only
+  trail of who changed generation settings (old and new value), providers, accounts (role,
+  disable, password reset, delete), integrations and the taxonomy. Passwords and API keys are
+  never written to it, only that they were replaced. A test fails if a new admin write route
+  does not record.
 
 ## Configuration (environment)
 

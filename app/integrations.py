@@ -11,9 +11,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Request
 
-from . import db, settings
+from . import audit, db, settings
 
 router = APIRouter()
 KINDS = {"jira": "Jira (Cloud or Data Center)", "azure": "Azure DevOps Boards", "github": "GitHub Issues",
@@ -425,19 +425,24 @@ def _save(body: Dict[str, Any], iid: Optional[str]) -> Dict[str, Any]:
 
 
 @router.post("/api/admin/integrations", status_code=201)
-def create_integration(body: Dict[str, Any] = Body(...)):
-    return _save(body, None)
+def create_integration(request: Request, body: Dict[str, Any] = Body(...)):
+    saved = _save(body, None)
+    audit.record(request, "integration created", saved["name"], saved["kind"])
+    return saved
 
 
 @router.put("/api/admin/integrations/{iid}")
-def update_integration(iid: str, body: Dict[str, Any] = Body(...)):
-    return _save(body, iid)
+def update_integration(iid: str, request: Request, body: Dict[str, Any] = Body(...)):
+    saved = _save(body, iid)
+    audit.record(request, "integration updated", saved["name"], saved["kind"] + ("; token replaced" if body.get("token") else ""))
+    return saved
 
 
 @router.delete("/api/admin/integrations/{iid}", status_code=204)
-def delete_integration(iid: str):
-    get(iid)
+def delete_integration(iid: str, request: Request):
+    row = get(iid)
     db.execute("DELETE FROM integrations WHERE id=%s", (iid,))
+    audit.record(request, "integration deleted", row["name"], row["kind"])
 
 
 @router.post("/api/admin/integrations/{iid}/test")

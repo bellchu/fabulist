@@ -5,9 +5,9 @@ import json
 import re
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Request, Response
 
-from . import config, db, embeddings, llm, settings, taxonomy
+from . import audit, config, db, embeddings, exporters, llm, settings, taxonomy
 from .fairuse import ai_fair_use
 
 router = APIRouter(prefix="/api/admin")
@@ -40,6 +40,17 @@ def runs(limit: int = 50):
                       ORDER BY r.created DESC, r.id LIMIT %s""", (min(limit, 200),))
 
 
+@router.get("/audit")
+def admin_audit(limit: int = 100, before: int = 0, actor: str = "", action: str = ""):
+    return audit.entries(limit, before, actor, action)
+
+
+@router.get("/audit.csv")
+def admin_audit_csv():
+    payload, mime = exporters.admin_audit_csv(audit.all_entries())
+    return Response(payload, media_type=mime, headers={"Content-Disposition": 'attachment; filename="admin-audit-trail.csv"'})
+
+
 @router.get("/settings")
 def get_settings() -> Dict[str, Any]:
     return {"values": settings.get_settings(), "defaults": settings.DEFAULTS, "limits": settings.NUMERIC_LIMITS,
@@ -47,9 +58,12 @@ def get_settings() -> Dict[str, Any]:
 
 
 @router.put("/settings")
-def put_settings(body: Dict[str, Any] = Body(...)):
+def put_settings(request: Request, body: Dict[str, Any] = Body(...)):
     before = settings.get_settings()
     values = settings.update_settings(body)
+    changed = {k: {"from": before.get(k), "to": values.get(k)} for k in values if before.get(k) != values.get(k)}
+    if changed:
+        audit.record(request, "settings changed", "Generation settings", ", ".join(sorted(changed)), changed)
     embed_changed = (before["embed_provider_id"], before["embed_model"]) != (values["embed_provider_id"], values["embed_model"])
     return {"values": values, "reindex_recommended": embed_changed}
 
@@ -67,23 +81,31 @@ def providers() -> Dict[str, Any]:
 
 
 @router.post("/providers", status_code=201)
-def create_provider(body: Dict[str, Any] = Body(...)):
-    return settings.save_provider(body)
+def create_provider(request: Request, body: Dict[str, Any] = Body(...)):
+    saved = settings.save_provider(body)
+    audit.record(request, "provider created", saved["name"], "%s, model %s" % (saved["kind"], saved.get("model") or "-"))
+    return saved
 
 
 @router.put("/providers/{pid}")
-def update_provider(pid: str, body: Dict[str, Any] = Body(...)):
-    return settings.save_provider(body, pid)
+def update_provider(pid: str, request: Request, body: Dict[str, Any] = Body(...)):
+    saved = settings.save_provider(body, pid)
+    key_note = "; key replaced" if body.get("api_key") else "; key removed" if body.get("clear_key") else ""
+    audit.record(request, "provider updated", saved["name"], "%s, model %s%s" % (saved["kind"], saved.get("model") or "-", key_note))
+    return saved
 
 
 @router.delete("/providers/{pid}", status_code=204)
-def delete_provider(pid: str):
+def delete_provider(pid: str, request: Request):
+    row = db.one("SELECT name FROM providers WHERE id = %s", (pid,))
     settings.delete_provider(pid)
+    audit.record(request, "provider deleted", row["name"])
 
 
 @router.post("/providers/{pid}/default")
-def make_default(pid: str):
+def make_default(pid: str, request: Request):
     settings.set_default(pid)
+    audit.record(request, "provider set as default", db.one("SELECT name FROM providers WHERE id = %s", (pid,))["name"])
     return {"ok": True}
 
 
@@ -146,7 +168,7 @@ def get_taxonomy():
 
 
 @router.post("/taxonomy/classes", status_code=201)
-def create_class(body: Dict[str, Any] = Body(...)):
+def create_class(request: Request, body: Dict[str, Any] = Body(...)):
     c = _clean_class(body)
     if db.one("SELECT count(*) AS n FROM product_classes")["n"] >= MAX_CLASSES:
         raise HTTPException(400, "Taxonomy is limited to %d classes" % MAX_CLASSES)
@@ -156,11 +178,12 @@ def create_class(body: Dict[str, Any] = Body(...)):
     db.execute("INSERT INTO product_classes (id, name, attributes, keywords, description, created) VALUES (%s,%s,%s,%s,%s,%s)",
                (cid, c["name"], json.dumps(c["attributes"]), json.dumps(c["keywords"]), c["description"], db.now()))
     taxonomy.invalidate()
+    audit.record(request, "taxonomy class created", c["name"])
     return db.one("SELECT * FROM product_classes WHERE id=%s", (cid,))
 
 
 @router.put("/taxonomy/classes/{cid}")
-def update_class(cid: str, body: Dict[str, Any] = Body(...)):
+def update_class(cid: str, request: Request, body: Dict[str, Any] = Body(...)):
     c = _clean_class(body)
     if not db.one("SELECT 1 AS x FROM product_classes WHERE id=%s", (cid,)):
         raise HTTPException(404, "Class not found")
@@ -169,17 +192,21 @@ def update_class(cid: str, body: Dict[str, Any] = Body(...)):
     db.execute("UPDATE product_classes SET name=%s, attributes=%s, keywords=%s, description=%s WHERE id=%s",
                (c["name"], json.dumps(c["attributes"]), json.dumps(c["keywords"]), c["description"], cid))
     taxonomy.invalidate()
+    audit.record(request, "taxonomy class updated", c["name"])
     return db.one("SELECT * FROM product_classes WHERE id=%s", (cid,))
 
 
 @router.delete("/taxonomy/classes/{cid}", status_code=204)
-def delete_class(cid: str):
+def delete_class(cid: str, request: Request):
+    row = db.one("SELECT name FROM product_classes WHERE id=%s", (cid,))
     db.execute("DELETE FROM product_classes WHERE id=%s", (cid,))
     taxonomy.invalidate()
+    if row:
+        audit.record(request, "taxonomy class deleted", row["name"])
 
 
 @router.put("/taxonomy/rules")
-def put_rules(body: Dict[str, Any] = Body(...)):
+def put_rules(request: Request, body: Dict[str, Any] = Body(...)):
     """Replace attribute -> acceptance-criterion rules. Body: {"rules": {attribute: criteria}}."""
     rules = body.get("rules")
     if not isinstance(rules, dict):
@@ -197,11 +224,12 @@ def put_rules(body: Dict[str, Any] = Body(...)):
         for attr, text in clean.items():
             c.execute("INSERT INTO attribute_rules (attribute, criteria) VALUES (%s,%s)", (attr, text))
     taxonomy.invalidate()
+    audit.record(request, "taxonomy rules replaced", "Attribute rules", "%d rules" % len(clean))
     return {"attribute_rules": db.rows("SELECT * FROM attribute_rules ORDER BY attribute")}
 
 
 @router.post("/taxonomy/import")
-def import_taxonomy(body: Dict[str, Any] = Body(...)):
+def import_taxonomy(request: Request, body: Dict[str, Any] = Body(...)):
     """CSV columns: name, attributes, keywords, description (lists separated by ';'). Upserts by name;
     mode=replace also removes classes that are not in the file."""
     text = str(body.get("csv") or "")
@@ -240,6 +268,7 @@ def import_taxonomy(body: Dict[str, Any] = Body(...)):
             c.execute("DELETE FROM product_classes WHERE id = ANY(%s)", (list(existing.values()),))
             removed = len(existing)
     taxonomy.invalidate()
+    audit.record(request, "taxonomy imported", "Product taxonomy", "%s: %d created, %d updated, %d removed" % (mode, created, updated, removed))
     return {"created": created, "updated": updated, "removed": removed}
 
 
