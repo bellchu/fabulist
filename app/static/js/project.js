@@ -380,6 +380,31 @@ async function viewSources(body) {
   });
   q.addEventListener("keydown", (e) => { if (e.key === "Enter") (readOnly() ? search : ask)(); });
 
+  // The documents are drawn a page at a time: a project can hold a thousand BRDs.
+  let docLimit = PAGE;
+  const docBox = h("div");
+  const renderDocs = () => {
+    const shown = docs.slice(0, docLimit);
+    const row = (d) => h("tr", {},
+      h("td", {}, h("div", { class: "row" }, icon("file"), h("b", {}, d.filename), d.extracted === null ? badge("New", "blue") : null)),
+      h("td", { class: "hide-sm" }, d.source === "repo" ? badge("Git", "violet") : badge("Upload")),
+      h("td", { class: "muted" }, fmt(Math.round(d.chars / 6)) + " words"),
+      h("td", { class: "hide-sm" }, d.chunks), h("td", { class: "muted small" }, timeAgo(d.created)),
+      h("td", { class: "nowrap", style: { textAlign: "right" } },
+        h("button", { class: "btn btn-sm btn-ghost", onclick: guard(async () => {
+          const full = await api.get(base() + "/documents/" + d.id);
+          modal({ title: full.filename, wide: true, body: h("div", { class: "pre" }, full.text), actions: [] });
+        }) }, "View"),
+        writer(h("button", { class: "btn btn-sm btn-ghost btn-danger", onclick: guard(async () => {
+          if (!(await confirmBox("Remove " + d.filename + "? Existing requirements are kept.", { danger: true, okLabel: "Remove" }))) return;
+          await api.del(base() + "/documents/" + d.id); rerender();
+        }) }, "Remove"))));
+    docBox.replaceChildren(h("div", { class: "table-wrap" }, h("table", { class: "table" },
+      h("thead", {}, h("tr", {}, [["Name", ""], ["Source", "hide-sm"], ["Size", ""], ["Indexed passages", "hide-sm"], ["Added", ""], ["", ""]].map(([x, c]) => h("th", { class: c }, x)))),
+      h("tbody", {}, shown.map(row), pagerRow(docs.length, shown.length, 6, (n) => { docLimit = n; renderDocs(); })))));
+  };
+  renderDocs();
+
   mount(body, 
     writer(h("div", { class: "grid grid-2", style: { marginBottom: "16px" } },
       h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Upload BRDs")), h("div", { class: "card-body" }, drop, fileInput)),
@@ -393,22 +418,7 @@ async function viewSources(body) {
     reposCard(repoList),
     h("div", { class: "card", style: { marginBottom: "16px" } },
       h("div", { class: "card-head" }, h("h3", { class: "grow" }, "Documents"), h("span", { class: "muted small" }, docs.length + " total")),
-      docs.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
-        h("thead", {}, h("tr", {}, [["Name", ""], ["Source", "hide-sm"], ["Size", ""], ["Indexed passages", "hide-sm"], ["Added", ""], ["", ""]].map(([x, c]) => h("th", { class: c }, x)))),
-        h("tbody", {}, docs.map((d) => h("tr", {},
-          h("td", {}, h("div", { class: "row" }, icon("file"), h("b", {}, d.filename), d.extracted === null ? badge("New", "blue") : null)),
-          h("td", { class: "hide-sm" }, d.source === "repo" ? badge("Git", "violet") : badge("Upload")),
-          h("td", { class: "muted" }, fmt(Math.round(d.chars / 6)) + " words"),
-          h("td", { class: "hide-sm" }, d.chunks), h("td", { class: "muted small" }, timeAgo(d.created)),
-          h("td", { class: "nowrap", style: { textAlign: "right" } },
-            h("button", { class: "btn btn-sm btn-ghost", onclick: guard(async () => {
-              const full = await api.get(base() + "/documents/" + d.id);
-              modal({ title: full.filename, wide: true, body: h("div", { class: "pre" }, full.text), actions: [] });
-            }) }, "View"),
-            writer(h("button", { class: "btn btn-sm btn-ghost btn-danger", onclick: guard(async () => {
-              if (!(await confirmBox("Remove " + d.filename + "? Existing requirements are kept.", { danger: true, okLabel: "Remove" }))) return;
-              await api.del(base() + "/documents/" + d.id); rerender();
-            }) }, "Remove"))))))))
+      docs.length ? docBox
         : empty({ iconName: "file", title: "No BRDs yet", text: "Upload or paste at least one business requirements document." })),
     h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Ask the BRDs"),
       h("span", { class: "muted small" }, "Answers come only from retrieved BRD passages, with numbered citations")),
