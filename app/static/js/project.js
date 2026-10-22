@@ -461,6 +461,17 @@ function historySection(itemId) {
 
 const talkBadge = (n) => (n ? h("span", { class: "chip", title: n + " open discussion" + (n === 1 ? "" : "s") }, icon("chat"), String(n)) : null);
 
+const PAGE = 300;  // rows drawn at a time in the long tables; filters, sorting and select-all still work on every row
+
+// The "Showing 300 of 13,800 · Show more" line under a long table. `more()` is called with the number of rows now drawn.
+function pagerRow(total, shown, cols, more) {
+  if (total <= shown) return null;
+  return h("tr", { class: "pager" }, h("td", { colspan: String(cols), style: { textAlign: "center", padding: "14px" } },
+    h("span", { class: "muted small" }, "Showing " + shown.toLocaleString() + " of " + total.toLocaleString() + "  "),
+    h("button", { type: "button", class: "btn btn-sm", onclick: () => more(shown + PAGE) }, "Show " + Math.min(PAGE, total - shown).toLocaleString() + " more"),
+    " ", h("button", { type: "button", class: "btn btn-sm btn-ghost", onclick: () => more(total) }, "Show all")));
+}
+
 const BULK_CONFIRM_AT = 10;  // a bulk change this large is confirmed first: it is one click for hundreds of reviews
 
 // A column header that sorts: ascending, descending, then back to the original order. `prefix` names the filters entry that remembers it.
@@ -530,9 +541,11 @@ async function viewRequirements(body) {
       }) }, l)),
     h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); renderTable(); renderBulk(); } }, "Clear"))] : []));
 
+  let limit = PAGE;
   const renderTable = () => {
-    const rows = sorted();
-    const all = h("input", { type: "checkbox", "aria-label": "Select all", checked: rows.length > 0 && rows.every((r) => selected.has(r.id)),
+    const rows = sorted();  // every row matching the filters: select-all, Next/Prev and the counts use these
+    const drawn = rows.slice(0, limit);
+    const all = h("input", { type: "checkbox", "aria-label": rows.length > drawn.length ? "Select all " + rows.length.toLocaleString() + " matching" : "Select all", checked: rows.length > 0 && rows.every((r) => selected.has(r.id)),
       onchange: (e) => {
         rows.forEach((r) => (e.target.checked ? selected.add(r.id) : selected.delete(r.id)));
         // touch the rows, don't rebuild them: rebuilding thousands of rows makes every click lag
@@ -540,8 +553,8 @@ async function viewRequirements(body) {
         renderBulk();
       } });
     tableBox.replaceChildren(h("div", { class: "card table-wrap" }, h("table", { class: "table" },
-      h("thead", {}, h("tr", {}, writer(h("th", { class: "w-check" }, all)), ...[["ID", "", "key"], ["Type", "hide-sm", "type"], ["Requirement", ""], ["Section", "hide-sm", "section"], ["Quality", "hide-sm", "quality"], ["Status", "", "status"]].map(([x, c, k]) => sortHeader(x, c, k, "req", renderTable)))),
-      h("tbody", {}, rows.length ? rows.map((r) => h("tr", { class: "clickable" + (selected.has(r.id) ? " selected" : ""), onclick: () => reqDrawer(r, nav) },
+      h("thead", {}, h("tr", {}, writer(h("th", { class: "w-check" }, all)), ...[["ID", "", "key"], ["Type", "hide-sm", "type"], ["Requirement", ""], ["Section", "hide-sm", "section"], ["Quality", "hide-sm", "quality"], ["Status", "", "status"]].map(([x, c, k]) => sortHeader(x, c, k, "req", () => restart())))),
+      h("tbody", {}, rows.length ? drawn.map((r) => h("tr", { class: "clickable" + (selected.has(r.id) ? " selected" : ""), onclick: () => reqDrawer(r, nav) },
         writer(h("td", { onclick: (e) => e.stopPropagation() }, h("input", { type: "checkbox", "aria-label": "Select " + r.key, checked: selected.has(r.id),
           onchange: (e) => {
             e.target.checked ? selected.add(r.id) : selected.delete(r.id);
@@ -556,7 +569,8 @@ async function viewRequirements(body) {
         h("td", { class: "small muted hide-sm" }, r.section),
         h("td", { class: "hide-sm" }, scorePill(r.quality_score)),
         h("td", {}, h("div", { class: "row", style: { flexWrap: "wrap" } }, badge(r.status, statusTone[r.status]), talkBadge(talk[r.id])))))
-        : h("tr", {}, h("td", { colspan: "7", class: "muted", style: { textAlign: "center", padding: "28px" } }, "No requirements match the filters."))))));
+        : h("tr", {}, h("td", { colspan: "7", class: "muted", style: { textAlign: "center", padding: "28px" } }, "No requirements match the filters.")),
+        pagerRow(rows.length, drawn.length, 7, (n) => { const before = drawn.length; limit = n; renderTable(); tableBox.querySelectorAll("tbody tr.clickable .row-open")[before]?.focus(); })))));
   };
   // Reload the data but redraw only the table, so a reviewer keeps their place in a long list.
   const count = h("span", { class: "muted small right" });
@@ -566,10 +580,11 @@ async function viewRequirements(body) {
     renderTable(); renderBulk();
   };
   const nav = { rows: sorted, refresh, find: (id) => reqs.find((r) => r.id === id) };
-  q.addEventListener("input", debounce(() => { filters.reqQ = q.value; renderTable(); }));
-  type.addEventListener("change", () => { filters.reqType = type.value; renderTable(); });
-  status.addEventListener("change", () => { filters.reqStatus = status.value; renderTable(); });
-  flagged.addEventListener("change", () => { filters.reqFlagged = flagged.checked; renderTable(); });
+  const restart = () => { limit = PAGE; renderTable(); };  // a new filter or order starts again from the top
+  q.addEventListener("input", debounce(() => { filters.reqQ = q.value; restart(); }));
+  type.addEventListener("change", () => { filters.reqType = type.value; restart(); });
+  status.addEventListener("change", () => { filters.reqStatus = status.value; restart(); });
+  flagged.addEventListener("change", () => { filters.reqFlagged = flagged.checked; restart(); });
 
   count.textContent = reqs.filter((r) => r.status === "approved").length + " of " + reqs.length + " approved";
   mount(body, h("div", { class: "toolbar" }, q, type, status, h("label", { class: "switch small" }, flagged, "Flagged only"), count,
@@ -713,14 +728,16 @@ async function viewStories(body) {
         await api.post(base() + "/stories/bulk", { ids: [...selected], status: st }); toast(l + ": " + selected.size, "ok"); selected.clear(); await refresh();
       }) }, l)),
     h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); render(); } }, "Clear"))] : []));
+  const paging = { limit: PAGE };  // rows of the list view drawn so far
   const render = () => {
     const rows = sorted();
-    box.replaceChildren(filters.storyView === "map" ? storyMap(rows) : storyTable(rows, render, { selected, changed: renderBulk }));
+    box.replaceChildren(filters.storyView === "map" ? storyMap(rows) : storyTable(rows, restart, { selected, changed: renderBulk, paging, render }));
     renderBulk();
   };
-  q.addEventListener("input", debounce(() => { filters.storyQ = q.value; render(); }));
-  status.addEventListener("change", () => { filters.storyStatus = status.value; render(); });
-  ready.addEventListener("change", () => { filters.storyReady = ready.value; render(); });
+  const restart = () => { paging.limit = PAGE; render(); };  // a new filter, view or order starts again from the top
+  q.addEventListener("input", debounce(() => { filters.storyQ = q.value; restart(); }));
+  status.addEventListener("change", () => { filters.storyStatus = status.value; restart(); });
+  ready.addEventListener("change", () => { filters.storyReady = ready.value; restart(); });
   const count = h("span", { class: "muted small right" });
   const tally = () => {
     const points = stories.filter((s) => s.status !== "rejected").reduce((a, s) => a + (s.story_points || 0), 0);
@@ -731,7 +748,7 @@ async function viewStories(body) {
   storyNav = { rows: sorted, refresh, find: (id) => stories.find((x) => x.id === id) };
   tally();
   mount(body, h("div", { class: "toolbar" },
-    segmented([["map", "Story map"], ["list", "List"]], filters.storyView, (v) => { filters.storyView = v; render(); }),
+    segmented([["map", "Story map"], ["list", "List"]], filters.storyView, (v) => { filters.storyView = v; restart(); }),
     q, status, ready,
     count,
     writer(h("button", { class: "btn", onclick: guard(estimateDialog) }, icon("sparkles"), "Estimate with AI")),
@@ -815,8 +832,9 @@ function rowOpener(key, onclick) {
 }
 
 function storyTable(rows, redraw, pick) {
-  const { selected, changed } = pick;
-  const all = h("input", { type: "checkbox", "aria-label": "Select all", checked: rows.length > 0 && rows.every((s) => selected.has(s.id)),
+  const { selected, changed, paging, render } = pick;
+  const drawn = rows.slice(0, paging.limit);  // `rows` is every story matching the filters: select-all and Next/Prev use these
+  const all = h("input", { type: "checkbox", "aria-label": rows.length > drawn.length ? "Select all " + rows.length.toLocaleString() + " matching" : "Select all", checked: rows.length > 0 && rows.every((s) => selected.has(s.id)),
     onchange: (e) => {
       rows.forEach((s) => (e.target.checked ? selected.add(s.id) : selected.delete(s.id)));
       // touch the rows, don't rebuild them: rebuilding thousands of rows makes every click lag
@@ -825,7 +843,7 @@ function storyTable(rows, redraw, pick) {
     } });
   const table = h("div", { class: "card table-wrap" }, h("table", { class: "table" },
     h("thead", {}, h("tr", {}, writer(h("th", { class: "w-check" }, all)), [["ID", "", "key"], ["Story", "", "title"], ["Epic / feature", "hide-sm", "epic"], ["Priority", "hide-sm", "priority"], ["Pts", "hide-sm", "points"], ["Requirements", "hide-sm"], ["Quality", "hide-sm", "quality"], ["Status", "", "status"]].map(([x, c, k]) => sortHeader(x, c, k, "story", redraw)))),
-    h("tbody", {}, rows.map((s) => h("tr", { class: "clickable" + (selected.has(s.id) ? " selected" : ""), onclick: () => storyDrawer(s) },
+    h("tbody", {}, drawn.map((s) => h("tr", { class: "clickable" + (selected.has(s.id) ? " selected" : ""), onclick: () => storyDrawer(s) },
       writer(h("td", { onclick: (e) => e.stopPropagation() }, h("input", { type: "checkbox", "aria-label": "Select " + s.key, checked: selected.has(s.id),
         onchange: (e) => {
           e.target.checked ? selected.add(s.id) : selected.delete(s.id);
@@ -840,7 +858,8 @@ function storyTable(rows, redraw, pick) {
       h("td", { class: "hide-sm" }, s.story_points || "–"),
       h("td", { class: "small mono hide-sm" }, s.requirement_ids.join(", ") || "–"),
       h("td", { class: "nowrap hide-sm" }, h("span", { class: "row" }, scorePill(s.quality_score), s.ready ? badge("Ready", "green") : null)),
-      h("td", {}, h("div", { class: "row", style: { flexWrap: "wrap" } }, badge(s.status, statusTone[s.status]), talkBadge((ctx.talk || {})[s.id]))))))));
+      h("td", {}, h("div", { class: "row", style: { flexWrap: "wrap" } }, badge(s.status, statusTone[s.status]), talkBadge((ctx.talk || {})[s.id]))))),
+      pagerRow(rows.length, drawn.length, 9, (n) => { const before = drawn.length; paging.limit = n; render(); document.querySelectorAll("#content tbody tr.clickable .row-open")[before]?.focus(); }))));
   return table;
 }
 
