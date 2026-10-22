@@ -33,3 +33,9 @@ Change the schema or the backup job? Run `scripts/restore-drill.sh` (Docker only
 - Secrets and configuration come from the environment, never the repository.
 - Update the README when behavior, configuration or operations change, and `CHANGELOG.md` for
   user-visible changes.
+
+## Repository settings
+
+`main` blocks force-pushes and deletion and requires a linear history (squash-merge PRs; no merge commits). Merged branches are deleted
+automatically, and Dependabot vulnerability alerts, secret scanning with push protection, and private vulnerability reporting are on.
+Reviews and status checks are not required by GitHub because the quality gate runs locally (`scripts/ci-k8s.sh`, `scripts/ui-check-k8s.sh`), not in Actions.
