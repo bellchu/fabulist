@@ -506,7 +506,8 @@ async function auditCard() {
 async function viewActivity(content) {
   const runs = await api.get("/api/admin/runs?limit=100");
   const audit = await auditCard();
-  mount(content, head("Activity", "Every extraction and generation run across projects, and every change to settings, providers, accounts and integrations."),
+  mount(content, head("Activity", "Every extraction and generation run across projects, and every change to settings, providers, accounts and integrations.",
+    h("button", { class: "btn", title: "Download every run (who, project, tokens, duration) as CSV, for usage reporting", onclick: () => download("/api/admin/runs.csv") }, icon("download"), "Export runs")),
     runs.length ? h("div", { class: "card table-wrap" }, h("table", { class: "table" },
       h("thead", {}, h("tr", {}, [["When", ""], ["Project", ""], ["Stage", ""], ["By", "hide-sm"], ["Provider", "hide-sm"], ["Status", ""], ["Items", "hide-sm"], ["Tokens", "hide-sm"], ["Duration", "hide-sm"]].map(([x, c]) => h("th", { class: c }, x)))),
       h("tbody", {}, runs.map((r) => h("tr", {},
