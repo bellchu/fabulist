@@ -945,11 +945,39 @@ _LIST_FIELDS = ("actors", "product_scope", "compliance_tags")
 
 @router.post("/api/projects/{pid}/requirements/import")
 def import_requirements(pid: str, request: Request, body: Dict[str, Any] = Body(...)):
-    """Add requirements from a CSV (a spreadsheet saved as CSV, or Fabulist's own Requirements export). Needs a statement column; everything
-    is validated first and nothing is imported if any row is wrong. A statement that already exists in the project is skipped, not doubled."""
+    """Add requirements from CSV text (a spreadsheet saved as CSV, or Fabulist's own Requirements export). See `_import_rows`."""
     _project(pid)
-    text = str(body.get("csv") or "").lstrip("\ufeff")
-    rows = list(csv.DictReader(io.StringIO(text)))
+    rows = list(csv.DictReader(io.StringIO(str(body.get("csv") or "").lstrip("\ufeff"))))
+    return _import_rows(pid, rows, history.actor(request), "CSV")
+
+
+@router.post("/api/projects/{pid}/requirements/import-file")
+def import_requirements_file(pid: str, request: Request, file: UploadFile = File(...)):
+    """The same from an uploaded .csv or .xlsx file (the sheet called Requirements, else the first sheet). A plain `def`: reading a workbook is blocking work."""
+    _project(pid)
+    data = file.file.read(config.MAX_UPLOAD_BYTES + 1)
+    if len(data) > config.MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "File too large")
+    name = (file.filename or "").lower()
+    if name.endswith(".xlsx"):
+        with _document_slot():
+            try:
+                rows = parsing.xlsx_rows(data, "Requirements")
+            except parsing.ParseError as exc:
+                raise HTTPException(400, str(exc))
+        return _import_rows(pid, rows, history.actor(request), "Excel")
+    if name.endswith(".csv"):
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = data.decode("latin-1")  # a spreadsheet saved as "CSV" on Windows is often not UTF-8
+        return _import_rows(pid, list(csv.DictReader(io.StringIO(text))), history.actor(request), "CSV")
+    raise HTTPException(400, "Choose a .csv or .xlsx file")
+
+
+def _import_rows(pid: str, rows: List[Dict[str, Any]], who: str, origin: str) -> Dict[str, int]:
+    """Needs a statement column; everything is validated first and nothing is imported if any row is wrong. A statement that already exists
+    in the project is skipped, not doubled."""
     if not rows:
         raise HTTPException(400, "The file has no rows. The first row must name the columns, with at least one called Requirement or Statement.")
     columns = {h: _IMPORT_COLUMNS[re.sub(r"[\s_]+", " ", h.strip().lower())] for h in rows[0] if h and re.sub(r"[\s_]+", " ", h.strip().lower()) in _IMPORT_COLUMNS}
@@ -982,7 +1010,6 @@ def import_requirements(pid: str, request: Request, body: Dict[str, Any] = Body(
             fresh.append((item, status))
     if errors:
         raise HTTPException(400, "Nothing was imported. " + "; ".join(errors[:10]) + ("; and %d more" % (len(errors) - 10) if len(errors) > 10 else ""))
-    who = history.actor(request)
     with db.conn() as c:
         seq = c.execute("SELECT coalesce(max(seq), -1) + 1 AS n FROM requirements WHERE project_id=%s", (pid,)).fetchone()["n"]
         for item, status in fresh:
@@ -991,7 +1018,7 @@ def import_requirements(pid: str, request: Request, body: Dict[str, Any] = Body(
             history.record(c, pid, "requirement", new, history.item_key("requirement", seq), "created", who, _label(item))
             seq += 1
         if fresh:
-            history.record(c, pid, "project", pid, "", "imported", who, "%d requirements from CSV" % len(fresh))
+            history.record(c, pid, "project", pid, "", "imported", who, "%d requirements from %s" % (len(fresh), origin))
     return {"created": len(fresh), "duplicates_skipped": skipped}
 
 

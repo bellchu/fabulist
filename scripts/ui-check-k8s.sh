@@ -43,7 +43,7 @@ kubectl -n "$NS" wait --for=condition=Ready pod/ui --timeout=420s >/dev/null
 until kubectl -n "$NS" exec ui -c db -- pg_isready -q -h 127.0.0.1 -U f -d f; do sleep 1; done
 git ls-files -z --cached --others --exclude-standard | COPYFILE_DISABLE=1 tar --null -T - -cf - | kubectl -n "$NS" exec -i ui -c app -- tar -xf - -C /src
 kubectl -n "$NS" exec ui -c app -- sh -c 'pip install -q --root-user-action=ignore -r requirements.txt && (nohup uvicorn app.main:app --port 8000 >/tmp/app.log 2>&1 &) && until python -c "import sys,urllib.request as u;u.urlopen(sys.argv[1])" http://127.0.0.1:8000/healthz 2>/dev/null; do sleep 1; done && (APP_BASIC_USER=admin APP_BASIC_PASSWORD=ui-check-admin-pass nohup uvicorn app.main:app --port 8001 >/tmp/app-auth.log 2>&1 &)'  # 8001: same database, sign-in required (for named-account flows)
-kubectl -n "$NS" exec ui -c browser -- sh -c 'pip install -q playwright==1.49.0 >/dev/null 2>&1; for i in $(seq 1 60); do python -c "import urllib.request as u;u.urlopen(\"$BASE_URL/healthz\");u.urlopen(\"$AUTH_URL/healthz\")" 2>/dev/null && exit 0; sleep 1; done; echo "app did not start" >&2; exit 1'
+kubectl -n "$NS" exec ui -c browser -- sh -c 'pip install -q playwright==1.49.0 openpyxl==3.1.5 >/dev/null 2>&1; for i in $(seq 1 60); do python -c "import urllib.request as u;u.urlopen(\"$BASE_URL/healthz\");u.urlopen(\"$AUTH_URL/healthz\")" 2>/dev/null && exit 0; sleep 1; done; echo "app did not start" >&2; exit 1'
 for f in "${scripts_to_run[@]}"; do
   echo "== $f"
   kubectl -n "$NS" exec ui -c browser -- python -u "/src/$f"

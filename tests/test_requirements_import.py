@@ -85,3 +85,55 @@ def test_viewers_cannot_import(client, monkeypatch):
     pid = client.post("/api/projects", json={"name": "P", "platform": "generic"}, auth=root).json()["id"]
     r = client.post("/api/projects/%s/requirements/import" % pid, json={"csv": CSV}, auth=("vic", "vic-password-12"))
     assert r.status_code == 403
+
+
+def _upload(client, pid, name, data, mime="application/octet-stream"):
+    return client.post("/api/projects/%s/requirements/import-file" % pid, files={"file": (name, data, mime)})
+
+
+def _workbook(sheets):
+    import io
+    from openpyxl import Workbook
+    wb = Workbook()
+    wb.remove(wb.active)
+    for title, rows in sheets:
+        ws = wb.create_sheet(title)
+        for row in rows:
+            ws.append(row)
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+def test_an_excel_sheet_is_imported(client):
+    pid = _project(client)
+    data = _workbook([("Notes", [["Nothing here"]]), ("Requirements", [["Requirement", "Type", "Status", "Source ID"],
+                      ["The system shall export invoices to CSV on request.", "functional", "approved", "BR-1"],
+                      ["Responses shall arrive within 2 seconds for 95% of requests.", "non-functional", "", "BR-2"]])])
+    r = _upload(client, pid, "reqs.xlsx", data)
+    assert r.status_code == 200 and r.json() == {"created": 2, "duplicates_skipped": 0}, r.text
+    assert {x["source_id"]: x["status"] for x in _reqs(client, pid)} == {"BR-1": "approved", "BR-2": "draft"}
+
+
+def test_the_first_sheet_is_used_when_none_is_called_requirements(client):
+    pid = _project(client)
+    r = _upload(client, pid, "any.xlsx", _workbook([("Sheet1", [["Statement"], ["The system shall log every sign-in attempt."]])]))
+    assert r.status_code == 200 and r.json()["created"] == 1
+
+
+def test_fabulists_excel_export_imports_back(client):
+    a = _project(client, "Source")
+    _import(client, a, CSV)
+    book = client.get("/api/projects/%s/export?format=xlsx" % a)
+    assert book.status_code == 200
+    b = _project(client, "Copy")
+    r = _upload(client, b, "export.xlsx", book.content)
+    assert r.status_code == 200 and r.json()["created"] == 3, r.text
+
+
+def test_csv_files_and_odd_files_through_the_file_endpoint(client):
+    pid = _project(client)
+    assert _upload(client, pid, "reqs.csv", CSV.encode("utf-8-sig")).json()["created"] == 3
+    assert _upload(client, pid, "reqs.docx", b"x").status_code == 400
+    assert _upload(client, pid, "broken.xlsx", b"not a workbook").status_code == 400
+    assert _upload(client, pid, "empty.csv", b"").status_code == 400
