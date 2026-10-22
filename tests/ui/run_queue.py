@@ -5,6 +5,7 @@ import os
 import sys
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from playwright.sync_api import sync_playwright
@@ -69,6 +70,9 @@ with sync_playwright() as p:
     page.wait_for_selector("text=Waiting for a free slot")
     check(page.get_by_text("Queued", exact=True).count() >= 1 and "position 1 of 2" in page.locator(".runbox").inner_text(), "the page shows Queued and the position in line")
     check(page.get_by_role("button", name="Queued…").is_disabled(), "the start button is disabled while queued")
+    page.add_script_tag(content=urllib.request.urlopen("https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.10.2/axe.min.js", timeout=30).read().decode())
+    bad = page.evaluate("axe.run(document, {runOnly: ['wcag2a','wcag2aa','wcag21a','wcag21aa']}).then(r => r.violations.filter(v => ['serious','critical'].includes(v.impact)).map(v => v.id))")
+    check(not bad, f"the queued state has no serious accessibility violations {bad}")
 
     # the third run is removed from the line from its own page
     page.goto(f"{BASE}/#/p/{third}/requirements")

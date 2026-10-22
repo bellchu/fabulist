@@ -52,6 +52,20 @@ with sync_playwright() as p:
         page.reload()
         page.get_by_role("checkbox", name="Select all").check()
         scan(page, f"{scheme}: requirements list with a selection")
+
+        # the run panel with unread BRDs (the "BRDs to read" choice and the New badges) and a long list with its "Show more" row
+        big = api.post(BASE + "/api/projects", data={"name": "A11y long " + scheme, "platform": "generic"}, headers=H).json()["id"]
+        api.post(f"{BASE}/api/projects/{big}/documents/text", data={"name": "unread.md", "text": "# A\nThe system shall do a thing for the buyer."}, headers=H)
+        for i in range(320):
+            api.post(f"{BASE}/api/projects/{big}/requirements", data={"statement": "The system shall support capability number %d for the business." % i}, headers=H)
+        page.goto(f"{BASE}/#/p/{big}/sources")
+        page.reload()
+        page.wait_for_selector("text=unread.md")
+        scan(page, f"{scheme}: sources with an unread (New) BRD")
+        page.goto(f"{BASE}/#/p/{big}/requirements")
+        page.reload()
+        page.wait_for_selector("tr.pager")
+        scan(page, f"{scheme}: requirements run panel (BRDs to read) and the Show more row")
         ctx.close()
     browser.close()
 sys.exit(1 if failures else 0)
