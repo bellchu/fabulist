@@ -576,7 +576,7 @@ function importFileButton(kind) {  // kind: "requirement" or "story"
     if (!chosen) return;
     const fd = new FormData(); fd.append("file", chosen);
     const r = await api.upload(base() + "/" + plural + "/import-file", fd);
-    toast("Imported " + r.created + " " + (r.created === 1 ? kind : plural) + (r.duplicates_skipped ? " (" + r.duplicates_skipped + " already there, skipped)" : ""), "ok");
+    toast("Imported " + r.created + " " + (r.created === 1 ? kind : plural) + (r.duplicates_skipped ? " (" + r.duplicates_skipped + " already there, skipped)" : "") + (r.statuses_not_recognised ? ". " + r.statuses_not_recognised + " had a status from another tool and came in as drafts" : ""), "ok");
     rerender();
   }));
   const hint = kind === "story"

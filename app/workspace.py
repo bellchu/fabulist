@@ -1144,7 +1144,7 @@ def _import_story_rows(pid: str, rows: List[Dict[str, Any]], who: str, origin: s
     seen = {pipeline._norm_key(r["title"]) for r in db.rows("SELECT data->>'title' AS title FROM stories WHERE project_id=%s", (pid,))}
     fresh: List[Tuple[Dict[str, Any], str]] = []
     errors: List[str] = []
-    skipped = 0
+    skipped = unrecognised = 0
     for line, row in enumerate(rows, 2):
         raw: Dict[str, Any] = {}
         for header, field_name in columns.items():
@@ -1155,11 +1155,13 @@ def _import_story_rows(pid: str, rows: List[Dict[str, Any]], who: str, origin: s
                 raw[field_name] = [v for v in re.split(r"[;,\s]+", value) if v.strip()]
             elif value:
                 raw[field_name] = value
-        status = str(raw.pop("status", "draft")).lower()
-        item = pipeline.normalize_story(raw)
+        status = str(raw.pop("status", "draft")).strip().lower()
         if status not in STORY_STATUSES:
-            errors.append("line %d: status must be draft, approved or rejected" % line)
-        elif item is None:
+            if status:
+                unrecognised += 1  # another tool's status ("To Do", "Done"): review states are decided here, so the story arrives as a draft
+            status = "draft"
+        item = pipeline.normalize_story(raw)
+        if item is None:
             errors.append("line %d: the title is missing" % line)
         elif pipeline._norm_key(item["title"]) in seen:
             skipped += 1
@@ -1177,7 +1179,7 @@ def _import_story_rows(pid: str, rows: List[Dict[str, Any]], who: str, origin: s
             seq += 1
         if fresh:
             history.record(c, pid, "project", pid, "", "imported", who, "%d stories from %s" % (len(fresh), origin))
-    return {"created": len(fresh), "duplicates_skipped": skipped}
+    return {"created": len(fresh), "duplicates_skipped": skipped, "statuses_not_recognised": unrecognised}
 
 
 def _import_rows(pid: str, rows: List[Dict[str, Any]], who: str, origin: str) -> Dict[str, int]:
