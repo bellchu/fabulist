@@ -51,7 +51,7 @@ spec:
             httpGet: {path: /healthz, port: 8000}
             periodSeconds: 5
           livenessProbe:
-            httpGet: {path: /healthz, port: 8000}
+            httpGet: {path: /livez, port: 8000}   # not /healthz: a database outage must not restart the app
             initialDelaySeconds: 15
             periodSeconds: 20
           resources:

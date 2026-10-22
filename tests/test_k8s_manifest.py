@@ -123,3 +123,9 @@ def test_a_deploy_does_not_drop_requests():
     # the old pod keeps serving until the new one is ready, and lingers a few seconds after leaving the endpoints
     assert "maxUnavailable: 0" in APP and "maxSurge: 1" in APP
     assert "preStop" in APP and "sleep" in APP
+
+
+def test_a_database_outage_does_not_restart_the_app():
+    live = APP.split("livenessProbe:")[1].split("resources:")[0]
+    ready = APP.split("readinessProbe:")[1].split("livenessProbe:")[0]
+    assert "/livez" in live and "/healthz" in ready

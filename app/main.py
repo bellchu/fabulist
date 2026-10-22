@@ -129,6 +129,8 @@ def custom_openapi() -> Dict[str, Any]:
     return spec
 
 
+PROBES = ("/healthz", "/livez")  # open to the platform: no sign-in, not counted in request metrics
+
 app = FastAPI(title="Fabulist", lifespan=lifespan, dependencies=[Depends(project_guards)], docs_url=None, redoc_url=None)
 app.openapi = custom_openapi  # type: ignore[assignment]
 # An ingress in front may not compress; a 10,000-requirement list is megabytes of repetitive JSON.
@@ -187,12 +189,12 @@ async def auth_and_guards(request: Request, call_next):
     if session:
         if path.startswith("/api/") and not users.allowed(session[1], request.method, path):
             return JSONResponse({"detail": "Your role (%s) does not allow this action" % session[1]}, status_code=403)
-    elif sso.enabled() and not path.startswith(("/auth/", "/static/")) and path != "/healthz" and "authorization" not in request.headers:
+    elif sso.enabled() and not path.startswith(("/auth/", "/static/")) and path not in PROBES and "authorization" not in request.headers:
         # Browsers without a session go to the identity provider; API clients get a plain 401.
         if path.startswith("/api/"):
             return JSONResponse({"detail": "Sign in required"}, status_code=401)
         return RedirectResponse("/auth/login?next=" + quote(path), status_code=302)
-    elif ((users.auth_enabled() or sso.enabled()) and path != "/healthz" and not path.startswith("/auth/")
+    elif ((users.auth_enabled() or sso.enabled()) and path not in PROBES and not path.startswith("/auth/")
           and not (sso.enabled() and path.startswith("/static/"))):
         token = users.bearer_token(request.headers.get("authorization", ""))
         creds = None if token else users.parse_basic(request.headers.get("authorization", ""))
@@ -254,7 +256,7 @@ async def observe(request: Request, call_next):
     finally:
         route = getattr(request.scope.get("route"), "path", None) or ("/static" if request.url.path.startswith("/static/") else "other")
         elapsed = time.monotonic() - started
-        if request.url.path not in ("/healthz", "/metrics"):
+        if request.url.path not in (*PROBES, "/metrics"):
             metrics.inc("fabulist_http_requests_total", method=request.method, route=route, status=str(status))
             metrics.observe_request(route, elapsed)
             access_log.info("request", extra={"fields": {"method": request.method, "route": route, "path": request.url.path,
@@ -298,7 +300,14 @@ async def settings_error(_request: Request, exc: settings.SettingsError):
 
 @app.get("/healthz")
 def healthz() -> Dict[str, str]:
+    """Readiness: can this instance serve (the database answers)? Failing it only takes the pod out of rotation."""
     db.one("SELECT 1 AS ok")
+    return {"status": "ok"}
+
+
+@app.get("/livez")
+def livez() -> Dict[str, str]:
+    """Liveness: is the process itself running? No database here, so a database outage never restarts the app (and kills its runs)."""
     return {"status": "ok"}
 
 

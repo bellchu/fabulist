@@ -1099,3 +1099,19 @@ def test_an_upload_that_cannot_get_a_parsing_slot_in_time_is_told_to_retry(clien
     finally:
         release.set()
         first.join(10)
+
+
+def test_liveness_does_not_depend_on_the_database(client, monkeypatch):
+    """A database blip must take the app out of rotation (readiness, /healthz), never restart it: a restart kills the AI runs in progress."""
+    import psycopg
+    from app import config, db
+
+    def dropped():
+        raise psycopg.OperationalError("server closed the connection unexpectedly")
+    with monkeypatch.context() as m:
+        m.setattr(db, "conn", dropped)
+        assert client.get("/healthz").status_code == 503
+        assert client.get("/livez").json() == {"status": "ok"}
+    monkeypatch.setattr(config, "BASIC_USER", "u")
+    monkeypatch.setattr(config, "BASIC_PASSWORD", "p")
+    assert client.get("/livez").status_code == 200, "probes carry no credentials"
