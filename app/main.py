@@ -12,6 +12,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.gzip import GZipMiddleware
 
 from . import admin, config, db, exporters, integrations, llm, metrics, pipeline, portability, repos, settings, sso, taxonomy, users, workspace
 from .profiles import PLATFORMS
@@ -130,6 +131,8 @@ def custom_openapi() -> Dict[str, Any]:
 
 app = FastAPI(title="Fabulist", lifespan=lifespan, dependencies=[Depends(project_guards)], docs_url=None, redoc_url=None)
 app.openapi = custom_openapi  # type: ignore[assignment]
+# An ingress in front may not compress; a 10,000-requirement list is megabytes of repetitive JSON.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.include_router(admin.router)
 app.include_router(repos.router)
 app.include_router(integrations.router)
