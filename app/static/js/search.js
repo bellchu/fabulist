@@ -1,9 +1,10 @@
 // Search across every project the person may see: projects by name, requirements and stories by their words.
 import { h, mount, api, badge, empty, icon, statusTone } from "./core.js";
-import { setCrumbs } from "./main.js";
+import { setCrumbs, setTitle } from "./main.js";
 
 export async function renderSearch(content, q) {
   setCrumbs("Search");
+  if (q.trim()) setTitle("“" + q.trim().slice(0, 60) + "”", "Search");  // the query in the tab title and the history entry
   const head = h("div", { class: "page-head" }, h("span", { class: "object-icon project" }, icon("search")),
     h("div", { class: "grow" }, h("div", { class: "object-label" }, "Search"), h("h1", {}, q ? "Results for “" + q + "”" : "Search"),
       h("p", { class: "sub" }, "Projects by name, requirements and stories by their words, across every project you can open. Archived projects are left out.")));
