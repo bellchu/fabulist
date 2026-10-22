@@ -17,3 +17,10 @@ def test_the_content_security_policy_allows_no_inline_script_and_no_plugins(clie
     csp = client.get("/").headers["content-security-policy"]
     assert "unsafe-inline" not in csp.split("script-src")[1].split(";")[0] and "unsafe-eval" not in csp
     assert "object-src 'none'" in csp
+
+
+def test_a_browser_without_javascript_is_told_why_the_page_is_empty(client):
+    html = client.get("/").text
+    assert "<noscript>" in html and "needs JavaScript" in html
+    assert 'style="' not in html, "inline style attributes are blocked by the Content Security Policy: use a class"
+    assert ".noscript-note" in client.get("/static/app.css").text
