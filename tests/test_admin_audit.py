@@ -150,3 +150,20 @@ def test_a_refused_delete_leaves_no_entry(client):
     pid = client.post("/api/projects", json={"name": "Alive", "platform": "generic"}).json()["id"]
     assert client.delete("/api/projects/%s" % pid).status_code == 409  # not archived
     assert trail(client, action="project deleted") == []
+
+
+def test_starting_the_taxonomy_from_scratch_removes_classes_and_rules_and_is_recorded(client):
+    from app import taxonomy
+    client.post("/api/admin/taxonomy/classes", json={"name": "Vaccine", "attributes": ["storage"], "keywords": ["vaccine"]})
+    client.put("/api/admin/taxonomy/rules", json={"rules": {"storage": "Stored at 2-8 C"}})
+    assert client.get("/api/admin/taxonomy").json()["classes"], "seeded and added classes are there"
+    r = client.delete("/api/admin/taxonomy")
+    assert r.status_code == 200 and r.json()["removed_classes"] >= 1 and r.json()["removed_rules"] == 1
+    t = client.get("/api/admin/taxonomy").json()
+    assert t["classes"] == [] and t["attribute_rules"] == []
+    taxonomy.seed()  # what every restart does: an emptied taxonomy must stay empty, not be refilled with the built-in medical classes
+    assert client.get("/api/admin/taxonomy").json()["classes"] == []
+    assert taxonomy.match_classes("The vaccine shall be stored cold.") == []
+    rows = [x for x in trail(client) if x["action"] == "taxonomy cleared"]
+    assert len(rows) == 1 and "classes" in rows[0]["summary"]
+    assert client.delete("/api/admin/taxonomy").json() == {"removed_classes": 0, "removed_rules": 0}

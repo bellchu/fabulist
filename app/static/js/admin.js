@@ -304,6 +304,10 @@ async function viewTaxonomy(content) {
     head("Product taxonomy", t.classes.length + " product classes. Keywords detect which classes a requirement affects; attributes drive product-specific acceptance criteria.",
       h("div", { class: "row" }, h("a", { class: "btn", href: "/api/admin/taxonomy.csv" }, icon("download"), "Export CSV"),
         h("button", { class: "btn", onclick: () => fileInput.click() }, icon("upload"), "Import CSV"),
+        t.classes.length ? h("button", { class: "btn btn-danger", title: "Remove every class and rule, for another industry or for none", onclick: guard(async () => {
+          if (!(await confirmBox("Remove all " + t.classes.length + " product classes and the attribute rules? Existing requirements and stories keep their product scope text. Export CSV first if you may want them back.", { danger: true, okLabel: "Remove all", title: "Start from scratch?" }))) return;
+          const r = await api.del("/api/admin/taxonomy"); state.meta = null; toast(r.removed_classes + " classes and " + r.removed_rules + " rules removed", "ok"); rerender();
+        }) }, icon("trash"), "Start from scratch") : null,
         h("button", { class: "btn btn-primary", onclick: () => classDialog(null) }, icon("plus"), "Add class"))),
     fileInput, h("div", { class: "toolbar" }, q), tableBox, rulesCard);
   render();

@@ -127,12 +127,16 @@ def variant_criteria(class_names: List[str]) -> List[Dict[str, str]]:
 
 
 def seed() -> None:
-    """First start: load the built-in medical-distribution taxonomy."""
+    """First start only: load the built-in medical-distribution taxonomy. It is marked as done, so an administrator who removes the classes (to
+    use their own, or none, for another industry) does not get them back at the next restart."""
     import json
 
     from . import db
 
     with db.conn() as c:
+        if c.execute("SELECT 1 FROM settings WHERE key = 'taxonomy_seeded'").fetchone():
+            return
+        c.execute("INSERT INTO settings (key, value) VALUES ('taxonomy_seeded', 'true') ON CONFLICT (key) DO NOTHING")
         if c.execute("SELECT 1 FROM product_classes LIMIT 1").fetchone() is None:
             for d in DEFAULT_CLASSES:
                 c.execute("INSERT INTO product_classes (id, name, attributes, keywords, description, created) VALUES (%s,%s,%s,%s,'',%s)",
