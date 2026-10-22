@@ -131,6 +131,30 @@ async function editProjectDialog() {
 
 // ---- runs ---------------------------------------------------------------
 
+// "Reading section 12 of 46: …" / "Writing stories 3 of 9: …": how far along the run is and, at the pace so far, how long is left.
+// "section 12 of 46" means 11 are done. The start time is the server's, so a reload knows the pace too.
+function runPace(run) {
+  const m = /(\d+) of (\d+)/.exec(run.progress || "");
+  if (!m || !Number(m[2])) return null;
+  const done = Math.max(0, Number(m[1]) - 1), total = Number(m[2]);
+  const elapsed = (Date.now() - new Date(run.started || run.created)) / 1000;
+  const left = done >= 2 && elapsed > 5 ? Math.round((elapsed / done) * (total - done)) : null;
+  return { done, total, pct: Math.round((100 * done) / total),
+    text: done + " of " + total + " done" + (left == null ? "" : " · about " + (left >= 90 ? Math.round(left / 60) + " min" : left + " s") + " left") };
+}
+
+// Show the pace in the elements runPanel drew (called when it renders and on every poll).
+function applyPace(run) {
+  const pace = runPace(run), bar = document.getElementById("run-bar"), line = document.getElementById("run-line"), text = document.getElementById("run-pace");
+  if (!bar || !line || !text) return;
+  bar.hidden = !pace;
+  line.hidden = Boolean(pace);  // the endless animation is only for when nothing is known yet
+  if (!pace) { text.textContent = ""; return; }
+  bar.setAttribute("aria-valuenow", String(pace.pct));
+  bar.firstChild.style.width = pace.pct + "%";
+  text.textContent = pace.text;
+}
+
 const LARGE_RUN = 20;  // from this many AI requests a run asks for confirmation, with the estimate
 
 function runPanel(stage) {
@@ -193,12 +217,14 @@ function runPanel(stage) {
     rerender();
   });
   let statusLine = null;
+  const pace = running ? runPace(run) : null;
   if (running) {
     // A hung AI provider shows up as a run that stops reporting progress: say so, instead of an endless "Running".
     const idle = Math.floor((Date.now() - new Date(run.updated || run.created)) / 60000);
     statusLine = h("div", { class: "row small", style: { flexBasis: "100%" } }, badge("Running", "blue"),
       h("span", { class: "muted grow", id: "run-progress" }, run.progress || "Starting…",
         idle >= 3 ? h("span", { style: { color: "var(--amber)", marginLeft: "8px" } }, "No progress for " + idle + " min. The AI provider may not be responding; you can cancel this run.") : null),
+      h("span", { class: "small", id: "run-pace" }, pace ? pace.text : ""),
       writer(h("button", { class: "btn btn-sm btn-ghost btn-danger", onclick: guard(async () => {
         await api.post(base() + "/runs/" + run.id + "/cancel"); toast("Cancelling after the current AI request…");
       }) }, "Cancel run")));
@@ -228,7 +254,10 @@ function runPanel(stage) {
         blocked && !readOnly() ? h("div", { class: "small", id: "run-blocked-" + stage, style: { color: "var(--amber)", marginTop: "2px" } }, blocked) : null),
       isReq || readOnly() ? null : scope, which,
       writer(h("button", { class: "btn btn-primary", disabled: running || queued || !!blocked, title: blocked || null, "aria-describedby": blocked ? "run-blocked-" + stage : null, onclick: start }, icon("sparkles"), startLabel)),
-      running ? h("div", { class: "progress-line" }) : null, statusLine));
+      running ? h("div", { class: "progress-line", id: "run-line", hidden: Boolean(pace) }) : null,
+      running ? h("div", { class: "progress-bar", id: "run-bar", role: "progressbar", "aria-label": "Run progress", "aria-valuemin": "0", "aria-valuemax": "100",
+        "aria-valuenow": String(pace ? pace.pct : 0), hidden: !pace }, h("span", { style: { width: (pace ? pace.pct : 0) + "%" } })) : null,
+      statusLine));
 }
 
 function schedulePoll() {
@@ -245,6 +274,7 @@ function schedulePoll() {
     if (active) {
       const el = document.getElementById("run-progress");
       if (el) el.textContent = active.progress || "Working…";
+      applyPace(active);
       schedulePoll();
     } else {
       const last = runs[0];
