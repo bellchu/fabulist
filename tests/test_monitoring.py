@@ -78,7 +78,7 @@ def test_every_alert_has_a_runbook_row():
 
 
 def test_the_database_size_is_exposed_and_alerted_on(client, monkeypatch):
-    from app import config, metrics
+    from app import config
     monkeypatch.setattr(config, "METRICS_TOKEN", "t")
     text = client.get("/metrics", headers={"Authorization": "Bearer t"}).text
     size = [l for l in text.splitlines() if l.startswith("fabulist_database_size_bytes ")]
