@@ -71,7 +71,63 @@ def project_guards(request: Request) -> None:
         raise HTTPException(409, "This project is archived and read-only. Restore it to make changes.")
 
 
-app = FastAPI(title="Fabulist", lifespan=lifespan, dependencies=[Depends(project_guards)])
+API_INTRO = """The Fabulist API turns BRDs into reviewed requirements and a traceable backlog. Everything the web app does goes through it.
+
+**Authentication.** Send a personal API token as `Authorization: Bearer fab_...` (create one on the Account page; it acts with your role and can be revoked), or HTTP Basic credentials, or a single-sign-on session. Tokens cannot be sent by a browser on its own, so they need no extra header. Browser sessions and Basic credentials must add `X-Requested-With: fabulist` to every request that changes data (POST, PUT, PATCH, DELETE).
+
+**Errors** are JSON: `{"detail": "what went wrong"}`. 401 means sign in, 403 means your role does not allow it, 404 includes projects you may not see, 409 means the project is archived or the item changed since you read it (send the item's `rev` back when you save), 429 and 503 carry `Retry-After`.
+
+**Long work** (extracting requirements, writing stories) is a *run*: start it with `POST /api/projects/{pid}/runs`, which answers 202 immediately, then poll `GET /api/projects/{pid}/runs`. A run waits in a queue when every slot is busy. `GET /api/projects/{pid}/runs/estimate` says what a run would ask of the AI provider first.
+
+Example: `curl -H "Authorization: Bearer $TOKEN" https://your-host/api/projects`"""
+
+_TAGS = (("Requirements", "/requirements"), ("Stories", "/stories"), ("Documents", ("/documents", "/search", "/ask", "/repos")), ("Runs", "/runs"),
+         ("Baselines", "/baselines"), ("Comments", "/comments"), ("Audit trail", "/history"), ("Export and push", ("/export", "/push")))
+TAG_DESCRIPTIONS = {
+    "Projects": "Create, open, archive, import and share projects.", "Documents": "BRD sources: uploads, pasted text, Git repositories, passage search, questions.",
+    "Requirements": "The reviewed requirement set, with quality checks.", "Stories": "User stories linked to requirements, with traceability.",
+    "Runs": "AI extraction and story generation: queue, estimate, progress.", "Baselines": "Versioned sign-off snapshots and comparison.",
+    "Comments": "Discussion on requirements and stories.", "Audit trail": "Who changed what and when.", "Export and push": "Reports, spreadsheets, tracker imports and pushes.",
+    "Integrations": "Issue trackers and webhooks (configured by administrators).", "Administration": "AI providers, settings, users, taxonomy, usage (administrators).",
+    "Account": "Your identity and personal API tokens.", "General": "Application metadata and people picker."}
+
+
+def _tag_for(path: str) -> str:
+    if path.startswith("/api/admin/"):
+        return "Administration"
+    if path.startswith(("/api/me", "/api/auth")):
+        return "Account"
+    if path.startswith("/api/integrations"):
+        return "Integrations"
+    if path.startswith("/api/projects/{pid}/"):
+        rest = path[len("/api/projects/{pid}"):]
+        for tag, needle in _TAGS:
+            if any(rest.startswith(n) for n in ((needle,) if isinstance(needle, str) else needle)):
+                return tag
+        return "Projects"  # the project itself: archive, restore, access, archive.json
+    if path.startswith("/api/projects"):
+        return "Projects"
+    return "General"
+
+
+def custom_openapi() -> Dict[str, Any]:
+    """The generated document, with every operation in a group (the URL structure decides which) and an introduction that says how to authenticate."""
+    if app.openapi_schema:
+        return app.openapi_schema
+    from fastapi.openapi.utils import get_openapi
+    spec = get_openapi(title="Fabulist API", version=config.VERSION, description=API_INTRO, routes=app.routes)
+    used = set()
+    for path, item in spec["paths"].items():
+        for op in item.values():
+            op["tags"] = [_tag_for(path)]
+            used.add(op["tags"][0])
+    spec["tags"] = [{"name": t, "description": TAG_DESCRIPTIONS.get(t, "")} for t in TAG_DESCRIPTIONS if t in used]
+    app.openapi_schema = spec
+    return spec
+
+
+app = FastAPI(title="Fabulist", lifespan=lifespan, dependencies=[Depends(project_guards)], docs_url=None, redoc_url=None)
+app.openapi = custom_openapi  # type: ignore[assignment]
 app.include_router(admin.router)
 app.include_router(repos.router)
 app.include_router(integrations.router)
@@ -260,6 +316,12 @@ def meta() -> Dict[str, Any]:
 @app.get("/", include_in_schema=False)
 def index():
     return FileResponse("app/static/index.html", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/docs", include_in_schema=False)
+def api_reference() -> FileResponse:
+    """The API reference, rendered by the app itself: FastAPI's stock page loads its scripts from a public CDN (blocked by our policy)."""
+    return FileResponse("app/static/docs.html", headers={"Cache-Control": "no-cache"})
 
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")

@@ -1,0 +1,35 @@
+/* API reference page: uses the app's colour tokens (app.css), so it follows light and dark mode. */
+body.docs { background: var(--bg); color: var(--text); margin: 0; font-family: inherit; }
+.docs-top { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
+.docs-main { max-width: 1000px; margin: 0 auto; padding: 16px 16px 48px; }
+.docs-main h1 { margin: 8px 0 12px; }
+.docs-intro { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 16px; margin-bottom: 16px; line-height: 1.55; }
+.docs-intro code, .docs-op code, .docs-schema code { font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; background: var(--sunken); padding: 1px 5px; border-radius: 3px; }
+.docs-tools { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.docs-filter-label { font-size: 13px; color: var(--text-2); }
+.docs-tools .search { max-width: 320px; }
+.docs-group { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; }
+.docs-group > summary { cursor: pointer; padding: 12px 16px; font-weight: 700; font-size: 16px; list-style: none; display: flex; gap: 10px; align-items: baseline; }
+.docs-group > summary::-webkit-details-marker { display: none; }
+.docs-group > summary::before { content: "▸"; color: var(--text-3); }
+.docs-group[open] > summary::before { content: "▾"; }
+.docs-group > summary .muted { font-weight: 400; font-size: 13px; }
+.docs-op { border-top: 1px solid var(--border); }
+.docs-op > summary { cursor: pointer; padding: 8px 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; list-style: none; }
+.docs-op > summary::-webkit-details-marker { display: none; }
+.docs-op > summary:hover { background: var(--sunken); }
+.docs-path { font-family: var(--mono, ui-monospace, monospace); font-size: 13px; word-break: break-all; }
+.docs-method { font: 700 11px/1 var(--mono, ui-monospace, monospace); padding: 4px 7px; border-radius: 4px; min-width: 48px; text-align: center; color: #fff; }
+.docs-method.get { background: #0b6b3a; } .docs-method.post { background: #0a5cad; } .docs-method.put, .docs-method.patch { background: #8a4b00; } .docs-method.delete { background: #a1211b; }
+.docs-sum { color: var(--text-2); font-size: 13px; }
+.docs-body { padding: 4px 16px 16px 16px; }
+.docs-body h4 { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--text-3); }
+.docs-schema { width: 100%; border-collapse: collapse; font-size: 13px; }
+.docs-schema th { text-align: left; font-size: 12px; color: var(--text-3); padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.docs-schema td { padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.docs-schema td:first-child { white-space: nowrap; font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; }
+.docs-req { color: #a1211b; font-weight: 700; }
+.docs-responses { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.docs-responses li { padding: 3px 0; }
+@media (prefers-color-scheme: dark) { .docs-req { color: #ff8a80; } }
+@media print { .docs-top, .docs-tools { display: none; } .docs-group, .docs-op { break-inside: avoid; } }

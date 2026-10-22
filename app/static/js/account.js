@@ -48,7 +48,8 @@ export async function renderAccount(content) {
   }
   const head = h("div", { class: "page-head" }, h("span", { class: "object-icon setup" }, icon("settings")),
     h("div", { class: "grow" }, h("div", { class: "object-label" }, "Account"), h("h1", {}, state.me.username),
-      h("p", { class: "sub" }, "Role: " + state.me.role + ". API tokens let scripts and integrations act as you without sharing your password.")),
+      h("p", { class: "sub" }, "Role: " + state.me.role + ". API tokens let scripts and integrations act as you without sharing your password. ",
+        h("a", { href: "/docs", target: "_blank", rel: "noopener" }, "API reference"))),
     tokens ? h("button", { class: "btn btn-primary", onclick: newTokenDialog }, icon("plus"), "New token") : null);
   if (!tokens) {
     mount(content, head, h("div", { class: "card" }, empty({ iconName: "lock", title: "Sign in with a named account",
