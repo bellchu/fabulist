@@ -197,6 +197,19 @@ table.table { width: 100%; border-collapse: collapse; background: var(--surface)
 .progress-bar { height: 6px; background: var(--neutral-soft); border-radius: 3px; overflow: hidden; flex-basis: 100%; }
 .progress-bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s ease; }
 @media (prefers-reduced-motion: reduce) { .progress-bar span { transition: none; } }
+
+/* Windows High Contrast / forced colours drops background colours: whatever says "selected", "current", "done" or "how full" by colour alone
+   would vanish. Give those states a shape or a system colour (Highlight) that survives. */
+@media (forced-colors: active) {
+  .seg button.on { forced-color-adjust: none; background: Highlight; border-color: Highlight; color: HighlightText; }
+  .meter, .progress-bar { border: 1px solid CanvasText; }
+  .meter > span, .progress-bar span { forced-color-adjust: none; background: Highlight; }
+  .badge, .chip, .scorepill { border: 1px solid CanvasText; }
+  .tab { border-bottom-color: Canvas; }
+  .tab.active, .nav-item.active { border-bottom-color: Highlight; border-bottom-width: 4px; }
+  .step.current { forced-color-adjust: none; background: Highlight; color: HighlightText; }  /* done steps keep their check mark; the arrow shape clips borders, so no outline here */
+  .btn-primary { border-width: 2px; }
+}
 .progress-line::after { content: ""; display: block; width: 35%; height: 100%; background: var(--accent); animation: slide 1.1s ease-in-out infinite; }
 .route-busy { position: fixed; top: 0; left: 0; right: 0; z-index: 101; height: 3px; overflow: hidden; }
 .route-busy::after { content: ""; display: block; width: 35%; height: 100%; background: var(--accent); animation: slide 1.1s ease-in-out infinite; }
