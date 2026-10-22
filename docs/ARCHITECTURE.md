@@ -46,6 +46,7 @@ Large inputs are incremental: `documents` = all / new / reset and `stories_for` 
 | App → trackers, webhooks | Only administrators set the URLs (https required), tokens encrypted, webhook payloads optionally signed (HMAC). Internal addresses are allowed on purpose: an on-premises Jira or an in-cluster model server is a normal setup, so protect the admin role accordingly. |
 | App → BRD repositories | Anyone who can add a repository supplies the URL, so it is refused if it resolves to a private, loopback, link-local or cluster-internal address (SSRF guard, re-checked at every sync). |
 | Uploads | Size limits, decompression-bomb limits, page limits, limited parse concurrency. |
+| App → database | The app logs in as a role that can read and write data but not change the schema or update or delete the history and administrative trail (the cascade that removes a deleted project's history runs with the owner's rights); a separate owner login (`MIGRATION_DATABASE_URL`) is used at startup only, to upgrade the schema and grant those rights. Append-only triggers sit behind that. |
 | Pod → cluster | Non-root, read-only root filesystem, no capabilities, no service-account token, NetworkPolicy (only the ingress and Prometheus reach the app; only this namespace reaches Postgres). |
 | Supply chain | Pinned dependencies, weekly audit, image scan gate in `deploy.sh`, Dependabot. |
 

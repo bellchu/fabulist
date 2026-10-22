@@ -22,6 +22,9 @@ def _bool(name: str, default: bool) -> bool:
 # Git revision baked into the image at build time (see Dockerfile / scripts/deploy.sh).
 VERSION = os.environ.get("APP_VERSION", "dev")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
+# Optional second login, the schema owner: creates and upgrades the tables at startup and grants DATABASE_URL's role only what it needs (read and
+# write the data, no schema changes, no rewriting the audit tables). Unset: one login does both, as before.
+MIGRATION_DATABASE_URL = os.environ.get("MIGRATION_DATABASE_URL", "")
 MAX_UPLOAD_BYTES = _int("MAX_UPLOAD_MB", 10) * 1024 * 1024
 MAX_DOC_CHARS = _int("MAX_DOC_CHARS", 2_000_000)
 MAX_CONCURRENT_PARSES = _int("MAX_CONCURRENT_PARSES", 2)  # documents parsed at once: a large Word or PDF file takes tens of MB and seconds of CPU

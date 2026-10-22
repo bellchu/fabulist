@@ -26,7 +26,7 @@ spec:
     command: [sleep, "3600"]
     workingDir: /src
     volumeMounts: [{name: src, mountPath: /src}]
-    env: [{name: TEST_DATABASE_URL, value: "postgresql://fabulist:fabulist@127.0.0.1:5432/fabulist_test"}]
+    env: [{name: TEST_DATABASE_URL, value: "postgresql://fabulist:fabulist@127.0.0.1:5432/fabulist_test"}, {name: TEST_RUNTIME_DATABASE_URL, value: "postgresql://fabulist_app:app@127.0.0.1:5432/fabulist_test"}]
   - name: node
     image: node:20-alpine
     command: [sleep, "3600"]
@@ -36,6 +36,8 @@ YAML
 kubectl -n "$NS" wait --for=condition=Ready pod/ci --timeout=300s >/dev/null
 # TCP, not the socket: the image's temporary init server answers on the socket only, then restarts.
 until kubectl -n "$NS" exec ci -c db -- pg_isready -q -h 127.0.0.1 -U fabulist -d fabulist_test; do sleep 1; done
+# a login that owns nothing: the role the running app uses in production (tests/test_runtime_role.py)
+kubectl -n "$NS" exec ci -c db -- psql -q -h 127.0.0.1 -U fabulist -d fabulist_test -c "CREATE ROLE fabulist_app LOGIN PASSWORD 'app' NOSUPERUSER NOCREATEDB NOCREATEROLE" >/dev/null
 git ls-files -z --cached --others --exclude-standard | COPYFILE_DISABLE=1 tar --null -T - -cf - | kubectl -n "$NS" exec -i ci -c py -- tar -xf - -C /src
 echo "== lint + tests"
 # PYTEST_ARGS narrows the run (e.g. "tests/test_api.py -k stuck"); REPEAT=N runs it N times, to chase a test that fails now and then.

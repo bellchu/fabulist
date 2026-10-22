@@ -111,7 +111,8 @@ A webhook that ticks "Also tell this webhook when an AI run finishes" also recei
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `DATABASE_URL` | Postgres with the pgvector extension (required) | - |
+| `DATABASE_URL` | Postgres with the pgvector extension (required). The login the running app uses | - |
+| `MIGRATION_DATABASE_URL` | optional second login, the schema owner: creates and upgrades the tables at startup and grants `DATABASE_URL`'s role the right to read and write data, but not to change the schema or to update or delete the history and administrative trail. Unset: one login does both. `scripts/deploy.sh` sets this up on Kubernetes (role `fabulist_app`) | unset |
 | `SETTINGS_ENCRYPTION_KEY` | encrypts provider API keys at rest (required to save keys) | - |
 | `APP_BASIC_USER`, `APP_BASIC_PASSWORD` | bootstrap admin; enables sign-in for all users | off |
 | `EMBED_DIM` | pgvector column size; must match the embeddings model | `256` |
@@ -283,6 +284,7 @@ What to turn when it is not enough: more concurrent AI runs (`MAX_CONCURRENT_RUN
 | FabulistMemoryNearLimit | The app is over 85% of its memory limit and will be killed (OOM) if it grows. Look for very large projects or exports in progress and for many large uploads at once (`MAX_CONCURRENT_PARSES`); raise the pod's memory limit in `deploy/k8s/app.yaml` if the load is legitimate. The Grafana *Capacity* row shows resident, peak and limit. |
 | FabulistAIRunsFailing | Admin → Activity shows each run's error. A run whose provider stopped answering is marked *stuck* after `STALE_RUN_MINUTES` and Cancel takes effect within one provider timeout. Use Admin → AI providers → Test to verify the endpoint, key and model. |
 | FabulistDependencyAudit | `kubectl -n fabulist logs job/<latest fabulist-dep-audit job>` lists packages and fixed versions; upgrade `requirements.txt`, run `scripts/test.sh`, redeploy. |
+| (database roles) | The app runs as `fabulist_app`, which cannot change the schema; the schema owner's login is `MIGRATION_DATABASE_URL` in the `fabulist-db` secret and is used at startup only. To undo the split (for example to roll back to an image older than this one), copy that value into `DATABASE_URL`, delete the `MIGRATION_DATABASE_URL` key and restart the app. To see who owns what: `kubectl -n fabulist exec postgres-0 -- psql -U fabulist -d fabulist -c '\dp history'`. |
 | FabulistRestarting | The app restarted twice or more in an hour; each restart fails the runs that were executing. `kubectl -n fabulist describe pod -l app=fabulist` shows the last state (`OOMKilled` means the memory limit: see FabulistMemoryNearLimit) and `kubectl -n fabulist logs deploy/fabulist --previous` the last words. Repeated liveness failures mean the process hangs: look for a stuck thread pool in the logs. |
 | FabulistBackupMissing | `kubectl -n fabulist get jobs` and the `fabulist-backup` job logs; make sure the backups volume has space. |
 
