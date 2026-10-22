@@ -319,7 +319,7 @@ async function viewOverview(body) {
         h("div", { class: "card-body" }, total ? [
           h("div", { class: "typebar" }, Object.entries(p.requirement_types).filter(([, n]) => n).map(([t, n]) =>
             h("span", { title: t + ": " + n, style: { width: (100 * n) / total + "%", background: TYPE_COLORS[t] } }))),
-          h("div", { class: "legend" }, Object.entries(p.requirement_types).map(([t, n]) => h("span", {}, h("i", { style: { background: TYPE_COLORS[t] } }), t + " " + n)))]
+          h("div", { class: "legend" }, Object.entries(p.requirement_types).filter(([, n]) => n).map(([t, n]) => h("span", {}, h("i", { style: { background: TYPE_COLORS[t] } }), t + " " + n)))]
           : h("p", { class: "muted" }, "No requirements yet."))),
       h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Recent runs")),
         runs.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
