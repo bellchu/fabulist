@@ -69,6 +69,15 @@ def history_csv(entries: List[Dict[str, Any]]) -> Output:
                                   json.dumps(e["changes"], ensure_ascii=False, sort_keys=True)] for e in entries])
 
 
+RUNS_HEADER = ["When", "Project", "Stage", "By", "Provider", "Model", "Status", "Items", "Tokens in", "Tokens out", "Duration (s)", "Error"]
+
+
+def runs_csv(runs: List[Dict[str, Any]]) -> Output:
+    return _csv(RUNS_HEADER, [[r["created"], r.get("project_name") or "", r["stage"], r.get("actor") or "", r.get("provider") or "", r.get("model") or "",
+                               r["status"], str(r["item_count"]), str(r["tokens_in"]), str(r["tokens_out"]), str(round((r["duration_ms"] or 0) / 1000, 1)), r.get("error") or ""]
+                              for r in runs])
+
+
 def admin_audit_csv(entries: List[Dict[str, Any]]) -> Output:
     return _csv(["When", "By", "Action", "Target", "Summary", "Changes"],
                 [[e["created"], e["actor"], e["action"], e["target"], e["summary"],

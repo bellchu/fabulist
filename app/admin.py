@@ -51,6 +51,14 @@ def admin_audit_csv():
     return Response(payload, media_type=mime, headers={"Content-Disposition": 'attachment; filename="admin-audit-trail.csv"'})
 
 
+@router.get("/runs.csv")
+def runs_csv():
+    """Every run, newest first (up to 50,000), for usage and cost reporting."""
+    rows = db.rows("SELECT r.*, p.name AS project_name FROM runs r LEFT JOIN projects p ON p.id = r.project_id ORDER BY r.created DESC, r.id LIMIT 50000")
+    payload, mime = exporters.runs_csv(rows)
+    return Response(payload, media_type=mime, headers={"Content-Disposition": 'attachment; filename="ai-runs.csv"'})
+
+
 @router.get("/settings")
 def get_settings() -> Dict[str, Any]:
     return {"values": settings.get_settings(), "defaults": settings.DEFAULTS, "limits": settings.NUMERIC_LIMITS,
