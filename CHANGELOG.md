@@ -4,6 +4,12 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+(New entries go here; they move under a dated heading when a release is marked.)
+
+## 2026-10-22
+
+Everything up to and including pull request #186: the work of the continuous improvement run (capacity and load tests, private projects, audit trails, security hardening, accessibility, import and search, operations and monitoring), as running on the cluster at the time.
+
 - Pressing **/** jumps to the search box from anywhere on the page (the habit from GitHub, Jira and most tools), but never while typing in a field or with a dialog or drawer open; the box says so (placeholder and `aria-keyshortcuts`). Browser test: `tests/ui/slash_search.py`.
 - Architecture notes: a "Running more than one replica" section says what already works (database-backed queue and admission, claims, run ownership, heartbeats, serialised schema upgrades) and exactly what is still per instance (rate limit and throttle, interactive AI limits and parse slots, short-lived caches, worker pools), so the single-replica limit is a stated, bounded one.
 - **A server starting no longer fails the runs of one that is still alive.** At startup every `running` run was failed as "Interrupted by server restart", but during a rolling deploy the old server is still running (and executing) its runs while the new one starts, so the new server killed them and their results were discarded. A running run now records which server instance owns it, instances beat every 10 seconds, a starting server leaves the runs of a live instance alone, and the once-a-minute sweeper fails the runs of an instance that has not beaten for 45 seconds ("the server that was running it stopped"), whichever server notices first (and writes it in the audit trail and notifies opted-in webhooks). Runs from before owners were recorded still fail at startup. This is also what a second replica would need. Tests: `tests/test_run_ownership.py`.
