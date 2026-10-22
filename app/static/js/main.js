@@ -17,7 +17,16 @@ let searchInput = null;
 function globalSearch(route) {
   const listId = "project-search";
   if (!searchInput) {
-    searchInput = h("input", { type: "search", list: listId, placeholder: "Search projects, requirements, stories…", "aria-label": "Search projects, requirements and stories" });
+    searchInput = h("input", { type: "search", list: listId, placeholder: "Search projects, requirements, stories…  ( / )", "aria-label": "Search projects, requirements and stories", "aria-keyshortcuts": "/" });
+    // "/" jumps to the search box from anywhere, except while typing in a field (or with a dialog open: its fields are fields too)
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (document.querySelector(".modal, .drawer")) return;
+      e.preventDefault();
+      searchInput.focus();
+    });
     searchInput.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;
       const text = searchInput.value.trim();
