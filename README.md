@@ -244,7 +244,7 @@ What to turn when it is not enough: more concurrent AI runs (`MAX_CONCURRENT_RUN
 
 | Alert | Check |
 |---|---|
-| FabulistDown | `kubectl -n fabulist get pods`; app logs; `/healthz` returns 503 when Postgres is unreachable (API calls then return a 503 with `Retry-After`), so check `postgres-0` too. The app reconnects by itself when the database returns. |
+| FabulistDown | `kubectl -n fabulist get pods`; app logs; `/healthz` (readiness) returns 503 when Postgres is unreachable, which only takes the pod out of rotation (`/livez`, the liveness probe, does not look at the database, so an outage never restarts the app and its AI runs) (API calls then return a 503 with `Retry-After`), so check `postgres-0` too. The app reconnects by itself when the database returns. |
 | FabulistDatabaseUnavailable | The app is up but `fabulist_database_up` is 0 and users get 503s. `kubectl -n fabulist get pods` and `describe pod postgres-0`; check its volume and logs. No app restart is needed: it reconnects by itself. |
 | FabulistAuthFailureSpike | Filter the JSON logs for `failed sign-in` and look at `ip` and `user`. Repeated failures are throttled per user and per address; disable or rotate the targeted account and block the source at the edge if it persists. |
 | FabulistHighErrorRate | Filter logs for `status >= 500`; look for database errors or provider timeouts. |
