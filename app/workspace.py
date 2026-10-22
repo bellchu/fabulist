@@ -1,4 +1,6 @@
 """Project workspace API: projects, sources, AI runs, requirements, stories, traceability, export, push."""
+import csv
+import io
 import json
 import logging
 import re
@@ -930,6 +932,67 @@ def refine_requirement(pid: str, rid: str, body: RefineIn):
 @router.delete("/api/projects/{pid}/requirements/{rid}", status_code=204)
 def delete_requirement(pid: str, rid: str, request: Request):
     _delete_item("requirements", pid, rid, history.actor(request))
+
+
+MAX_IMPORT_ROWS = 2000
+_IMPORT_COLUMNS = {  # header (lower case, spaces and underscores alike) -> field; the export's own headers import back
+    "statement": "statement", "requirement": "statement", "text": "statement", "description": "statement",
+    "type": "type", "epic": "epic", "section": "section", "feature": "section", "source id": "source_id", "sourceid": "source_id",
+    "source ref": "source_ref", "actors": "actors", "actor": "actors", "product scope": "product_scope", "compliance tags": "compliance_tags",
+    "compliance": "compliance_tags", "rationale": "rationale", "status": "status"}
+_LIST_FIELDS = ("actors", "product_scope", "compliance_tags")
+
+
+@router.post("/api/projects/{pid}/requirements/import")
+def import_requirements(pid: str, request: Request, body: Dict[str, Any] = Body(...)):
+    """Add requirements from a CSV (a spreadsheet saved as CSV, or Fabulist's own Requirements export). Needs a statement column; everything
+    is validated first and nothing is imported if any row is wrong. A statement that already exists in the project is skipped, not doubled."""
+    _project(pid)
+    text = str(body.get("csv") or "").lstrip("\ufeff")
+    rows = list(csv.DictReader(io.StringIO(text)))
+    if not rows:
+        raise HTTPException(400, "The file has no rows. The first row must name the columns, with at least one called Requirement or Statement.")
+    columns = {h: _IMPORT_COLUMNS[re.sub(r"[\s_]+", " ", h.strip().lower())] for h in rows[0] if h and re.sub(r"[\s_]+", " ", h.strip().lower()) in _IMPORT_COLUMNS}
+    if "statement" not in columns.values():
+        raise HTTPException(400, "No Requirement or Statement column found in the first row")
+    if len(rows) > MAX_IMPORT_ROWS:
+        raise HTTPException(400, "At most %d rows per import; split the file" % MAX_IMPORT_ROWS)
+    seen = {pipeline._norm_key(r["statement"]) for r in db.rows("SELECT data->>'statement' AS statement FROM requirements WHERE project_id=%s", (pid,))}
+    fresh: List[Tuple[Dict[str, Any], str]] = []
+    errors: List[str] = []
+    skipped = 0
+    for line, row in enumerate(rows, 2):
+        raw: Dict[str, Any] = {}
+        for header, field_name in columns.items():
+            value = (row.get(header) or "").strip()
+            if field_name in _LIST_FIELDS:
+                raw[field_name] = [v for v in re.split(r"[;\n]", value) if v.strip()]
+            elif value:
+                raw[field_name] = value
+        status = str(raw.pop("status", "draft")).lower()
+        item = pipeline.normalize_requirement(raw, {"heading": "CSV"}, "Imported")
+        if status not in STATUSES:
+            errors.append("line %d: status must be draft, approved or excluded" % line)
+        elif item is None:
+            errors.append("line %d: the statement is missing or shorter than 8 characters" % line)
+        elif pipeline._norm_key(item["statement"]) in seen:
+            skipped += 1
+        else:
+            seen.add(pipeline._norm_key(item["statement"]))
+            fresh.append((item, status))
+    if errors:
+        raise HTTPException(400, "Nothing was imported. " + "; ".join(errors[:10]) + ("; and %d more" % (len(errors) - 10) if len(errors) > 10 else ""))
+    who = history.actor(request)
+    with db.conn() as c:
+        seq = c.execute("SELECT coalesce(max(seq), -1) + 1 AS n FROM requirements WHERE project_id=%s", (pid,)).fetchone()["n"]
+        for item, status in fresh:
+            new = db.new_id()
+            c.execute("INSERT INTO requirements (id, project_id, seq, status, data) VALUES (%s,%s,%s,%s,%s)", (new, pid, seq, status, json.dumps(item)))
+            history.record(c, pid, "requirement", new, history.item_key("requirement", seq), "created", who, _label(item))
+            seq += 1
+        if fresh:
+            history.record(c, pid, "project", pid, "", "imported", who, "%d requirements from CSV" % len(fresh))
+    return {"created": len(fresh), "duplicates_skipped": skipped}
 
 
 @router.post("/api/projects/{pid}/requirements/bulk")
