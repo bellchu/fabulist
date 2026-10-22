@@ -4,6 +4,7 @@
 # Needs only kubectl access (and git, tar). Sends the working tree (tracked + new, not ignored files).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. scripts/lib-cluster.sh; require_cluster
 # Docker Hub intermittently refuses to pull on the node (digest/size validation); the AWS public mirror serves the same official image.
 PYTHON_IMAGE="${PYTHON_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim}"
 NS="fabulist-ci-$(date +%s)-$$"

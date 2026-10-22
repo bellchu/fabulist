@@ -5,6 +5,7 @@
 # Usage: scripts/load-test-k8s.sh [burst] [slowai] [volume] [bigproject] [bigfiles] [manyprojects] [flakyai]     (default: the first three)   env: REQUESTERS BRDS_EACH VOLUME_BRDS BRD_KB VOLUME_KB LLM_LATENCY SLOW_BRDS_EACH BIG_BRDS MAX_BATCHES
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. scripts/lib-cluster.sh; require_cluster
 PYTHON_IMAGE="${PYTHON_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim}"
 scenarios=("$@"); [ "${#scenarios[@]}" -gt 0 ] || scenarios=(burst slowai volume)
 NS="fabulist-load-$(date +%s)-$$"
