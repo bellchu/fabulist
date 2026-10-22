@@ -1,0 +1,38 @@
+# Weekly proof that the nightly backup restores: the newest dump is restored into a scratch Postgres inside the job (nothing touches the real database)
+# and sanity-checked. The script is scripts/restore-check-job.sh, put in the ConfigMap by scripts/deploy.sh. A failed job raises FabulistRestoreCheckFailed.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fabulist-restore-check
+  namespace: fabulist
+spec:
+  schedule: "30 4 * * 0"   # Sundays, two hours after the nightly backup
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1200
+      template:
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          containers:
+            - name: restore-check
+              image: pgvector/pgvector:pg16
+              command: ["/bin/sh", "/job/restore-check-job.sh"]
+              resources:
+                requests: {cpu: 100m, memory: 128Mi}
+                limits: {memory: 768Mi}
+              volumeMounts:
+                - {name: backups, mountPath: /backups, readOnly: true}
+                - {name: job, mountPath: /job}
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: fabulist-backups
+                readOnly: true
+            - name: job
+              configMap:
+                name: fabulist-restore-check

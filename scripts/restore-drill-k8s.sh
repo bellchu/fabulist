@@ -26,6 +26,10 @@ spec:
     image: pgvector/pgvector:pg16
     volumeMounts: [{name: dump, mountPath: /dump}]
     env: [{name: PGPORT, value: "5433"}, {name: POSTGRES_USER, value: f}, {name: POSTGRES_PASSWORD, value: f}, {name: POSTGRES_DB, value: f}]
+  - name: checker
+    image: pgvector/pgvector:pg16
+    command: [sleep, "1800"]
+    volumeMounts: [{name: dump, mountPath: /backups}]
   - name: app
     image: ${PYTHON_IMAGE}
     command: [sleep, "3600"]
@@ -71,8 +75,8 @@ PY
 COUNTS="SELECT (SELECT count(*) FROM projects),(SELECT count(*) FROM documents),(SELECT count(*) FROM requirements),(SELECT count(*) FROM stories),(SELECT count(*) FROM chunks),(SELECT count(*) FROM history),(SELECT count(*) FROM baselines),(SELECT count(*) FROM admin_audit),(SELECT count(*) FROM settings)"
 before=$(sql source 5432 "$COUNTS"); echo "source:   $before  (projects documents requirements stories passages history baselines admin_audit settings)"
 echo "== dump (as the CronJob does) and restore into a fresh database"
-kubectl -n "$NS" exec drill -c source -- pg_dump -h 127.0.0.1 -p 5432 -U f -d f -Fc -f /dump/drill.dump
-kubectl -n "$NS" exec drill -c restored -- pg_restore -h 127.0.0.1 -p 5433 -U f -d f --clean --if-exists --exit-on-error /dump/drill.dump
+kubectl -n "$NS" exec drill -c source -- pg_dump -h 127.0.0.1 -p 5432 -U f -d f -Fc -f /dump/fabulist-drill.dump
+kubectl -n "$NS" exec drill -c restored -- pg_restore -h 127.0.0.1 -p 5433 -U f -d f --clean --if-exists --exit-on-error /dump/fabulist-drill.dump
 after=$(sql restored 5433 "$COUNTS"); echo "restored: $after"
 [ "$before" = "$after" ] || { echo "FAIL: row counts differ" >&2; exit 1; }
 echo "== the app on the restored database"
@@ -93,4 +97,7 @@ if not any("confirmations" in str(c) for c in api("POST", "/api/projects/%s/sear
 if "Drill baseline" not in str(api("GET", "/api/projects/%s/baselines" % pid)): fail("baseline missing")
 if not any(e["action"] == "settings changed" for e in api("GET", "/api/admin/audit")): fail("administrative trail missing")
 PY
+echo "== the weekly restore-check job script, against this dump (as the CronJob runs it)"
+kubectl -n "$NS" exec -i drill -c checker -- sh -c 'cat > /tmp/restore-check-job.sh' < scripts/restore-check-job.sh
+kubectl -n "$NS" exec drill -c checker -- env BACKUP_DIR=/backups MAX_AGE_SECONDS=3600 SCRATCH_PORT=5434 sh /tmp/restore-check-job.sh
 echo "restore drill passed"

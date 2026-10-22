@@ -120,6 +120,12 @@ spec:
           annotations:
             summary: The Fabulist app restarted twice or more in an hour (a restart ends the AI runs in progress)
             runbook: "README.md#runbook: kubectl describe the pod for the last state (OOMKilled?) and read the previous logs"
+        - alert: FabulistRestoreCheckFailed
+          expr: kube_job_status_failed{namespace="fabulist", job_name=~"fabulist-restore-check.*"} > 0
+          labels: {severity: critical, team: fabulist}
+          annotations:
+            summary: The weekly test restore of the newest backup failed (the backups may not be usable)
+            runbook: "README.md#runbook: read the fabulist-restore-check job log; take a fresh backup by hand and try the restore yourself"
         - alert: FabulistBackupMissing
           expr: time() - kube_cronjob_status_last_successful_time{namespace="fabulist", cronjob="fabulist-backup"} > 26 * 3600
           for: 30m
