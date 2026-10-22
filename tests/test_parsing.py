@@ -163,3 +163,32 @@ def test_truncation_is_announced_not_silent(monkeypatch):
     assert "only the first 3 rows" in sheet.lower() and "R2" in sheet and "R5" not in sheet
     # a short document is untouched
     assert "truncated" not in parsing.extract_text("ok.txt", b"The system shall export invoices.").lower()
+
+
+def test_a_large_word_document_is_read_in_seconds_not_minutes():
+    import time
+    doc = Document()
+    doc.add_heading("Order capture", level=1)
+    for i in range(20000):
+        doc.add_paragraph("The system shall support capability number %d for the buyer." % i)
+    doc.add_heading("Invoicing", level=1)
+    doc.add_paragraph("The system shall invoice at month end.")
+    buf = io.BytesIO()
+    doc.save(buf)
+    t = time.time()
+    text = parsing.extract_text("big.docx", buf.getvalue())
+    took = time.time() - t
+    assert took < 8, "20,000 paragraphs took %.1f s (python-docx looked the style up from scratch for every paragraph: about 25 s)" % took
+    assert text.count("\n# ") >= 1 and "# Order capture" in text, "headings are still recognised"
+
+
+def test_reading_a_word_document_stops_at_the_text_limit(monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "MAX_DOC_CHARS", 5000)
+    doc = Document()
+    for i in range(5000):
+        doc.add_paragraph("The system shall support capability number %d for the buyer." % i)
+    buf = io.BytesIO()
+    doc.save(buf)
+    text = parsing.extract_text("long.docx", buf.getvalue())
+    assert "truncated" in text.lower() and len(text) < 20000, "no need to extract what would be cut anyway (%d chars)" % len(text)

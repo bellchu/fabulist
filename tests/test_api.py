@@ -1008,3 +1008,53 @@ def test_duplicate_analysis_is_cached_per_project_and_recomputed_when_a_requirem
     client.patch(api + "/requirements/" + after[1]["id"], json={"status": "excluded"})
     client.get(api + "/requirements")
     assert len(calls) == n + 2, "excluding one changes what is compared"
+
+
+def test_only_a_few_documents_are_parsed_at_once_the_rest_wait_and_none_fail(client, monkeypatch):
+    import threading
+    import time
+    from app import config, parsing
+    monkeypatch.setattr(config, "MAX_CONCURRENT_PARSES", 2)
+    lock, now, peak = threading.Lock(), [0], [0]
+
+    def slow_parse(name, data):
+        with lock:
+            now[0] += 1
+            peak[0] = max(peak[0], now[0])
+        time.sleep(0.2)
+        with lock:
+            now[0] -= 1
+        return "# A\nThe system shall do a thing for the buyer."
+    monkeypatch.setattr(parsing, "extract_text", slow_parse)
+    pid = client.post("/api/projects", json={"name": "Parse", "platform": "generic"}).json()["id"]
+    codes = []
+
+    def upload(i):
+        r = client.post("/api/projects/%s/documents" % pid, files={"file": ("brd%d.docx" % i, b"x" * 100, "application/octet-stream")})
+        codes.append(r.status_code)
+    threads = [threading.Thread(target=upload, args=(i,)) for i in range(8)]
+    [t.start() for t in threads]
+    [t.join(30) for t in threads]
+    assert codes == [201] * 8, "all eight uploads are stored: %s" % codes
+    assert peak[0] == 2, "but never more than MAX_CONCURRENT_PARSES parse at the same moment (%d)" % peak[0]
+
+
+def test_an_upload_that_cannot_get_a_parsing_slot_in_time_is_told_to_retry(client, monkeypatch):
+    import threading
+    from app import config, parsing, workspace
+    monkeypatch.setattr(config, "MAX_CONCURRENT_PARSES", 1)
+    monkeypatch.setattr(config, "PARSE_WAIT_SECONDS", 0.3)
+    workspace._reset_parse_slots()
+    release = threading.Event()
+    monkeypatch.setattr(parsing, "extract_text", lambda name, data: (release.wait(10), "# A\nThe system shall do a thing.")[1])
+    pid = client.post("/api/projects", json={"name": "Busy", "platform": "generic"}).json()["id"]
+    first = threading.Thread(target=lambda: client.post("/api/projects/%s/documents" % pid, files={"file": ("a.docx", b"x", "application/octet-stream")}))
+    first.start()
+    import time
+    time.sleep(0.2)
+    try:
+        second = client.post("/api/projects/%s/documents" % pid, files={"file": ("b.docx", b"x", "application/octet-stream")})
+        assert second.status_code == 503 and second.headers["retry-after"] and "busy" in second.json()["detail"].lower(), second.text
+    finally:
+        release.set()
+        first.join(10)

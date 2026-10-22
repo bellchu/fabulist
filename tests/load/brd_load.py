@@ -118,6 +118,15 @@ def budget(ok, what):
         budget_misses.append(what)
 
 
+def clean_slate():
+    """Every scenario starts from the settings a fresh install has: the offline AI provider as default and the default limits, whatever an
+    earlier scenario changed (the slow-AI one points the default provider at a fake that stops with it)."""
+    with httpx.Client(base_url=BASE, headers=H, timeout=30) as c:
+        offline = next(p for p in c.get("/api/admin/providers").json()["providers"] if p["kind"] == "mock")
+        c.post(f"/api/admin/providers/{offline['id']}/default", json={})
+        c.put("/api/admin/settings", json=c.get("/api/admin/settings").json()["defaults"])
+
+
 def raise_section_limit():
     """20 BRDs of this size are ~460 sections, over the default 'Max sections per run' (200): without this an extraction is refused up front
     (a deliberate cost guard; see the estimate). An administrator running a large intake raises it, so the scenario does too."""
@@ -309,6 +318,61 @@ def slowai():
     budget(max(bystander.lat.get("bystander /healthz", [99])) < 5, "the health probe stayed responsive while 20 runs worked and queued")
 
 
+def bigfiles():
+    """20 requesters upload one large Word file each at the same moment: parsing a big .docx holds a multiple of its size in memory, so
+    this is where uploads could take the app down. Each file is about FILE_MB megabytes zipped, built from non-repeating text."""
+    import random
+    mb = float(os.environ.get("FILE_MB", 6))
+    print("\n== bigfiles: %d requesters upload a ~%.0f MB .docx at the same moment" % (REQUESTERS, mb))
+    rnd = random.Random(7)
+    words = ["system", "shall", "allow", "buyer", "approve", "order", "invoice", "record", "notify", "validate", "report", "export"] + ["w%04d" % i for i in range(4000)]
+
+    def big_docx(tag):
+        from docx import Document
+        doc = Document()
+        size = 0
+        while size < mb * 1024 * 1024 * 3.2:  # random words compress about 3:1
+            line = " ".join(rnd.choice(words) for _ in range(60))
+            doc.add_paragraph("The system shall %s (%s)." % (line, tag))
+            size += len(line) + 40
+        buf = io.BytesIO()
+        doc.save(buf)
+        return buf.getvalue()
+    files = [big_docx("F%02d" % i) for i in range(REQUESTERS)]
+    print("built %d files, %.1f MB each on the wire" % (len(files), len(files[0]) / 1048576))
+    timings, bystander, stop = Timings(), Timings(), threading.Event()
+    with httpx.Client(base_url=BASE, headers=H, timeout=30) as c:
+        pids = [c.post("/api/projects", json={"name": "Big file %02d" % i, "platform": "generic"}).json()["id"] for i in range(REQUESTERS)]
+    memory("before the uploads")
+    barrier = threading.Barrier(REQUESTERS + 1)
+    outcomes = []
+
+    def upload(i):
+        with httpx.Client(base_url=BASE, headers=H, timeout=300) as c:
+            barrier.wait()
+            r = timed(c, timings, "upload big .docx", "POST", f"/api/projects/{pids[i]}/documents", files={"file": ("big-%02d.docx" % i, files[i], "application/octet-stream")})
+            outcomes.append(r.status_code if r is not None else "error")
+
+    threads = [threading.Thread(target=upload, args=(i,)) for i in range(REQUESTERS)]
+    mon = threading.Thread(target=monitor, args=(stop, bystander))
+    mon.start()
+    [t.start() for t in threads]
+    barrier.wait()
+    t0 = time.time()
+    [t.join() for t in threads]
+    stop.set()
+    mon.join()
+    print("all uploads answered after %.0f s: %s" % (time.time() - t0, {code: outcomes.count(code) for code in set(outcomes)}))
+    timings.report()
+    print()
+    bystander.report()
+    _, peak, limit = memory("after the uploads")
+    print("budgets:")
+    budget(all(code in (201, 400, 413) for code in outcomes), "every upload got a proper answer (201 stored, or 400/413 refused), none failed outright %s" % set(outcomes))
+    budget(limit == 0 or peak < limit * 0.85, "memory peak stayed under 85%% of the container limit (peak %d MiB of %d MiB)" % (peak, limit))
+    budget(max(bystander.lat.get("bystander /healthz", [99])) < 5, "the health probe stayed responsive (max %.1f s)" % max(bystander.lat.get("bystander /healthz", [99])))
+
+
 def bigproject():
     """Where the memory goes when one project holds very many requirements: one operation at a time, with the process's memory read after each.
     Seeds VOLUME_BRDS small BRDs and reads them all in batches (each BRD yields about 46 requirements)."""
@@ -443,6 +507,7 @@ def volume():
 if __name__ == "__main__":
     which = sys.argv[1:] or ["burst", "slowai", "volume"]
     for name in which:
-        {"burst": burst, "slowai": slowai, "volume": volume, "bigproject": bigproject}[name]()
+        clean_slate()
+        {"burst": burst, "slowai": slowai, "volume": volume, "bigproject": bigproject, "bigfiles": bigfiles}[name]()
     print("\n%s" % ("LOAD TEST OK" if not budget_misses else "LOAD TEST: %d budget(s) missed: %s" % (len(budget_misses), budget_misses)))
     sys.exit(1 if budget_misses else 0)

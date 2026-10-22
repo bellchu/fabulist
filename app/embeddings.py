@@ -9,6 +9,7 @@ import httpx
 from . import config, db, settings
 
 _TOKEN = re.compile(r"[a-z0-9]{2,}")
+INDEX_BATCH = 100  # chunks embedded and inserted at a time
 
 
 def _hash_embed(text: str) -> List[float]:
@@ -69,15 +70,17 @@ def index_document(project_id: str, document_id: str, text: str) -> int:
     chunks = split_text(text)
     if not chunks:
         return 0
-    vectors = embed(chunks)
+    # In batches inside one transaction: a 2 MB document is ~1,700 chunks, and embedding them all at once held tens of MB of vectors
+    # per document, which added up when many large documents arrived together.
     with db.conn() as c:
         with c.cursor() as cur:
-            cur.executemany(
-                "INSERT INTO chunks (id, project_id, document_id, seq, text, embedding) "
-                "VALUES (%s, %s, %s, %s, %s, %s::vector)",
-                [(db.new_id(), project_id, document_id, i, t, db.vec(v))
-                 for i, (t, v) in enumerate(zip(chunks, vectors))],
-            )
+            for start in range(0, len(chunks), INDEX_BATCH):
+                batch = chunks[start:start + INDEX_BATCH]
+                cur.executemany(
+                    "INSERT INTO chunks (id, project_id, document_id, seq, text, embedding) "
+                    "VALUES (%s, %s, %s, %s, %s, %s::vector)",
+                    [(db.new_id(), project_id, document_id, start + i, t, db.vec(v)) for i, (t, v) in enumerate(zip(batch, embed(batch)))],
+                )
     return len(chunks)
 
 
