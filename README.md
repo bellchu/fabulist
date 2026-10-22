@@ -225,7 +225,7 @@ seccomp profile. `networkpolicy.yaml` lets only the ingress controller and Prome
 namespace's own pods reach Postgres (Calico or another policy-enforcing CNI is required for it to take effect).
 
 A nightly CronJob (`deploy/k8s/backup.yaml`) writes `pg_dump` backups to a separate volume and
-keeps 7 days. To restore one:
+keeps every dump of the last 7 days and the Sunday dump of each of the last 5 weeks. To restore one:
 
 ```bash
 kubectl -n fabulist exec -i postgres-0 -- pg_restore -U fabulist -d fabulist --clean --if-exists --exit-on-error < fabulist-YYYYMMDD-HHMMSS.dump

@@ -35,4 +35,4 @@ spec:
                 readOnly: true
             - name: job
               configMap:
-                name: fabulist-restore-check
+                name: fabulist-job-scripts
