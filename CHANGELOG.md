@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- `SBOM_SOURCE=image scripts/sbom-k8s.sh` reads the image that is running with Trivy and lists its operating-system packages as well (157 components: Debian packages and Python), which the Python-only list lacks.
 - `scripts/sbom-k8s.sh` writes a software bill of materials (CycloneDX JSON: 35 components with exact versions, transitive packages included) for the app's pinned Python packages, built on the cluster with `pip-audit` (already a tool of the project, so no new dependency). Procurement and security reviews of enterprise software ask for one.
 - The README cookbook's request sequence is now run as a test (`tests/test_cookbook_flow.py`): a personal API token takes a BRD through upload, extraction, bulk approval, story generation and Excel export.
 - README: an automation cookbook (create a project, upload a BRD, run, wait, approve, generate stories, export; how to treat 429 and 503). A test checks every route it names exists in the API description.
