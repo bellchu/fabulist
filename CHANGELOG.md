@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- **The audit tables are append-only in the database itself.** "Append-only" was true only because the API never updated or deleted them. A database trigger now refuses any `UPDATE` of the project history and any `UPDATE` or `DELETE` of the administrative trail, so a bug or an injected statement cannot rewrite what auditors rely on. A project's own history still goes when the project is permanently deleted (and that deletion is recorded in the administrative trail). This is defence in depth: whoever owns the table can still drop the trigger, so keep the application's database role from owning it if that matters to you. Tests: `tests/test_append_only.py`; the restore drill still passes.
 - `SBOM_SOURCE=image scripts/sbom-k8s.sh` reads the image that is running with Trivy and lists its operating-system packages as well (157 components: Debian packages and Python), which the Python-only list lacks.
 - `scripts/sbom-k8s.sh` writes a software bill of materials (CycloneDX JSON: 35 components with exact versions, transitive packages included) for the app's pinned Python packages, built on the cluster with `pip-audit` (already a tool of the project, so no new dependency). Procurement and security reviews of enterprise software ask for one.
 - The README cookbook's request sequence is now run as a test (`tests/test_cookbook_flow.py`): a personal API token takes a BRD through upload, extraction, bulk approval, story generation and Excel export.

@@ -55,6 +55,14 @@ SCHEMA = [
     """CREATE TABLE IF NOT EXISTS admin_audit (
          n BIGSERIAL, id TEXT PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL DEFAULT '',
          summary TEXT NOT NULL DEFAULT '', changes JSONB NOT NULL DEFAULT '{}', created TEXT NOT NULL)""",
+    # The audit tables are append-only in the database too (defence in depth against a bug or an injected statement; the table owner can still drop
+    # a trigger). A project's own history may still go with the project (ON DELETE CASCADE), so history refuses only UPDATE.
+    """CREATE OR REPLACE FUNCTION fabulist_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN RAISE EXCEPTION 'the % table is append-only', TG_TABLE_NAME; END $$""",
+    "DROP TRIGGER IF EXISTS history_append_only ON history",
+    "CREATE TRIGGER history_append_only BEFORE UPDATE ON history FOR EACH ROW EXECUTE FUNCTION fabulist_append_only()",
+    "DROP TRIGGER IF EXISTS admin_audit_append_only ON admin_audit",
+    "CREATE TRIGGER admin_audit_append_only BEFORE UPDATE OR DELETE ON admin_audit FOR EACH ROW EXECUTE FUNCTION fabulist_append_only()",
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS archived TEXT",
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'everyone'",  # 'everyone', or 'members' (see project_members)
     """CREATE TABLE IF NOT EXISTS project_members (
