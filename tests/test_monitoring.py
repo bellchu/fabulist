@@ -61,3 +61,10 @@ def test_the_dashboard_is_valid_json_and_graphs_the_capacity_signals():
     for i, (x1, y1, w1, h1) in enumerate(boxes):
         for x2, y2, w2, h2 in boxes[i + 1:]:
             assert x1 + w1 <= x2 or x2 + w2 <= x1 or y1 + h1 <= y2 or y2 + h2 <= y1, f"dashboard panels overlap: {(x1, y1, w1, h1)} and {(x2, y2, w2, h2)}"
+
+
+def test_provider_throttling_is_graphed_and_alerted_on():
+    dash = _dashboard()
+    panel = next(p for p in dash["panels"] if p["title"] == "AI provider retries by reason (5 min)")
+    assert "fabulist_llm_retries_total" in panel["targets"][0]["expr"]
+    assert "FabulistAIProviderThrottling" in MONITORING and "fabulist_llm_retries_total" in MONITORING.split("FabulistAIProviderThrottling", 1)[1][:400]
