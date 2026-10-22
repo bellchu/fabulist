@@ -144,3 +144,22 @@ def test_the_sample_file_in_the_repository_imports(client):
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "samples", "requirements-import.csv")
     r = _import(client, _project(client), open(path, encoding="utf-8").read())
     assert r.status_code == 200 and r.json()["created"] == 3
+
+
+def test_hostile_files_are_contained(client):
+    pid = _project(client)
+    # a formula as a statement is stored as text and neutralised again when exported
+    assert _import(client, pid, 'Requirement\n"=HYPERLINK(""http://evil"",""x"") shall be used here"\n').json()["created"] == 1
+    assert "'=HYPERLINK" in client.get("/api/projects/%s/export?format=requirements-csv" % pid).text
+    # a megabyte in one cell is cut to the field limit instead of stored whole
+    assert _import(client, pid, "Requirement\n" + "The system shall " + "x" * 1_000_000 + "\n").json()["created"] == 1
+    assert max(len(x["statement"]) for x in _reqs(client, pid)) <= 1500
+    # markup stays text (the UI renders it with textContent; the API must not change it)
+    assert _import(client, pid, "Requirement\n<script>alert(1)</script> shall never run in a browser\n").json()["created"] == 1
+    # headers only, binary garbage, a thousand columns
+    assert _import(client, pid, "Requirement\n").status_code == 400
+    assert _import(client, pid, "\x00\x01\x02\xff garbage").status_code == 400
+    wide = ",".join("c%d" % i for i in range(1000)) + ",Requirement\n" + ",".join("v" for _ in range(1000)) + ",The system shall cope with wide files.\n"
+    assert _import(client, pid, wide).json()["created"] == 1
+    # a non-string csv value does not crash the endpoint
+    assert client.post("/api/projects/%s/requirements/import" % pid, json={"csv": 12345}).status_code == 400
