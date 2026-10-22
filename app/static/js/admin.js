@@ -1,5 +1,5 @@
 // Admin dashboard: usage overview, AI provider profiles, generation settings, activity log.
-import { h, mount, icon, api, guard, toast, modal, confirmBox, badge, statusTone, meter, fmt, duration, timeAgo, field, select, segmented, empty } from "./core.js";
+import { h, mount, icon, api, guard, toast, modal, confirmBox, download, badge, statusTone, meter, fmt, duration, timeAgo, field, select, segmented, empty } from "./core.js";
 import { state, setCrumbs } from "./main.js";
 import { when } from "./account.js";
 
@@ -469,9 +469,40 @@ function userDialog(data, u) {
 
 // ---- activity -----------------------------------------------------------
 
+const AUDIT_PAGE = 25;
+
+function auditTable(rows) {
+  return h("table", { class: "table", "aria-label": "Administrative changes" },
+    h("thead", {}, h("tr", {}, [["When", ""], ["By", ""], ["Change", ""], ["What", ""], ["Detail", "hide-sm"]].map(([x, c]) => h("th", { class: c }, x)))),
+    h("tbody", {}, rows.map((e) => h("tr", {},
+      h("td", { class: "small nowrap muted", title: e.created }, timeAgo(e.created)),
+      h("td", { class: "small" }, e.actor),
+      h("td", {}, e.action),
+      h("td", {}, e.target),
+      h("td", { class: "small muted hide-sm" }, e.summary || "–")))));
+}
+
+async function auditCard() {
+  let rows = await api.get("/api/admin/audit?limit=" + AUDIT_PAGE);
+  const body = h("div", { class: "table-wrap" });
+  const more = h("button", { class: "btn btn-sm", onclick: async () => {
+    const next = await api.get("/api/admin/audit?limit=" + AUDIT_PAGE + "&before=" + rows[rows.length - 1].n);
+    rows = rows.concat(next);
+    draw(next.length === AUDIT_PAGE);
+  } }, "Show older");
+  const draw = (hasMore) => mount(body.replaceChildren() || body, rows.length ? auditTable(rows) : empty({ iconName: "activity", title: "No changes yet", text: "Changes to settings, providers, accounts and integrations are listed here." }),
+    hasMore ? h("div", { class: "card-body" }, more) : null);
+  draw(rows.length === AUDIT_PAGE);
+  return h("div", { class: "card", id: "admin-audit", style: { marginTop: "16px" } },
+    h("div", { class: "card-head" }, h("h3", {}, "Administrative changes"),
+      h("button", { class: "btn btn-sm right", title: "Download the complete trail as CSV", onclick: () => download("/api/admin/audit.csv") }, icon("download"), "Export trail")),
+    body);
+}
+
 async function viewActivity(content) {
   const runs = await api.get("/api/admin/runs?limit=100");
-  mount(content, head("Activity", "Every extraction and generation run across projects."),
+  const audit = await auditCard();
+  mount(content, head("Activity", "Every extraction and generation run across projects, and every change to settings, providers, accounts and integrations."),
     runs.length ? h("div", { class: "card table-wrap" }, h("table", { class: "table" },
       h("thead", {}, h("tr", {}, [["When", ""], ["Project", ""], ["Stage", ""], ["By", "hide-sm"], ["Provider", "hide-sm"], ["Status", ""], ["Items", "hide-sm"], ["Tokens", "hide-sm"], ["Duration", "hide-sm"]].map(([x, c]) => h("th", { class: c }, x)))),
       h("tbody", {}, runs.map((r) => h("tr", {},
@@ -484,5 +515,6 @@ async function viewActivity(content) {
         h("td", { class: "hide-sm" }, r.status === "done" ? r.item_count : "–"),
         h("td", { class: "nowrap hide-sm" }, fmt(r.tokens_in + r.tokens_out)),
         h("td", { class: "nowrap hide-sm" }, duration(r.duration_ms)))))))
-      : h("div", { class: "card" }, empty({ iconName: "activity", title: "No activity yet", text: "Runs appear here once projects start extracting requirements." })));
+      : h("div", { class: "card" }, empty({ iconName: "activity", title: "No activity yet", text: "Runs appear here once projects start extracting requirements." })),
+    audit);
 }

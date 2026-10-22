@@ -52,6 +52,9 @@ SCHEMA = [
          item_type TEXT NOT NULL, item_id TEXT NOT NULL, item_key TEXT NOT NULL DEFAULT '',
          action TEXT NOT NULL, actor TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
          changes JSONB NOT NULL DEFAULT '{}', created TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS admin_audit (
+         n BIGSERIAL, id TEXT PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL DEFAULT '',
+         summary TEXT NOT NULL DEFAULT '', changes JSONB NOT NULL DEFAULT '{}', created TEXT NOT NULL)""",
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS archived TEXT",
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'everyone'",  # 'everyone', or 'members' (see project_members)
     """CREATE TABLE IF NOT EXISTS project_members (
