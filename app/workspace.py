@@ -113,6 +113,10 @@ def get_project(pid: str):
     p["requirement_types"] = {t: sum(1 for r in active if r["type"] == t) for t in pipeline.REQ_TYPES}
     p["runs"] = {st: db.one("SELECT * FROM runs WHERE project_id=%s AND stage=%s ORDER BY created DESC LIMIT 1", (pid, st))
                  for st in STAGES}
+    for run in p["runs"].values():
+        if run and run["status"] == "queued":  # where it stands in the line, oldest first
+            run["queue_position"] = db.one("SELECT count(*) AS n FROM runs WHERE status='queued' AND (created, id) <= (%s, %s)", (run["created"], run["id"]))["n"]
+            run["queue_length"] = db.one("SELECT count(*) AS n FROM runs WHERE status='queued'")["n"]
     return p
 
 
@@ -254,6 +258,9 @@ class RunCancelled(Exception):
 
 
 def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str) -> None:
+    # A queued run waits for a pool worker; claim it now. If it was cancelled (or failed by a restart) while waiting, there is nothing to do.
+    if not db.one("UPDATE runs SET status='running', updated=%s WHERE id=%s AND status IN ('queued', 'running') RETURNING id", (db.now(), run_id)):
+        return
     started = time.monotonic()
     usage = {"in": 0, "out": 0}
 
@@ -425,24 +432,33 @@ def start_run(pid: str, body: RunIn, request: Request):
                             ("Too many requirement groups (%d) for one run (limit %d). Raise 'Max sections per run' in Admin > Generation settings, "
                              "or generate from approved requirements only." % (needed, limit)))
     _recover_stuck_runs(pid)
-    if db.one("SELECT 1 AS x FROM runs WHERE project_id=%s AND status='running'", (pid,)):
+    if db.one("SELECT 1 AS x FROM runs WHERE project_id=%s AND status IN ('running', 'queued')", (pid,)):
         raise HTTPException(409, "A run is already in progress for this project")
     busy = db.one("SELECT count(*) AS n FROM runs WHERE status='running' AND coalesce(updated, created) >= %s", (_stale_cutoff(),))["n"]
-    if busy >= config.MAX_CONCURRENT_RUNS:  # runs that stopped making progress do not count: they are recovered above
+    waiting = db.one("SELECT count(*) AS n FROM runs WHERE status='queued'")["n"]
+    # Runs that stopped making progress do not count as busy: they are recovered above. A full pool queues the run instead of turning
+    # people away (with a real AI provider a run takes minutes to hours, so "try again later" is no answer); the queue itself is bounded.
+    status = "running" if busy < config.MAX_CONCURRENT_RUNS else "queued"
+    if status == "queued" and waiting >= config.MAX_QUEUED_RUNS:
         metrics.inc("fabulist_runs_total", stage=body.stage, status="rejected")
-        raise HTTPException(429, "%d AI runs are already in progress on this server. Try again in a few minutes." % busy,
+        raise HTTPException(429, "%d AI runs are in progress and the queue is full (%d waiting). Try again in a few minutes." % (busy, waiting),
                             headers={"Retry-After": "60"})
     rid = db.new_id()
     db.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, actor, created) "
-               "VALUES (%s,%s,'running',%s,%s,%s,%s,%s)",
-               (rid, pid, body.stage, profile["name"], profile["model"], history.actor(request), db.now()))
+               "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+               (rid, pid, status, body.stage, profile["name"], profile["model"], history.actor(request), db.now()))
     _run_pool().submit(_execute_run, rid, pid, body.stage, profile["id"], body.scope)
-    return {"id": rid, "status": "running"}
+    return {"id": rid, "status": status}
 
 
 @router.post("/api/projects/{pid}/runs/{rid}/cancel")
 def cancel_run(pid: str, rid: str):
     with db.conn() as c:
+        # Still waiting for a slot: just drop it; the worker skips it when its turn comes.
+        dropped = c.execute("UPDATE runs SET status='cancelled', error='Cancelled before it started', progress='' WHERE id=%s AND project_id=%s "
+                            "AND status='queued' RETURNING id", (rid, pid)).fetchone()
+        if dropped:
+            return {"status": "cancelled"}
         row = c.execute("UPDATE runs SET cancel_requested=TRUE, progress='Cancelling…' WHERE id=%s AND project_id=%s "
                         "AND status='running' RETURNING id", (rid, pid)).fetchone()
     if not row:

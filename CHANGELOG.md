@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- **Run queue.** When every AI run slot is busy, a new run is accepted and queued instead of refused with "try again in a few minutes" (in the load test 53 of 73 start attempts were refused; with a real AI provider a run takes minutes to hours, so retrying by hand is no answer). The page shows "Queued: position N of M", the run starts by itself in order and the page follows, and a waiting run can be removed. The queue is bounded (`MAX_QUEUED_RUNS`, default 50, then HTTP 429), a project still has one run at a time, and waiting runs are failed with a clear message if the server restarts. New metric `fabulist_queued_runs` and alert `FabulistRunQueueBacklog`. Browser test: `tests/ui/run_queue.py`.
 - **Load test and the fixes it drove** (`scripts/load-test-k8s.sh`, `tests/load/brd_load.py`; runs on the cluster with the offline AI provider, so no AI spend). Scenarios: 20 requesters each submitting 20 BRDs at the same moment, and one project holding 1,100 BRDs (up to 165 MB of text). Findings and fixes:
   - Uploading a BRD blocked the whole server while it was parsed and stored (health probes waited up to 2.5 s; the pod's probe times out at 1 s). Uploads now run in the worker pool: the same burst leaves the probe at 0.2 s.
   - Listing the documents of a project took 5 s at 1,100 BRDs (a per-document chunk count with no index, quadratic). Now 0.28 s, with an index on `chunks(document_id)`.

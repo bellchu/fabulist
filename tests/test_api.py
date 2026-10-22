@@ -8,7 +8,7 @@ BRD = ("# Ordering\n## Vaccines\nThe system shall allow a customer to place orde
 def _wait(client, pid):
     for _ in range(60):
         runs = client.get("/api/projects/%s/runs?limit=1" % pid).json()
-        if runs and runs[0]["status"] != "running":
+        if runs and runs[0]["status"] not in ("running", "queued"):
             return runs[0]
         time.sleep(0.2)
     raise AssertionError("run did not finish")
@@ -729,10 +729,11 @@ def test_cancelling_during_a_provider_timeout_ends_as_cancelled_not_failed(clien
     assert len(calls) == 1, "no further attempts after the cancel"
 
 
-def test_ai_runs_use_their_own_bounded_pool_and_the_server_says_when_it_is_full(client, monkeypatch):
+def test_ai_runs_use_their_own_bounded_pool_and_extra_runs_wait_in_a_queue(client, monkeypatch):
     import threading
     from app import config, pipeline
     monkeypatch.setattr(config, "MAX_CONCURRENT_RUNS", 2)
+    monkeypatch.setattr(config, "MAX_QUEUED_RUNS", 1)
     release, started, names = threading.Event(), threading.Semaphore(0), []
 
     def blocking_extract(docs, platform, profile, opts, progress, usage):
@@ -746,20 +747,70 @@ def test_ai_runs_use_their_own_bounded_pool_and_the_server_says_when_it_is_full(
         pid = client.post("/api/projects", json={"name": "Load %d" % i, "platform": "generic"}).json()["id"]
         client.post("/api/projects/%s/documents/text" % pid, json={"name": "brd.md", "text": "# A\nThe system shall do a."})
         pids.append(pid)
+    run = lambda p: client.post("/api/projects/%s/runs" % p, json={"stage": "requirements"})  # noqa: E731
     try:
-        first = [client.post("/api/projects/%s/runs" % p, json={"stage": "requirements"}) for p in pids[:2]]
-        assert [r.status_code for r in first] == [202, 202]
+        first = [run(p) for p in pids[:2]]
+        assert [r.status_code for r in first] == [202, 202] and [r.json()["status"] for r in first] == ["running", "running"]
         assert started.acquire(timeout=10) and started.acquire(timeout=10)
-        full = client.post("/api/projects/%s/runs" % pids[2], json={"stage": "requirements"})
-        assert full.status_code == 429 and full.headers["retry-after"] and "2 AI runs" in full.json()["detail"]
+        waiting = run(pids[2])
+        assert waiting.status_code == 202 and waiting.json()["status"] == "queued", "both slots are busy: the run is accepted and waits"
+        queued = client.get("/api/projects/%s" % pids[2]).json()["runs"]["requirements"]
+        assert queued["status"] == "queued" and queued["queue_position"] == 1 and queued["queue_length"] == 1, queued
+        full = run(pids[3])
+        assert full.status_code == 429 and full.headers["retry-after"] and "queue is full" in full.json()["detail"], full.text
+        assert run(pids[2]).status_code == 409, "a project has one run at a time, queued or running"
         assert client.get("/api/projects").status_code == 200, "the API keeps answering while runs are in progress"
         assert all(n.startswith("run") for n in names), "runs execute in their own pool, never in the request threads: %s" % names
     finally:
         release.set()
+    for p in pids[:3]:
+        assert _wait(client, p)["status"] == "done", "the queued run starts by itself when a slot frees up"
+    assert run(pids[3]).status_code == 202
+    _wait(client, pids[3])
+
+
+def test_a_queued_run_can_be_cancelled_before_it_starts_and_never_runs(client, monkeypatch):
+    import threading
+    from app import config, pipeline
+    monkeypatch.setattr(config, "MAX_CONCURRENT_RUNS", 1)
+    release, started, calls = threading.Event(), threading.Semaphore(0), []
+
+    def blocking_extract(docs, platform, profile, opts, progress, usage):
+        calls.append(docs[0]["filename"])
+        started.release()
+        release.wait(20)
+        return [{"statement": "The system shall export invoices to CSV.", "type": "functional"}]
+    monkeypatch.setattr(pipeline, "extract_requirements", blocking_extract)
+    pids = []
+    for name in ("first.md", "second.md"):
+        pid = client.post("/api/projects", json={"name": name, "platform": "generic"}).json()["id"]
+        client.post("/api/projects/%s/documents/text" % pid, json={"name": name, "text": "# A\nThe system shall do a."})
+        pids.append(pid)
+    try:
+        assert client.post("/api/projects/%s/runs" % pids[0], json={"stage": "requirements"}).status_code == 202
+        assert started.acquire(timeout=10)
+        queued = client.post("/api/projects/%s/runs" % pids[1], json={"stage": "requirements"}).json()
+        assert queued["status"] == "queued"
+        assert client.post("/api/projects/%s/runs/%s/cancel" % (pids[1], queued["id"])).json()["status"] == "cancelled"
+        assert client.get("/api/projects/%s/runs" % pids[1]).json()[0]["status"] == "cancelled"
+    finally:
+        release.set()
     _wait(client, pids[0])
-    _wait(client, pids[1])
-    assert client.post("/api/projects/%s/runs" % pids[2], json={"stage": "requirements"}).status_code == 202, "a slot frees up when a run finishes"
-    _wait(client, pids[2])
+    import time
+    time.sleep(0.5)
+    assert calls == ["first.md"], "the cancelled run was skipped when its turn came: %s" % calls
+    assert client.get("/api/projects/%s/runs" % pids[1]).json()[0]["status"] == "cancelled"
+
+
+def test_runs_that_were_waiting_when_the_server_restarted_are_failed_with_a_clear_message(client):
+    from app import db, main
+    pid = client.post("/api/projects", json={"name": "Waiting", "platform": "generic"}).json()["id"]
+    rid = db.new_id()
+    db.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, actor, created) VALUES (%s,%s,'queued','requirements','Offline heuristic','','t',%s)",
+               (rid, pid, db.now()))
+    main.recover_runs_after_restart()
+    row = db.one("SELECT status, error FROM runs WHERE id=%s", (rid,))
+    assert row["status"] == "failed" and "restart" in row["error"] and "start" in row["error"].lower()
 
 
 def test_a_stuck_run_does_not_hold_a_slot_forever(client, monkeypatch):
@@ -770,9 +821,12 @@ def test_a_stuck_run_does_not_hold_a_slot_forever(client, monkeypatch):
     b = client.post("/api/projects", json={"name": "B", "platform": "generic"}).json()["id"]
     client.post("/api/projects/%s/documents/text" % b, json={"name": "brd.md", "text": "# A\nThe system shall export invoices to CSV."})
     stuck = _running_run(a, updated_minutes_ago=2)
-    assert client.post("/api/projects/%s/runs" % b, json={"stage": "requirements"}).status_code == 429, "a live run holds the only slot"
+    waits = client.post("/api/projects/%s/runs" % b, json={"stage": "requirements"})
+    assert waits.status_code == 202 and waits.json()["status"] == "queued", "a live run holds the only slot, so this one waits"
+    client.post("/api/projects/%s/runs/%s/cancel" % (b, waits.json()["id"]))
     db.execute("UPDATE runs SET updated=%s WHERE id=%s", ("2000-01-01T00:00:00.000+00:00", stuck))
-    assert client.post("/api/projects/%s/runs" % b, json={"stage": "requirements"}).status_code == 202, "a run with no progress for 15 minutes no longer counts"
+    started = client.post("/api/projects/%s/runs" % b, json={"stage": "requirements"})
+    assert started.status_code == 202 and started.json()["status"] == "running", "a run with no progress for 15 minutes no longer counts"
     _wait(client, b)
     db.execute("UPDATE runs SET status='failed' WHERE id=%s", (stuck,))  # the fixture waits for 'running' rows at teardown
 

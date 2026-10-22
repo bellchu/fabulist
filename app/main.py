@@ -29,13 +29,18 @@ SECURITY_HEADERS = {
 }
 
 
+def recover_runs_after_restart() -> None:
+    """A restart kills in-process runs and empties the in-memory queue; don't leave either "running" or "waiting" forever."""
+    db.execute("UPDATE runs SET status='failed', error='Interrupted by server restart' WHERE status='running'")
+    db.execute("UPDATE runs SET status='failed', progress='', error='The server restarted while this run was waiting; start it again.' WHERE status='queued'")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     db.init()
     settings.seed()
     taxonomy.seed()
-    # A restart kills in-process runs; don't leave them "running" forever.
-    db.execute("UPDATE runs SET status='failed', error='Interrupted by server restart' WHERE status='running'")
+    recover_runs_after_restart()
     yield
     workspace.shutdown_runs()
     db.close()
