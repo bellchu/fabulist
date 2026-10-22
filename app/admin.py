@@ -83,7 +83,7 @@ def providers() -> Dict[str, Any]:
 @router.post("/providers", status_code=201)
 def create_provider(request: Request, body: Dict[str, Any] = Body(...)):
     saved = settings.save_provider(body)
-    audit.record(request, "provider created", saved["name"], "%s, model %s" % (saved["kind"], saved.get("model") or "-"))
+    audit.record(request, "provider created", saved["name"], "%s%s" % (saved["kind"], ", model " + saved["model"] if saved.get("model") else ""))
     return saved
 
 
@@ -91,7 +91,7 @@ def create_provider(request: Request, body: Dict[str, Any] = Body(...)):
 def update_provider(pid: str, request: Request, body: Dict[str, Any] = Body(...)):
     saved = settings.save_provider(body, pid)
     key_note = "; key replaced" if body.get("api_key") else "; key removed" if body.get("clear_key") else ""
-    audit.record(request, "provider updated", saved["name"], "%s, model %s%s" % (saved["kind"], saved.get("model") or "-", key_note))
+    audit.record(request, "provider updated", saved["name"], "%s%s%s" % (saved["kind"], ", model " + saved["model"] if saved.get("model") else "", key_note))
     return saved
 
 

@@ -515,6 +515,6 @@ async function viewActivity(content) {
         h("td", { class: "hide-sm" }, r.status === "done" ? r.item_count : "–"),
         h("td", { class: "nowrap hide-sm" }, fmt(r.tokens_in + r.tokens_out)),
         h("td", { class: "nowrap hide-sm" }, duration(r.duration_ms)))))))
-      : h("div", { class: "card" }, empty({ iconName: "activity", title: "No activity yet", text: "Runs appear here once projects start extracting requirements." })),
+      : h("div", { class: "card" }, empty({ iconName: "activity", title: "No runs yet", text: "Runs appear here once projects start extracting requirements." })),
     audit);
 }

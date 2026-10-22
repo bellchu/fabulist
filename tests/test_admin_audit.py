@@ -37,6 +37,8 @@ def test_provider_changes_are_recorded_without_the_key(client):
     rows = trail(client)
     assert [r["action"] for r in rows[:4]] == ["provider deleted", "provider set as default", "provider updated", "provider created"]
     assert all(r["target"] == "Corp AI" for r in rows[:4])
+    other = [r for r in rows if r["target"] == "Other"][0]
+    assert other["summary"] == "mock", "no 'model -' filler for a provider that has no model"
     assert "secret" not in str(rows)
 
 
