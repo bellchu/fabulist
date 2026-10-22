@@ -10,10 +10,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from fastapi import APIRouter, Body, File, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from . import config, db, embeddings, exporters, history, integrations, llm, metrics, parsing, pipeline, quality, settings
+from .fairuse import ai_fair_use
 from .profiles import PLATFORMS
 
 log = logging.getLogger("fabulist")
@@ -340,7 +341,7 @@ class AskIn(BaseModel):
     provider_id: Optional[str] = None
 
 
-@router.post("/api/projects/{pid}/ask")
+@router.post("/api/projects/{pid}/ask", dependencies=[Depends(ai_fair_use)])
 def ask_brds(pid: str, body: AskIn):
     """Answer a question from the project's BRDs using retrieved passages, with citations."""
     _project(pid)
@@ -888,7 +889,7 @@ def update_requirement(pid: str, rid: str, request: Request, body: Dict[str, Any
     return next(r for r in _requirements(pid) if r["id"] == rid)
 
 
-@router.post("/api/projects/{pid}/requirements/{rid}/refine")
+@router.post("/api/projects/{pid}/requirements/{rid}/refine", dependencies=[Depends(ai_fair_use)])
 def refine_requirement(pid: str, rid: str, body: RefineIn):
     """Propose a rewrite (possibly split into several requirements). Nothing is saved."""
     project = _project(pid)
@@ -942,7 +943,7 @@ def update_story(pid: str, sid: str, request: Request, body: Dict[str, Any] = Bo
     return next(s for s in _stories(pid) if s["id"] == sid)
 
 
-@router.post("/api/projects/{pid}/stories/{sid}/refine")
+@router.post("/api/projects/{pid}/stories/{sid}/refine", dependencies=[Depends(ai_fair_use)])
 def refine_story(pid: str, sid: str, body: RefineIn):
     """Propose an improved version of one story. Nothing is saved; the client applies it via PATCH."""
     project = _project(pid)
@@ -970,7 +971,7 @@ class EstimateIn(BaseModel):
     scope: str = "unestimated"
 
 
-@router.post("/api/projects/{pid}/stories/estimate")
+@router.post("/api/projects/{pid}/stories/estimate", dependencies=[Depends(ai_fair_use)])
 def estimate_stories(pid: str, body: EstimateIn):
     """Propose story points; nothing is saved until the client applies them."""
     _project(pid)

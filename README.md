@@ -109,6 +109,7 @@ def verify(secret: str, body: bytes, headers, tolerance=300) -> bool:
 | `MAX_UNZIPPED_MB`, `MAX_PDF_PAGES` | DOCX/XLSX may expand to at most this many MB (decompression-bomb guard; the upload limit counts compressed bytes), and PDFs may have at most this many pages | `200`, `500` |
 | `REPO_CLONE_TIMEOUT`, `MAX_REPO_MB` | seconds a Git sync may spend cloning (keep under the proxy timeout), and the size a clone may grow to before it is stopped | `60`, `500` |
 | `MAX_ARCHIVE_MB` | size of a project archive that may be imported | `50` |
+| `MAX_INTERACTIVE_PER_USER` | of those, how many one person may have running at once, so one person cannot take the whole pool and lock everyone else out (they get `429` with `Retry-After`) | `3` |
 | `MAX_INTERACTIVE_AI_CALLS` | AI calls made inside a request (Refine, Estimate, Ask the BRDs, provider test) in flight at once; beyond that the request is refused immediately with `429` instead of holding a web thread | `8` |
 | `MALLOC_ARENA_MAX` | set to `2` in the image (not a Fabulist setting): without it glibc kept every thread's freed memory and 20 large uploads ran the pod out of memory | `2` |
 | `MAX_CONCURRENT_RUNS` | AI runs in progress at once on this server; they run in their own pool so they can never starve the web requests. A run started beyond the limit is queued (see `MAX_QUEUED_RUNS`) | `4` |

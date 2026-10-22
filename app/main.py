@@ -280,10 +280,10 @@ async def database_unavailable(_request: Request, exc: Exception):
 
 
 @app.exception_handler(llm.AIBusy)
-async def ai_busy(_request: Request, _exc: Exception):
+async def ai_busy(_request: Request, exc: Exception):
     metrics.inc("fabulist_ai_busy_total")
-    return JSONResponse({"detail": "The AI service is busy with other requests. Try again in a moment."}, status_code=429,
-                        headers={"Retry-After": "5"})
+    reason = str(exc).rstrip(".") or "The AI service is busy with other requests"  # the pool is full, or this person has used their share of it
+    return JSONResponse({"detail": reason + ". Try again in a moment."}, status_code=429, headers={"Retry-After": "5"})
 
 
 @app.exception_handler(settings.SettingsError)

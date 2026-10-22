@@ -5,9 +5,10 @@ import json
 import re
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Response
 
 from . import config, db, embeddings, llm, settings, taxonomy
+from .fairuse import ai_fair_use
 
 router = APIRouter(prefix="/api/admin")
 
@@ -106,7 +107,7 @@ def provider_models(body: Dict[str, Any] = Body(...)):
     return {"models": models, "embedding_models": [m for m in models if "embed" in m["id"].lower()]}
 
 
-@router.post("/providers/{pid}/test")
+@router.post("/providers/{pid}/test", dependencies=[Depends(ai_fair_use)])
 def test_provider(pid: str):
     return llm.test_connection(settings.get_provider(pid), settings.get_settings())
 
