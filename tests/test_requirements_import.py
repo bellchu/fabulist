@@ -137,3 +137,10 @@ def test_csv_files_and_odd_files_through_the_file_endpoint(client):
     assert _upload(client, pid, "reqs.docx", b"x").status_code == 400
     assert _upload(client, pid, "broken.xlsx", b"not a workbook").status_code == 400
     assert _upload(client, pid, "empty.csv", b"").status_code == 400
+
+
+def test_the_sample_file_in_the_repository_imports(client):
+    import os
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "samples", "requirements-import.csv")
+    r = _import(client, _project(client), open(path, encoding="utf-8").read())
+    assert r.status_code == 200 and r.json()["created"] == 3
