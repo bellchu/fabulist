@@ -182,6 +182,18 @@ def get_taxonomy():
             "attribute_rules": db.rows("SELECT * FROM attribute_rules ORDER BY attribute")}
 
 
+@router.delete("/taxonomy")
+def clear_taxonomy(request: Request):
+    """Start from scratch: remove every product class and attribute rule (for another industry, or for none). They are not seeded again at restart."""
+    with db.conn() as c:
+        classes = c.execute("DELETE FROM product_classes").rowcount
+        rules = c.execute("DELETE FROM attribute_rules").rowcount
+    taxonomy.invalidate()
+    if classes or rules:
+        audit.record(request, "taxonomy cleared", "Product taxonomy", "%d classes and %d rules removed" % (classes, rules))
+    return {"removed_classes": classes, "removed_rules": rules}
+
+
 @router.post("/taxonomy/classes", status_code=201)
 def create_class(request: Request, body: Dict[str, Any] = Body(...)):
     c = _clean_class(body)
