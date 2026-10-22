@@ -27,6 +27,13 @@ with sync_playwright() as p:
     page = ctx.new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)[:120]))
+    # the bootstrap administrator has no account row: the page says so and links to where one is created
+    boot = browser.new_context(http_credentials=ADMIN).new_page()
+    boot.goto(AUTH + "/#/account")
+    boot.reload()
+    boot.get_by_role("link", name="Create a named account").click()
+    boot.wait_for_selector("text=Users & roles")
+    check("#/admin/users" in boot.url, "bootstrap admin: the Account page links to user administration")
     page.goto(AUTH + "/#/account")
     page.reload()
     page.get_by_role("button", name="New token").first.click()
