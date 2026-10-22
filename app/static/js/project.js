@@ -130,28 +130,45 @@ function runPanel(stage) {
   const queued = run && run.status === "queued";
   const scope = select([["all", "Approved + draft requirements"], ["approved", "Approved requirements only"]], "all", { "aria-label": "Requirement scope" });
   const isReq = stage === "requirements";
+  // Which BRDs a run reads: the ones not read yet (added to what exists, in batches that fit the limit), or all of them starting over.
+  const fresh = isReq ? ctx.project.documents_new : 0;
+  const whichOptions = [];
+  if (fresh > 0) whichOptions.push(["new", "New BRDs only (" + fresh + "): adds to your requirements"]);
+  if (ctx.project.requirements > 0 || fresh === 0) whichOptions.push(["reset", "All BRDs: start over (replaces requirements)"]);
+  const which = isReq && !readOnly() && ctx.project.documents > 0 ? select(whichOptions, whichOptions[0][0], { "aria-label": "BRDs to read" }) : null;
+  const mode = () => (which ? which.value : "all");
+  const verb = () => (running ? "Running…" : queued ? "Queued…" : isReq ? (mode() === "new" ? "Extract new BRDs" : ctx.project.requirements ? "Re-extract" : "Extract")
+    : (ctx.project.stories ? "Regenerate" : "Generate"));
+  const startLabel = h("span", {}, verb());
+  if (which) which.addEventListener("change", () => { startLabel.textContent = verb(); });
   // Say why a run cannot start instead of failing after the click.
   const blocked = isReq ? (ctx.project.documents === 0 ? "Add a BRD on the Sources tab first." : "")
     : (ctx.project.requirements === 0 ? "Extract or add requirements first." : "");
   const start = guard(async () => {
     // Say what the run will ask of the AI provider before it does: a big project means many requests, hours and real cost.
-    const est = await api.get(base() + "/runs/estimate?stage=" + stage + "&scope=" + (isReq ? "all" : scope.value));
+    const est = await api.get(base() + "/runs/estimate?stage=" + stage + "&scope=" + (isReq ? "all" : scope.value) + "&documents=" + mode());
     if (est.over_limit) {
       modal({ title: "Too large for one run",
-        body: h("p", {}, "This run needs " + est.requests + " AI requests, above the limit of " + est.limit + ". Raise “Max sections per run” in Admin → Generation settings"
-          + (isReq ? ", or split the documents." : ", or generate from approved requirements only (choose it next to the button).")), actions: [] });
+        body: h("p", {}, est.too_big ? est.too_big : "This run needs " + est.requests + " AI requests, above the limit of " + est.limit + ". "
+          + (isReq && mode() === "all" ? "Raise “Max sections per run” in Admin → Generation settings."
+            : "Raise “Max sections per run” in Admin → Generation settings" + (isReq ? ", or split the documents." : ", or generate from approved requirements only (choose it next to the button)."))), actions: [] });
       return;
     }
+    const adding = isReq && mode() === "new", batched = isReq && mode() !== "all";
+    const total = adding ? est.new_documents : est.batch_documents + est.remaining_documents;
+    const batch = batched ? "This run reads " + est.batch_documents + " of the " + total + (adding ? " new" : "") + " BRD" + (total === 1 ? "" : "s") + " ("
+      + est.requests + " sections)" + (est.remaining_documents ? "; " + est.remaining_documents + " more will be left for the next run" : "") + ". "
+      + (adding ? "Your existing requirements are not changed. " : "") : "";
     const big = est.requests >= LARGE_RUN;
     const cost = big ? "This run will make about " + est.requests + " AI requests"
       + (est.seconds ? " (roughly " + (est.seconds >= 90 ? Math.round(est.seconds / 60) + " minutes" : est.seconds + " seconds") + (est.tokens ? " and " + fmt(est.tokens) + " tokens" : "") + ")" : "")
       + ". " + est.basis + " " : "";
-    const hasData = isReq ? ctx.project.requirements > 0 || ctx.project.stories > 0 : ctx.project.stories > 0;
+    const hasData = !adding && (isReq ? ctx.project.requirements > 0 || ctx.project.stories > 0 : ctx.project.stories > 0);
     const replace = hasData ? (isReq ? "Re-extracting replaces all requirements and the current backlog, including your edits."
       : "Regenerating replaces the current stories, including your edits.") : "";
-    if ((big || hasData) && !(await confirmBox((cost + replace).trim() + (big && !hasData ? " Continue?" : ""),
+    if ((big || hasData) && !(await confirmBox((batch + cost + replace).trim() + (big && !hasData ? " Continue?" : ""),
       { okLabel: hasData ? (isReq ? "Re-extract" : "Regenerate") : (isReq ? "Extract" : "Generate"), danger: hasData }))) return;
-    await api.post(base() + "/runs", { stage, scope: scope.value });
+    await api.post(base() + "/runs", { stage, scope: scope.value, documents: mode() });
     toast(isReq ? "Extraction started" : "Story generation started");
     rerender();
   });
@@ -189,8 +206,8 @@ function runPanel(stage) {
           ? "AI reads each BRD section and proposes atomic requirements with types and sources for your review."
           : "Builds epics, features and INVEST stories with Gherkin criteria, linked to requirement IDs."),
         blocked && !readOnly() ? h("div", { class: "small", id: "run-blocked-" + stage, style: { color: "var(--amber)", marginTop: "2px" } }, blocked) : null),
-      isReq || readOnly() ? null : scope,
-      writer(h("button", { class: "btn btn-primary", disabled: running || queued || !!blocked, title: blocked || null, "aria-describedby": blocked ? "run-blocked-" + stage : null, onclick: start }, icon("sparkles"), running ? "Running…" : queued ? "Queued…" : isReq ? (ctx.project.requirements ? "Re-extract" : "Extract") : (ctx.project.stories ? "Regenerate" : "Generate"))),
+      isReq || readOnly() ? null : scope, which,
+      writer(h("button", { class: "btn btn-primary", disabled: running || queued || !!blocked, title: blocked || null, "aria-describedby": blocked ? "run-blocked-" + stage : null, onclick: start }, icon("sparkles"), startLabel)),
       running ? h("div", { class: "progress-line" }) : null, statusLine));
 }
 
@@ -379,7 +396,7 @@ async function viewSources(body) {
       docs.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
         h("thead", {}, h("tr", {}, [["Name", ""], ["Source", "hide-sm"], ["Size", ""], ["Indexed passages", "hide-sm"], ["Added", ""], ["", ""]].map(([x, c]) => h("th", { class: c }, x)))),
         h("tbody", {}, docs.map((d) => h("tr", {},
-          h("td", {}, h("div", { class: "row" }, icon("file"), h("b", {}, d.filename))),
+          h("td", {}, h("div", { class: "row" }, icon("file"), h("b", {}, d.filename), d.extracted === null ? badge("New", "blue") : null)),
           h("td", { class: "hide-sm" }, d.source === "repo" ? badge("Git", "violet") : badge("Upload")),
           h("td", { class: "muted" }, fmt(Math.round(d.chars / 6)) + " words"),
           h("td", { class: "hide-sm" }, d.chunks), h("td", { class: "muted small" }, timeAgo(d.created)),

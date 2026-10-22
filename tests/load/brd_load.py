@@ -309,6 +309,33 @@ def slowai():
     budget(max(bystander.lat.get("bystander /healthz", [99])) < 5, "the health probe stayed responsive while 20 runs worked and queued")
 
 
+def bigproject():
+    """Where the memory goes when one project holds very many requirements: one operation at a time, with the process's memory read after each.
+    Seeds VOLUME_BRDS small BRDs and reads them all in batches (each BRD yields about 46 requirements)."""
+    n = int(os.environ.get("BIG_BRDS", 300))
+    print("\n== bigproject: %d BRDs read into one project" % n)
+    with httpx.Client(base_url=BASE, headers=H, timeout=600) as c:
+        c.put("/api/admin/settings", json={"max_chunks_per_run": 2000})
+        pid = c.post("/api/projects", json={"name": "Big", "platform": "generic"}).json()["id"]
+        for k in range(n):
+            c.post(f"/api/projects/{pid}/documents/text", json={"name": "BRD %04d" % k, "text": brd_text("B%04d" % k, 10)})
+        while c.post(f"/api/projects/{pid}/runs", json={"stage": "requirements", "documents": "new"}).status_code == 202:
+            while c.get(f"/api/projects/{pid}/runs?limit=1").json()[0]["status"] in ("running", "queued"):
+                time.sleep(0.2)
+        count = len(c.get(f"/api/projects/{pid}/requirements").json())
+        print("project now holds %d requirements" % count)
+        memory("baseline (idle, after the work)")
+        for label, path in (("GET project (summary)", f"/api/projects/{pid}"), ("GET projects (home)", "/api/projects"), ("GET requirements (list)", f"/api/projects/{pid}/requirements"),
+                            ("GET stories estimate", f"/api/projects/{pid}/runs/estimate?stage=stories&scope=all"), ("GET comments", f"/api/projects/{pid}/comments"),
+                            ("GET history", f"/api/projects/{pid}/history?limit=20")):
+            t = time.time()
+            r = c.get(path)
+            took = time.time() - t
+            print("%-26s HTTP %s %6.2f s %7.1f MB" % (label, r.status_code, took, len(r.content) / 1048576))
+            memory("  after " + label)
+            del r
+
+
 def volume():
     print("\n== volume: one project with %d BRDs (~%d KB each)" % (VOLUME_BRDS, VOLUME_KB))
     timings, bystander, stop = Timings(), Timings(), threading.Event()
@@ -358,19 +385,42 @@ def volume():
         del a
         memory("after the project archive export")
         est = c.get(f"/api/projects/{pid}/runs/estimate?stage=requirements&scope=all").json()
-        print("extraction estimate over %d BRDs: %s requests, over_limit=%s, limit=%s" % (VOLUME_BRDS, est.get("requests"), est.get("over_limit"), est.get("limit")))
-        start = c.post(f"/api/projects/{pid}/runs", json={"stage": "requirements", "scope": "all"})
-        print("start extraction on %d BRDs -> HTTP %s %s" % (VOLUME_BRDS, start.status_code, start.text[:140]))
-        run_s = None
-        if start.status_code == 202:
-            t = time.time()
-            while time.time() - t < 900:
-                runs = c.get(f"/api/projects/{pid}/runs").json()
-                if runs[0]["status"] != "running":
-                    run_s = time.time() - t
-                    print("extraction finished: %s, %s items in %.0f s" % (runs[0]["status"], runs[0]["item_count"], run_s))
+        print("extraction of all %d BRDs in ONE run: %s sections, over_limit=%s (limit %s)" % (VOLUME_BRDS, est.get("requests"), est.get("over_limit"), est.get("limit")))
+        one = c.post(f"/api/projects/{pid}/runs", json={"stage": "requirements", "scope": "all"})
+        print("starting that run -> HTTP %s: %s" % (one.status_code, one.json().get("detail", "")[:110]))
+        first = c.get(f"/api/projects/{pid}/runs/estimate?stage=requirements&documents=new").json()
+        print("reading only the new BRDs: each run takes a batch of %s BRDs (%s sections); %s BRDs left after the first" % (first["batch_documents"], first["requests"], first["remaining_documents"]))
+        batches, started, added = 0, time.time(), 0
+        while batches < int(os.environ.get("MAX_BATCHES", 60)):
+            r = c.post(f"/api/projects/{pid}/runs", json={"stage": "requirements", "documents": "new"})
+            if r.status_code != 202:
+                break
+            while True:
+                run = c.get(f"/api/projects/{pid}/runs?limit=1").json()[0]
+                if run["status"] not in ("running", "queued"):
                     break
-                time.sleep(2)
+                time.sleep(0.2)
+            if run["status"] != "done":
+                print("batch %d ended %s: %s" % (batches + 1, run["status"], run.get("error")))
+                break
+            batches += 1
+            added += run["item_count"]
+        left = c.get(f"/api/projects/{pid}/runs/estimate?stage=requirements&documents=new").json()["new_documents"]
+        run_s = time.time() - started
+        print("read %d BRDs in %d runs over %.0f s, adding %d requirements; %d BRDs still new" % (VOLUME_BRDS - left, batches, run_s, added, left))
+        memory("after reading all the BRDs")
+        after = Timings()
+        for _ in range(3):
+            timed(c, after, "GET project (summary)", "GET", f"/api/projects/{pid}")
+            timed(c, after, "GET requirements (list)", "GET", f"/api/projects/{pid}/requirements")
+            timed(c, after, "GET projects (home)", "GET", "/api/projects")
+            timed(c, after, "GET comments", "GET", f"/api/projects/{pid}/comments")
+            timed(c, after, "GET runs/estimate stories", "GET", f"/api/projects/{pid}/runs/estimate?stage=stories&scope=all")
+        r = c.get(f"/api/projects/{pid}/requirements")
+        print("requirements payload: %.1f MB for %d requirements" % (len(r.content) / 1048576, len(r.json())))
+        memory("after listing the requirements")
+        print("with %d requirements in the project:" % added)
+        after.report()
     stop.set()
     mon.join()
     ops.report()
@@ -382,6 +432,9 @@ def volume():
     budget(p95("GET documents (list)") < 3, "listing %d documents answers within 3 s (%.2f s)" % (VOLUME_BRDS, p95("GET documents (list)")))
     budget(p95("GET projects (home)") < 2, "the project list answers within 2 s (%.2f s)" % p95("GET projects (home)"))
     budget(p95("POST search") < 3, "passage search over %d BRDs answers within 3 s (%.2f s)" % (VOLUME_BRDS, p95("POST search")))
+    budget(one.status_code == 400, "reading everything in one run is refused up front when it cannot fit the limit")
+    budget(first["batch_documents"] >= 1 and first["requests"] <= first["limit"] and not first["over_limit"], "a batch of new BRDs always fits the section limit")
+    budget(batches >= 1 and added > 0, "reading BRDs in batches works at this size (%d runs, %d requirements)" % (batches, added))
     budget(max(bystander.lat.get("bystander /healthz", [99])) < 5, "the health probe never waited more than 5 s during the volume work")
     _, peak, limit = memory()
     budget(limit == 0 or peak < limit * 0.85, "memory peak stayed under 85%% of the container limit (peak %d MiB of %d MiB)" % (peak, limit))
@@ -390,6 +443,6 @@ def volume():
 if __name__ == "__main__":
     which = sys.argv[1:] or ["burst", "slowai", "volume"]
     for name in which:
-        {"burst": burst, "slowai": slowai, "volume": volume}[name]()
+        {"burst": burst, "slowai": slowai, "volume": volume, "bigproject": bigproject}[name]()
     print("\n%s" % ("LOAD TEST OK" if not budget_misses else "LOAD TEST: %d budget(s) missed: %s" % (len(budget_misses), budget_misses)))
     sys.exit(1 if budget_misses else 0)

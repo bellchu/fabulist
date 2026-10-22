@@ -100,6 +100,7 @@ SCHEMA = [
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS repo_id TEXT",
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS path TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS extracted TEXT",  # when an extraction run read it; NULL = not yet read
     "CREATE INDEX IF NOT EXISTS idx_history_project ON history(project_id, created)",
     "CREATE INDEX IF NOT EXISTS idx_history_item ON history(item_id, created)",
     "CREATE INDEX IF NOT EXISTS idx_reqs_project ON requirements(project_id, seq)",
@@ -161,8 +162,13 @@ def init() -> None:
     with conn() as c:
         # Serialize concurrent startups (multiple replicas) on schema creation.
         c.execute("SELECT pg_advisory_xact_lock(727274)")
+        had_table = c.execute("SELECT 1 FROM information_schema.tables WHERE table_name = 'documents'").fetchone()
+        had_flag = c.execute("SELECT 1 FROM information_schema.columns WHERE table_name = 'documents' AND column_name = 'extracted'").fetchone()
         for stmt in SCHEMA:
             c.execute(stmt)
+        if had_table and not had_flag:
+            # Upgrading: documents that already sit behind requirements have been read; those of projects with none are new.
+            c.execute("UPDATE documents SET extracted = created WHERE project_id IN (SELECT DISTINCT project_id FROM requirements)")
 
 
 def rows(sql: str, args: Sequence[Any] = ()) -> List[Dict[str, Any]]:

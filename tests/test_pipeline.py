@@ -342,3 +342,45 @@ def test_a_requirement_stated_in_several_documents_keeps_every_source():
     twice = [{"id": "1", "filename": "v1.md", "text": "# A\n## B\nBR-1: The system shall export orders.\nBR-2: The system shall export orders.\nBR-2: The system shall export orders."}]
     only = pipeline.extract_requirements(twice, "generic", MOCK, opts, lambda m: None, {"in": 0, "out": 0})
     assert len(only) == 1 and only[0]["source_ref"] == "v1.md > B; also v1.md > B (BR-2)"
+
+
+# ---- near-duplicate detection on repetitive input ---------------------------------------------------------------
+
+def _templated(n):
+    return [{"key": "REQ-%d" % i, "statement": "The system shall allow an authorised %s user to process request number %d, validate it against the business rules "
+             "for area %d, record who changed what and when, and notify the requester within %d seconds." % (["buyer", "approver", "auditor", "planner"][i % 4], i, i % 17, 5 + i % 55),
+             "status": "draft"} for i in range(n)]
+
+
+def test_duplicate_partners_are_capped_so_memory_does_not_grow_with_the_square_of_the_set():
+    same = [{"key": "REQ-%d" % i, "statement": "The system shall export every invoice to CSV for the finance team.", "status": "draft"} for i in range(500)]
+    dupes = quality.duplicate_pairs(same)
+    assert len(dupes) == 500, "every one of the identical statements is flagged"
+    assert max(len(v) for v in dupes.values()) <= quality.MAX_PARTNERS, "but none lists all 499 others (%d)" % max(len(v) for v in dupes.values())
+    assert all(k not in v for k, v in dupes.items()), "an item is never its own duplicate"
+
+
+def test_repetitive_requirements_do_not_make_duplicate_detection_slow():
+    import time
+    items = _templated(6000)
+    t = time.time()
+    dupes = quality.duplicate_pairs(items)
+    took = time.time() - t
+    assert took < 5, "6000 templated requirements took %.1f s (about a minute before the comparison budget)" % took
+    assert isinstance(dupes, dict)
+
+
+def test_the_comparison_budget_stops_the_work_and_what_was_found_so_far_is_still_right():
+    items = _templated(1500) + [{"key": "DUP-A", "statement": "The system shall archive closed orders after seven years automatically.", "status": "draft"},
+                                {"key": "DUP-B", "statement": "The system shall archive closed orders after seven years automatically.", "status": "draft"}]
+    full = quality.duplicate_pairs(items, max_comparisons=10**9)
+    tiny = quality.duplicate_pairs(items, max_comparisons=2000)
+    assert "DUP-B" in full["DUP-A"], "the real pair is found with an ample budget"
+    assert set(tiny) <= set(full) and all(set(v) <= set(full[k]) for k, v in tiny.items()), "a small budget finds fewer pairs, never wrong ones"
+
+
+def test_small_sets_are_still_exact():
+    items = [{"key": "A", "statement": "The system shall export invoices to CSV on request.", "status": "draft"},
+             {"key": "B", "statement": "The system shall export invoices to CSV on request!", "status": "draft"},
+             {"key": "C", "statement": "Customer service agents may place orders on behalf of clinics.", "status": "draft"}]
+    assert quality.duplicate_pairs(items) == {"A": ["B"], "B": ["A"]}
