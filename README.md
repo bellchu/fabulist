@@ -160,6 +160,7 @@ scripts/ci-k8s.sh                # the same gate (minus image build) in a tempor
 scripts/ui-check-k8s.sh             # browser regression checks (tests/ui) in a temporary cluster namespace
 scripts/load-test-k8s.sh            # load scenarios (tests/load): 20 requesters x 20 BRDs at once; a project with 1,000+ BRDs (cluster, offline AI provider)
 scripts/release-check-k8s.sh        # the whole battery on the cluster (gate, browser suite, load scenarios, image scan, restore drill) and one summary: is this build ready?
+scripts/live-smoke-k8s.sh               # read-only smoke test of the running site: every page, light and dark, no script errors, no serious accessibility problems (FABULIST_HOST=...)
 scripts/run-py-k8s.sh script.py        # run a Python script against the working tree on the cluster (profiling, one-off checks)
 scripts/sbom-k8s.sh                 # software bill of materials (CycloneDX JSON) of the app's Python packages; SBOM_SOURCE=image adds the image's operating-system packages (for procurement and security reviews)
 scripts/scan-image-k8s.sh           # Trivy scan of the deployed image for fixable HIGH/CRITICAL vulnerabilities (cluster)
