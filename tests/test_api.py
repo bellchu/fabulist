@@ -857,3 +857,23 @@ def test_a_finished_run_records_how_many_provider_requests_it_made(client, monke
     run = _wait(client, pid)
     assert run["status"] == "done" and run["requests"] == 2 and run["tokens_in"] == 14
     assert db.one("SELECT requests FROM runs WHERE id=%s", (run["id"],))["requests"] == 2
+
+
+def test_viewers_can_search_the_brds_and_comment_but_nothing_else(client, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "BASIC_USER", "root")
+    monkeypatch.setattr(config, "BASIC_PASSWORD", "root-password-123")
+    root = ("root", "root-password-123")
+    client.post("/api/admin/users", json={"username": "vera", "role": "viewer", "password": "vera-password-123"}, auth=root)
+    vera = ("vera", "vera-password-123")
+    pid = client.post("/api/projects", json={"name": "RO", "platform": "generic"}, auth=root).json()["id"]
+    req = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall export invoices to CSV."}, auth=root).json()
+    base = "/api/projects/%s" % pid
+    # reading a passage is a read, even though the query travels in a POST body
+    assert client.post(base + "/search", json={"query": "invoices"}, auth=vera).status_code == 200
+    assert client.post(base + "/comments", json={"item_id": req["id"], "body": "In scope for release 1?"}, auth=vera).status_code == 201
+    # everything that changes the backlog, or spends AI budget, stays closed
+    for path, body in (("/requirements", {"statement": "The system shall add something new."}), ("/ask", {"question": "What is in scope?"}),
+                       ("/runs", {"stage": "requirements"}), ("/baselines", {"name": "x"}), ("/requirements/bulk", {"ids": [req["id"]], "status": "approved"})):
+        assert client.post(base + path, json=body, auth=vera).status_code == 403, path
+    assert client.patch(base + "/requirements/" + req["id"], json={"status": "approved"}, auth=vera).status_code == 403

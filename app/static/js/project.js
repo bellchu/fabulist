@@ -15,6 +15,9 @@ let ctx = null;
 let pollTimer = null;
 
 const rerender = () => window.dispatchEvent(new HashChangeEvent("hashchange"));
+// Reviewers (the viewer role) read and take part in discussions; the server refuses everything else, so the UI does not offer it.
+const readOnly = () => state.me.role === "viewer";
+const writer = (el) => (readOnly() ? null : el);
 const base = () => "/api/projects/" + ctx.pid;
 
 export async function renderProject(content, pid, tab) {
@@ -38,7 +41,7 @@ function header(p) {
   return h("div", { class: "page-head" },
     h("span", { class: "object-icon project" }, icon("folder")),
     h("div", { class: "grow" }, h("div", { class: "object-label" }, "Project"), h("h1", {}, p.name)),
-    h("div", { class: "row" }, h("button", { class: "btn", onclick: editProjectDialog }, "Edit"),
+    h("div", { class: "row" }, writer(h("button", { class: "btn", onclick: editProjectDialog }, "Edit")),
       h("a", { class: "btn", href: "#/p/" + p.id + "/export" }, "Export")),
     h("div", { class: "row wrap", style: { flexBasis: "100%", gap: "32px", paddingLeft: "44px" } },
       kv("Target platform", state.meta.platforms[p.platform] || p.platform),
@@ -156,9 +159,9 @@ function runPanel(stage) {
     statusLine = h("div", { class: "row small", style: { flexBasis: "100%" } }, badge("Running", "blue"),
       h("span", { class: "muted grow", id: "run-progress" }, run.progress || "Starting…",
         idle >= 3 ? h("span", { style: { color: "var(--amber)", marginLeft: "8px" } }, "No progress for " + idle + " min. The AI provider may not be responding; you can cancel this run.") : null),
-      h("button", { class: "btn btn-sm btn-ghost btn-danger", onclick: guard(async () => {
+      writer(h("button", { class: "btn btn-sm btn-ghost btn-danger", onclick: guard(async () => {
         await api.post(base() + "/runs/" + run.id + "/cancel"); toast("Cancelling after the current AI request…");
-      }) }, "Cancel run"));
+      }) }, "Cancel run")));
   } else if (run && run.status === "cancelled") {
     statusLine = h("div", { class: "callout warn small", style: { flexBasis: "100%" } }, icon("info"), "Last run was cancelled; existing data was kept.");
   } else if (run && run.status === "failed") {
@@ -175,9 +178,9 @@ function runPanel(stage) {
         h("div", { class: "muted small" }, isReq
           ? "AI reads each BRD section and proposes atomic requirements with types and sources for your review."
           : "Builds epics, features and INVEST stories with Gherkin criteria, linked to requirement IDs."),
-        blocked ? h("div", { class: "small", id: "run-blocked-" + stage, style: { color: "var(--amber)", marginTop: "2px" } }, blocked) : null),
-      isReq ? null : scope,
-      h("button", { class: "btn btn-primary", disabled: running || !!blocked, title: blocked || null, "aria-describedby": blocked ? "run-blocked-" + stage : null, onclick: start }, icon("sparkles"), running ? "Running…" : isReq ? (ctx.project.requirements ? "Re-extract" : "Extract") : (ctx.project.stories ? "Regenerate" : "Generate")),
+        blocked && !readOnly() ? h("div", { class: "small", id: "run-blocked-" + stage, style: { color: "var(--amber)", marginTop: "2px" } }, blocked) : null),
+      isReq || readOnly() ? null : scope,
+      writer(h("button", { class: "btn btn-primary", disabled: running || !!blocked, title: blocked || null, "aria-describedby": blocked ? "run-blocked-" + stage : null, onclick: start }, icon("sparkles"), running ? "Running…" : isReq ? (ctx.project.requirements ? "Re-extract" : "Extract") : (ctx.project.stories ? "Regenerate" : "Generate"))),
       running ? h("div", { class: "progress-line" }) : null, statusLine));
 }
 
@@ -284,18 +287,18 @@ function reposCard(repoList) {
   return h("div", { class: "card", style: { marginBottom: "16px" } },
     h("div", { class: "card-head" }, h("div", { class: "grow" }, h("h3", {}, "BRD repositories"),
       h("div", { class: "muted small" }, "Keep BRDs in Git; sync to pull new and changed documents.")),
-      h("button", { class: "btn btn-sm", onclick: repoDialog }, icon("link"), "Connect repository")),
+      writer(h("button", { class: "btn btn-sm", onclick: repoDialog }, icon("link"), "Connect repository"))),
     repoList.length ? repoList.map((r) => h("div", { class: "provider-row" },
       h("div", { class: "grow", style: { minWidth: "260px" } },
         h("div", { class: "row" }, h("b", { class: "mono" }, r.url), r.branch ? badge(r.branch) : null),
         h("div", { class: "small muted" }, "Path: " + r.path_glob + " · " + r.documents + " documents" + (r.has_token ? " · token " + r.key_hint : "")),
         r.last_error ? h("div", { class: "small", style: { color: "var(--red)" } }, r.last_error)
           : h("div", { class: "small muted" }, r.last_sync ? "Synced " + timeAgo(r.last_sync) + " at " + r.last_commit.slice(0, 8) : "Never synced")),
-      h("button", { class: "btn btn-sm", onclick: guard(() => syncRepo(r.id)) }, icon("refresh"), "Sync now"),
-      h("button", { class: "btn btn-sm btn-ghost btn-danger", "aria-label": "Disconnect " + r.url, onclick: guard(async () => {
+      writer(h("button", { class: "btn btn-sm", onclick: guard(() => syncRepo(r.id)) }, icon("refresh"), "Sync now")),
+      writer(h("button", { class: "btn btn-sm btn-ghost btn-danger", "aria-label": "Disconnect " + r.url, onclick: guard(async () => {
         if (!(await confirmBox("Disconnect " + r.url + "? Its " + r.documents + " synced documents are removed; existing requirements are kept.", { danger: true, okLabel: "Disconnect" }))) return;
         await api.del(base() + "/repos/" + r.id); rerender();
-      }) }, icon("trash"))))
+      }) }, icon("trash")))))
       : h("div", { class: "card-body muted small" }, "No repository connected. Upload files below, or connect a Git repository that holds your BRDs."));
 }
 
@@ -345,10 +348,10 @@ async function viewSources(body) {
       r.citations.length ? h("div", { class: "section-title" }, "Sources") : null,
       ...r.citations.map((c) => passage(c, c.n)));
   });
-  q.addEventListener("keydown", (e) => { if (e.key === "Enter") ask(); });
+  q.addEventListener("keydown", (e) => { if (e.key === "Enter") (readOnly() ? search : ask)(); });
 
   mount(body, 
-    h("div", { class: "grid grid-2", style: { marginBottom: "16px" } },
+    writer(h("div", { class: "grid grid-2", style: { marginBottom: "16px" } },
       h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Upload BRDs")), h("div", { class: "card-body" }, drop, fileInput)),
       h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Paste text")),
         h("div", { class: "card-body stack" }, field("Document name", pasteName), pasteText,
@@ -356,7 +359,7 @@ async function viewSources(body) {
             requireValue(pasteText, "Paste some text first");
             await api.post(base() + "/documents/text", { name: pasteName.value, text: pasteText.value });
             toast("Document added", "ok"); rerender();
-          }) }, icon("plus"), "Add document"))))),
+          }) }, icon("plus"), "Add document")))))),
     reposCard(repoList),
     h("div", { class: "card", style: { marginBottom: "16px" } },
       h("div", { class: "card-head" }, h("h3", { class: "grow" }, "Documents"), h("span", { class: "muted small" }, docs.length + " total")),
@@ -372,14 +375,14 @@ async function viewSources(body) {
               const full = await api.get(base() + "/documents/" + d.id);
               modal({ title: full.filename, wide: true, body: h("div", { class: "pre" }, full.text), actions: [] });
             }) }, "View"),
-            h("button", { class: "btn btn-sm btn-ghost btn-danger", onclick: guard(async () => {
+            writer(h("button", { class: "btn btn-sm btn-ghost btn-danger", onclick: guard(async () => {
               if (!(await confirmBox("Remove " + d.filename + "? Existing requirements are kept.", { danger: true, okLabel: "Remove" }))) return;
               await api.del(base() + "/documents/" + d.id); rerender();
-            }) }, "Remove")))))))
+            }) }, "Remove"))))))))
         : empty({ iconName: "file", title: "No BRDs yet", text: "Upload or paste at least one business requirements document." })),
     h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Ask the BRDs"),
       h("span", { class: "muted small" }, "Answers come only from retrieved BRD passages, with numbered citations")),
-      h("div", { class: "card-body" }, h("div", { class: "row wrap" }, q, h("button", { class: "btn btn-primary", onclick: ask }, icon("sparkles"), "Ask"),
+      h("div", { class: "card-body" }, h("div", { class: "row wrap" }, q, writer(h("button", { class: "btn btn-primary", onclick: ask }, icon("sparkles"), "Ask")),
         h("button", { class: "btn", onclick: search }, icon("search"), "Find passages")), results)));
 }
 
@@ -396,7 +399,7 @@ function discussionSection(itemId) {
           h("span", { class: "right row" },
             h("button", { class: "btn btn-sm btn-ghost", onclick: guard(async () => { await api.post(base() + "/comments/" + c.id + "/resolve"); load(); }) },
               c.resolved ? "Reopen" : "Resolve"),
-            state.me.role === "admin" || state.me.username === c.author ? h("button", { class: "btn btn-sm btn-ghost btn-danger", "aria-label": "Delete comment",
+            !readOnly() && (state.me.role === "admin" || state.me.username === c.author) ? h("button", { class: "btn btn-sm btn-ghost btn-danger", "aria-label": "Delete comment",
               onclick: guard(async () => { await api.del(base() + "/comments/" + c.id); load(); }) }, icon("trash")) : null)),
         h("div", { style: { whiteSpace: "pre-wrap", marginTop: "2px" } }, c.body))))
       : [h("p", { class: "muted small" }, "No discussion yet.")]));
@@ -464,7 +467,7 @@ async function viewRequirements(body) {
   if (!reqs.length) {
     mount(body, h("div", { class: "card" }, empty({ iconName: "list", title: "No requirements yet",
       text: ctx.project.documents ? "Extract requirements from your BRDs, or add them manually." : "Add BRDs on the Sources tab first.",
-      action: h("button", { class: "btn", onclick: () => reqDrawer(null) }, icon("plus"), "Add manually") })));
+      action: writer(h("button", { class: "btn", onclick: () => reqDrawer(null) }, icon("plus"), "Add manually")) })));
     return;
   }
   const selected = new Set();
@@ -503,15 +506,15 @@ async function viewRequirements(body) {
         renderBulk();
       } });
     tableBox.replaceChildren(h("div", { class: "card table-wrap" }, h("table", { class: "table" },
-      h("thead", {}, h("tr", {}, h("th", { class: "w-check" }, all), ...[["ID", "", "key"], ["Type", "hide-sm", "type"], ["Requirement", ""], ["Section", "hide-sm", "section"], ["Quality", "hide-sm", "quality"], ["Status", "", "status"]].map(([x, c, k]) => sortHeader(x, c, k, "req", renderTable)))),
+      h("thead", {}, h("tr", {}, writer(h("th", { class: "w-check" }, all)), ...[["ID", "", "key"], ["Type", "hide-sm", "type"], ["Requirement", ""], ["Section", "hide-sm", "section"], ["Quality", "hide-sm", "quality"], ["Status", "", "status"]].map(([x, c, k]) => sortHeader(x, c, k, "req", renderTable)))),
       h("tbody", {}, rows.length ? rows.map((r) => h("tr", { class: "clickable" + (selected.has(r.id) ? " selected" : ""), onclick: () => reqDrawer(r, nav) },
-        h("td", { onclick: (e) => e.stopPropagation() }, h("input", { type: "checkbox", "aria-label": "Select " + r.key, checked: selected.has(r.id),
+        writer(h("td", { onclick: (e) => e.stopPropagation() }, h("input", { type: "checkbox", "aria-label": "Select " + r.key, checked: selected.has(r.id),
           onchange: (e) => {
             e.target.checked ? selected.add(r.id) : selected.delete(r.id);
             e.target.closest("tr").classList.toggle("selected", e.target.checked);
             all.checked = rows.every((x) => selected.has(x.id));
             renderBulk();
-          } })),
+          } }))),
         h("td", { class: "mono nowrap" }, rowOpener(r.key)),
         h("td", { class: "hide-sm" }, badge(r.type, typeTone[r.type])),
         h("td", { class: "statement" }, r.statement,
@@ -536,7 +539,7 @@ async function viewRequirements(body) {
 
   count.textContent = reqs.filter((r) => r.status === "approved").length + " of " + reqs.length + " approved";
   mount(body, h("div", { class: "toolbar" }, q, type, status, h("label", { class: "switch small" }, flagged, "Flagged only"), count,
-    h("button", { class: "btn", onclick: () => reqDrawer(null) }, icon("plus"), "Add requirement")), bulk, tableBox);
+    writer(h("button", { class: "btn", onclick: () => reqDrawer(null) }, icon("plus"), "Add requirement"))), bulk, tableBox);
   renderTable();
 }
 
@@ -574,7 +577,7 @@ function reqDrawer(r, nav) {
     if (dirty && !(await confirmBox("Discard your unsaved changes to " + r.key + "?", { okLabel: "Discard" }))) return;
     close(); go(id);
   });
-  const keys = reviewKeys({ save: save(false), approve: nextId ? save(true) : save(false), prev: () => prevId && step(prevId)(), next: () => nextId && step(nextId)() });
+  const keys = reviewKeys({ save: readOnly() ? () => {} : save(false), approve: readOnly() ? () => {} : nextId ? save(true) : save(false), prev: () => prevId && step(prevId)(), next: () => nextId && step(nextId)() });
   const remove = guard(async () => {
     if (!(await confirmBox("Delete " + r.key + "? Stories keep a dangling link until regenerated.", { danger: true, okLabel: "Delete" }))) return;
     await api.del(base() + "/requirements/" + r.id); close(); nav ? await nav.refresh() : rerender();
@@ -583,24 +586,25 @@ function reqDrawer(r, nav) {
     subtitle: isNew ? "New requirement" : r.key + " · " + (r.source_ref || ""), title: isNew ? "Add requirement" : "Review requirement",
     body: h("div", { class: "stack", oninput: () => { dirty = true; } },
       isNew ? null : h("div", { class: "card card-body" }, h("div", { class: "row", style: { marginBottom: "10px" } }, h("b", { class: "grow" }, "Quality (ISO/IEC/IEEE 29148)"), scorePill(r.quality_score)), issueList(r.issues)),
+      h("fieldset", { class: "plain-fieldset stack", disabled: readOnly() },  // a disabled fieldset makes every field below read-only
       field("Review status", segmented([["draft", "Draft"], ["approved", "Approved"], ["excluded", "Excluded"]], status, (v) => { status = v; dirty = true; })),
       field("Statement", statement, "One verifiable requirement. Avoid vague terms such as 'fast' or 'user-friendly'."),
       h("div", { class: "form-grid" }, field("Type", type), field("BRD reference ID", sourceId), field("Epic", epic), field("Section / feature", section)),
       field("Actors", actors.el),
       field("Product classes", scope.el, "Leave empty if it applies to all products."),
       field("Compliance", compliance.el),
-      field("Rationale", rationale), field("Notes", notes),
+      field("Rationale", rationale), field("Notes", notes)),
       isNew ? null : discussionSection(r.id),
       isNew ? null : historySection(r.id)),
     onkeydown: keys,
-    footer: [h("button", { class: "btn btn-primary", onclick: save(false) }, "Save"),
-      nav && !isNew && nextId ? h("button", { class: "btn", onclick: save(true), title: "Mark approved, save, and open the next requirement (Ctrl+Shift+Enter)" }, "Approve & next") : null,
+    footer: [writer(h("button", { class: "btn btn-primary", onclick: save(false) }, "Save")),
+      nav && !isNew && nextId ? writer(h("button", { class: "btn", onclick: save(true), title: "Mark approved, save, and open the next requirement (Ctrl+Shift+Enter)" }, "Approve & next")) : null,
       nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Previous requirement", title: "Alt+Left", disabled: !prevId, onclick: step(prevId) }, "‹ Prev") : null,
       nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Next requirement", title: "Alt+Right", disabled: !nextId, onclick: step(nextId) }, "Next ›") : null,
-      isNew ? null : h("button", { class: "btn", onclick: guard(() => refineRequirementDialog(r, close, nav)) }, icon("sparkles"), "Refine with AI"),
+      isNew ? null : writer(h("button", { class: "btn", onclick: guard(() => refineRequirementDialog(r, close, nav)) }, icon("sparkles"), "Refine with AI")),
       h("span", { class: "grow" }),
-      isNew ? null : h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete"),
-      nav && !isNew ? shortcutHint() : null],
+      isNew ? null : writer(h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete")),
+      nav && !isNew && !readOnly() ? shortcutHint() : null],
   });
 }
 
@@ -653,7 +657,7 @@ async function viewStories(body) {
   if (!stories.length) {
     mount(body, h("div", { class: "card" }, empty({ iconName: "map", title: "No stories yet",
       text: reqs.length ? "Generate stories from your reviewed requirements." : "Extract and review requirements first.",
-      action: h("button", { class: "btn", onclick: () => storyDrawer(null) }, icon("plus"), "Add manually") })));
+      action: writer(h("button", { class: "btn", onclick: () => storyDrawer(null) }, icon("plus"), "Add manually")) })));
     return;
   }
   const box = h("div");
@@ -696,8 +700,8 @@ async function viewStories(body) {
     segmented([["map", "Story map"], ["list", "List"]], filters.storyView, (v) => { filters.storyView = v; render(); }),
     q, status, ready,
     count,
-    h("button", { class: "btn", onclick: guard(estimateDialog) }, icon("sparkles"), "Estimate with AI"),
-    h("button", { class: "btn", onclick: () => storyDrawer(null) }, icon("plus"), "Add story")), bulk, box);
+    writer(h("button", { class: "btn", onclick: guard(estimateDialog) }, icon("sparkles"), "Estimate with AI")),
+    writer(h("button", { class: "btn", onclick: () => storyDrawer(null) }, icon("plus"), "Add story"))), bulk, box);
   render();
 }
 
@@ -737,7 +741,7 @@ function storyMap(rows) {
     cols.get(k).items.push(s);
   }
   // Drag a card onto another column to move the story to that epic/feature (saved and audited).
-  const dropTarget = (c) => ({
+  const dropTarget = (c) => readOnly() ? {} : ({
     ondragover: (e) => { if (e.dataTransfer.types.includes("text/fabulist-story")) { e.preventDefault(); e.currentTarget.classList.add("drop"); } },
     ondragleave: (e) => e.currentTarget.classList.remove("drop"),
     ondrop: guard(async (e) => {
@@ -758,7 +762,7 @@ function storyMap(rows) {
     h("div", Object.assign({ class: "map-col", "aria-label": c.epic + " / " + c.feature }, dropTarget(c)),
       h("div", { class: "map-col-head" }, h("div", { class: "grow" }, h("div", { class: "map-feature", style: { padding: 0 } }, c.epic), h("h3", {}, c.feature)), badge(String(c.items.length))),
       c.items.sort((a, b) => order[a.priority] - order[b.priority]).map((s) => h("div", { class: "story-card " + s.status, tabindex: "0", role: "button", onclick: () => storyDrawer(s),
-        draggable: "true", ondragstart: (e) => { e.dataTransfer.setData("text/fabulist-story", s.id); e.dataTransfer.effectAllowed = "move"; },
+        draggable: readOnly() ? null : "true", ondragstart: (e) => { e.dataTransfer.setData("text/fabulist-story", s.id); e.dataTransfer.effectAllowed = "move"; },
         onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); storyDrawer(s); } } },
         h("div", { class: "row" }, h("span", { class: "dot " + s.priority, title: s.priority + " priority" }), h("span", { class: "k" }, s.key),
           h("span", { class: "right" }, s.status !== "draft" ? badge(s.status, statusTone[s.status]) : null)),
@@ -786,15 +790,15 @@ function storyTable(rows, redraw, pick) {
       changed();
     } });
   const table = h("div", { class: "card table-wrap" }, h("table", { class: "table" },
-    h("thead", {}, h("tr", {}, h("th", { class: "w-check" }, all), [["ID", "", "key"], ["Story", "", "title"], ["Epic / feature", "hide-sm", "epic"], ["Priority", "hide-sm", "priority"], ["Pts", "hide-sm", "points"], ["Requirements", "hide-sm"], ["Quality", "hide-sm", "quality"], ["Status", "", "status"]].map(([x, c, k]) => sortHeader(x, c, k, "story", redraw)))),
+    h("thead", {}, h("tr", {}, writer(h("th", { class: "w-check" }, all)), [["ID", "", "key"], ["Story", "", "title"], ["Epic / feature", "hide-sm", "epic"], ["Priority", "hide-sm", "priority"], ["Pts", "hide-sm", "points"], ["Requirements", "hide-sm"], ["Quality", "hide-sm", "quality"], ["Status", "", "status"]].map(([x, c, k]) => sortHeader(x, c, k, "story", redraw)))),
     h("tbody", {}, rows.map((s) => h("tr", { class: "clickable" + (selected.has(s.id) ? " selected" : ""), onclick: () => storyDrawer(s) },
-      h("td", { onclick: (e) => e.stopPropagation() }, h("input", { type: "checkbox", "aria-label": "Select " + s.key, checked: selected.has(s.id),
+      writer(h("td", { onclick: (e) => e.stopPropagation() }, h("input", { type: "checkbox", "aria-label": "Select " + s.key, checked: selected.has(s.id),
         onchange: (e) => {
           e.target.checked ? selected.add(s.id) : selected.delete(s.id);
           e.target.closest("tr").classList.toggle("selected", e.target.checked);
           all.checked = rows.every((x) => selected.has(x.id));
           changed();
-        } })),
+        } }))),
       h("td", { class: "mono nowrap" }, rowOpener(s.key)),
       h("td", {}, h("b", {}, s.title), h("div", { class: "small muted" }, s.persona)),
       h("td", { class: "small hide-sm" }, s.epic, h("div", { class: "muted" }, s.feature)),
@@ -851,7 +855,7 @@ function storyDrawer(s, nav = storyNav) {
     if (dirty && !(await confirmBox("Discard your unsaved changes to " + s.key + "?", { okLabel: "Discard" }))) return;
     close(); go(id);
   });
-  const keys = reviewKeys({ save: save(false), approve: nextId ? save(true) : save(false), prev: () => prevId && step(prevId)(), next: () => nextId && step(nextId)() });
+  const keys = reviewKeys({ save: readOnly() ? () => {} : save(false), approve: readOnly() ? () => {} : nextId ? save(true) : save(false), prev: () => prevId && step(prevId)(), next: () => nextId && step(nextId)() });
   const remove = guard(async () => {
     if (!(await confirmBox("Delete " + s.key + "?", { danger: true, okLabel: "Delete" }))) return;
     await api.del(base() + "/stories/" + s.id); close(); nav ? await nav.refresh() : rerender();
@@ -864,6 +868,7 @@ function storyDrawer(s, nav = storyNav) {
       isNew ? null : h("div", { class: "card card-body" },
         h("div", { class: "row", style: { marginBottom: "10px" } }, h("b", { class: "grow" }, "Quality (INVEST, Definition of Ready)"),
           s.ready ? badge("Ready", "green") : badge("Needs work", "amber"), scorePill(s.quality_score)), issueList(s.issues)),
+      h("fieldset", { class: "plain-fieldset stack", disabled: readOnly() },
       field("Review status", segmented([["draft", "Draft"], ["approved", "Approved"], ["rejected", "Rejected"]], status, (v) => { status = v; dirty = true; })),
       field("Title", title),
       h("div", { class: "form-grid" }, field("Persona", persona), field("Priority", priority), field("Epic", epic), field("Feature", feature)),
@@ -874,18 +879,18 @@ function storyDrawer(s, nav = storyNav) {
       linked.length ? h("div", { class: "callout small" }, h("div", { class: "stack", style: { gap: "4px" } },
         linked.map((r) => h("div", {}, h("b", { class: "mono" }, r.key + " "), r.statement)))) : null,
       field("Labels", labels.el), field("Product classes", scope.el), field("Compliance", compliance.el),
-      field("Open questions", questions, "Stories with open questions don't meet the Definition of Ready."), field("Notes", notes),
+      field("Open questions", questions, "Stories with open questions don't meet the Definition of Ready."), field("Notes", notes)),
       isNew ? null : discussionSection(s.id),
       isNew ? null : historySection(s.id)),
     onkeydown: keys,
-    footer: [h("button", { class: "btn btn-primary", onclick: save(false) }, "Save"),
-      nav && !isNew && nextId ? h("button", { class: "btn", onclick: save(true), title: "Mark approved, save, and open the next story (Ctrl+Shift+Enter)" }, "Approve & next") : null,
+    footer: [writer(h("button", { class: "btn btn-primary", onclick: save(false) }, "Save")),
+      nav && !isNew && nextId ? writer(h("button", { class: "btn", onclick: save(true), title: "Mark approved, save, and open the next story (Ctrl+Shift+Enter)" }, "Approve & next")) : null,
       nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Previous story", title: "Alt+Left", disabled: !prevId, onclick: step(prevId) }, "‹ Prev") : null,
       nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Next story", title: "Alt+Right", disabled: !nextId, onclick: step(nextId) }, "Next ›") : null,
-      isNew ? null : h("button", { class: "btn", onclick: guard(() => refineDialog(s, close, nav)) }, icon("sparkles"), "Refine with AI"),
+      isNew ? null : writer(h("button", { class: "btn", onclick: guard(() => refineDialog(s, close, nav)) }, icon("sparkles"), "Refine with AI")),
       h("span", { class: "grow" }),
-      isNew ? null : h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete"),
-      nav && !isNew ? shortcutHint() : null],
+      isNew ? null : writer(h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete")),
+      nav && !isNew && !readOnly() ? shortcutHint() : null],
   });
 }
 
@@ -1068,7 +1073,7 @@ async function baselinesCard() {
   return h("div", { class: "card", style: { marginTop: "12px" } },
     h("div", { class: "card-head" }, h("div", { class: "grow" }, h("h3", {}, "Baselines"),
       h("div", { class: "muted small" }, "Versioned sign-off snapshots of the backlog for audit and release planning.")),
-      h("button", { class: "btn btn-sm", onclick: create }, icon("plus"), "Create baseline")),
+      writer(h("button", { class: "btn btn-sm", onclick: create }, icon("plus"), "Create baseline"))),
     list.length ? h("div", { class: "table-wrap", style: { marginTop: "8px" } }, h("table", { class: "table" },
       h("thead", {}, h("tr", {}, [["Version", ""], ["Name", ""], ["Contents", "hide-sm"], ["Created", "hide-sm"], ["", ""]].map(([x, c]) => h("th", { class: c }, x)))),
       h("tbody", {}, list.map((b) => {
@@ -1088,6 +1093,7 @@ async function baselinesCard() {
 }
 
 async function pushCard() {
+  if (readOnly()) return null;  // pushing writes to an external tracker
   const { integrations } = await api.get("/api/integrations");
   const card = h("div", { class: "card", style: { marginTop: "16px" } },
     h("div", { class: "card-head" }, h("div", { class: "grow" }, h("h3", {}, "Push to issue tracker"),
