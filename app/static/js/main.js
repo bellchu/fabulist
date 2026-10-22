@@ -3,6 +3,7 @@ import { h, mount, icon, api, guard, toast, modal, field, requireValue, select, 
 import { renderProject } from "./project.js";
 import { renderAdmin } from "./admin.js";
 import { renderAccount } from "./account.js";
+import { renderSearch } from "./search.js";
 
 export const state = { meta: null, projects: [], me: null };
 
@@ -12,12 +13,12 @@ function navItem(href, label, active, iconName) {
 
 function globalSearch() {
   const listId = "project-search";
-  const input = h("input", { type: "search", list: listId, placeholder: "Search projects…", "aria-label": "Search projects" });
+  const input = h("input", { type: "search", list: listId, placeholder: "Search projects, requirements, stories…", "aria-label": "Search projects, requirements and stories" });
   input.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
     const q = input.value.trim().toLowerCase();
-    const hit = state.projects.find((p) => p.name.toLowerCase() === q) || state.projects.find((p) => p.name.toLowerCase().includes(q));
-    if (hit) location.hash = "#/p/" + hit.id;
+    const hit = state.projects.find((p) => p.name.toLowerCase() === q);
+    location.hash = hit ? "#/p/" + hit.id : "#/search/" + encodeURIComponent(input.value.trim());  // an exact project name opens it; anything else is a search
   });
   return h("div", { class: "global-search" }, icon("search"), input, h("datalist", { id: listId }, state.projects.map((p) => h("option", { value: p.name }))));
 }
@@ -97,6 +98,7 @@ async function route() {
     if (parts[0] === "p" && parts[1]) await renderProject(content, parts[1], parts[2] || "overview");
     else if (parts[0] === "admin" && state.me.role === "admin") await renderAdmin(content, parts[1] || "overview");
     else if (parts[0] === "account") await renderAccount(content);
+    else if (parts[0] === "search") await renderSearch(content, decodeURIComponent(parts.slice(1).join("/")));
     else renderHome(content);
     if (refocus && ticket === rendering && location.hash === hash && (!document.activeElement || document.activeElement === document.body)) {
       document.querySelector("#app " + refocus)?.focus();
