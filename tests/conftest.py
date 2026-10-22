@@ -15,6 +15,14 @@ def instant_retry_waits(monkeypatch):
     llm._cooldowns.clear()
 
 
+@pytest.fixture(autouse=True)
+def no_rate_limit(monkeypatch):
+    """Tests make hundreds of requests from one address; the limiter has its own tests (tests/test_ratelimit.py)."""
+    from app import config, ratelimit
+    monkeypatch.setattr(config, "RATE_LIMIT_PER_MINUTE", 0)
+    ratelimit.reset()
+
+
 @pytest.fixture()
 def client(monkeypatch):
     if not TEST_DB:
