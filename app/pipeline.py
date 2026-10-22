@@ -247,22 +247,22 @@ def _in_order(count: int, work: Callable[[int], Any], workers: int, progress: Pr
         pool.shutdown(wait=True)  # calls already in flight finish (or notice the cancel); nothing new starts
 
 
+JSON_ATTEMPTS = 3  # replies that are not a JSON array are asked for again (twice) before giving up: a run makes hundreds of requests
+
+
 def _ask(profile: Dict[str, Any], opts: Dict[str, Any], system: str, prompt: str, usage: Usage) -> List[Any]:
     if opts.get("redact_pii", True):
         prompt = llm.redact(prompt)
-    text, u = llm.complete(profile, system, prompt, opts)
-    _count(usage, u)
-    try:
-        return parse_json_array(text)
-    except (ValueError, json.JSONDecodeError):
-        text, u = llm.complete(profile, system, "Your previous reply was not valid JSON. Return ONLY the JSON "
-                                                 "array for this input.\n\n" + prompt, opts)
+    ask = prompt
+    for attempt in range(JSON_ATTEMPTS):
+        text, u = llm.complete(profile, system, ask, opts)
         _count(usage, u)
         try:
             return parse_json_array(text)
         except (ValueError, json.JSONDecodeError):
-            raise ValueError("The AI provider did not return valid JSON after a retry. Try a stronger model, "
-                             "a smaller section size, or a lower temperature.")
+            ask = "Your previous reply was not valid JSON. Return ONLY the JSON array for this input.\n\n" + prompt
+    raise ValueError("The AI provider did not return valid JSON after %d tries. Try a stronger model, a smaller section size, "
+                     "or a lower temperature." % JSON_ATTEMPTS)
 
 
 def _ask_at(where: str, profile: Dict[str, Any], opts: Dict[str, Any], system: str, prompt: str, usage: Usage) -> List[Any]:

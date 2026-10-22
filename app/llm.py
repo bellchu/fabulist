@@ -1,4 +1,5 @@
 """LLM provider adapters for provider profiles managed in the admin dashboard."""
+import random
 import re
 import threading
 import time
@@ -56,12 +57,50 @@ def _is_quota(resp: httpx.Response) -> bool:
     return "insufficient_quota" in text or ("quota" in text and "billing" in text)
 
 
+MAX_WAIT_SECONDS = 60.0  # the longest single wait between attempts, whatever the provider asks for
+_cooldowns: Dict[str, float] = {}  # provider host -> monotonic time before which nothing should be sent to it
+_cooldown_lock = threading.Lock()
+
+
+def _note_rate_limit(host: str, seconds: float) -> None:
+    """The provider asked for a pause: every call to it, from every section of every run, waits it out, instead of each one finding out the hard way."""
+    with _cooldown_lock:
+        _cooldowns[host] = max(_cooldowns.get(host, 0.0), time.monotonic() + seconds)
+
+
+def _wait_cooldown(host: str) -> None:
+    with _cooldown_lock:
+        remaining = _cooldowns.get(host, 0.0) - time.monotonic()
+    if remaining > 0:
+        _sleep(remaining)
+
+
+def _retry_after(resp: httpx.Response) -> Optional[float]:
+    try:
+        return max(0.0, float(resp.headers.get("retry-after", "")))
+    except ValueError:
+        return None  # absent, or an HTTP date (rare): fall back to exponential backoff
+
+
+def _backoff(attempt: int, asked: Optional[float]) -> float:
+    """Seconds to wait before the next attempt: what the provider asked for, else 1.5 s doubling each time; capped, with jitter so that
+    parallel sections do not all come back at the same instant."""
+    if asked is not None:
+        return min(asked, MAX_WAIT_SECONDS) + random.uniform(0.0, 1.0)
+    return min(MAX_WAIT_SECONDS, 1.5 * (2 ** attempt)) * random.uniform(0.75, 1.25)
+
+
 def _post(url: str, headers: dict, payload: dict, timeout: float) -> dict:
-    """POST with bounded retries for transient failures (429/5xx/network)."""
+    """POST with bounded, patient retries for transient failures (429/5xx/network). A large run makes hundreds of requests, so even a
+    modest failure rate means some request fails several times in a row: three quick attempts failed whole runs."""
     host = urlsplit(url).hostname or url
     last = "unknown error"
-    for attempt in range(3):
+    attempts = max(1, int(config.LLM_MAX_ATTEMPTS))
+    for attempt in range(attempts):
         _check_cancelled()
+        _wait_cooldown(host)
+        asked: Optional[float] = None
+        limited = False
         try:
             resp = httpx.post(url, headers=headers, json=payload, timeout=timeout)
             if resp.status_code == 429 and _is_quota(resp):
@@ -69,6 +108,7 @@ def _post(url: str, headers: dict, payload: dict, timeout: float) -> dict:
                 raise LLMError("provider returned HTTP 429: %s (the account is out of quota; retrying will not help)" % _error_text(resp))
             if resp.status_code == 429 or resp.status_code >= 500:
                 detail = _error_text(resp)
+                asked, limited = _retry_after(resp), resp.status_code == 429 or resp.headers.get("retry-after") is not None
                 raise _Retryable("provider returned HTTP %d%s" % (resp.status_code, ": " + detail if detail else ""))
             if resp.status_code >= 400:
                 hint = HINTS.get(resp.status_code)
@@ -79,8 +119,11 @@ def _post(url: str, headers: dict, payload: dict, timeout: float) -> dict:
         except httpx.HTTPError as exc:
             last = "cannot reach %s (%s): check the endpoint URL and network access" % (host, type(exc).__name__)
         _check_cancelled()  # the attempt that just failed may have been the one the user was waiting on
-        if attempt < 2:
-            _sleep(1.5 * (2 ** attempt))
+        if attempt < attempts - 1:
+            wait = _backoff(attempt, asked)
+            if limited:
+                _note_rate_limit(host, wait)
+            _sleep(wait)
     raise LLMError(last)
 
 

@@ -122,6 +122,7 @@ def verify(secret: str, body: bytes, headers, tolerance=300) -> bool:
 | `DB_POOL_MAX`, `DB_POOL_TIMEOUT` | database connections per process, and seconds a request waits for one before getting a retryable 503 | `20`, `10` |
 | `MAX_CONCURRENT_PARSES`, `PARSE_WAIT_SECONDS` | documents read and indexed at once (a large Word or PDF file takes tens of MB and seconds of CPU); the rest wait, and get `503` with `Retry-After` after this many seconds | `2`, `60` |
 | `LLM_TIMEOUT_SECONDS` | default timeout for one AI provider request (the Generation settings page overrides it) | `120` |
+| `LLM_MAX_ATTEMPTS` | tries per AI request on rate limits, server errors and network failures; the wait between tries is the provider's `Retry-After`, else 1.5 s doubling up to a minute (a large run makes hundreds of requests, so a few quick tries failed whole runs), and a rate limit pauses every call to that provider | `6` |
 | `MAX_RUN_AI_CALLS` | background AI calls in flight at once across all runs (each run asks `ai_concurrency` sections at a time, a generation setting, default 4) | `8` |
 | `PUSH_BUDGET_SECONDS` | a tracker push stops after this long and reports how many stories remain (push again to continue; nothing is duplicated). Keep it under the proxy timeout | `60` |
 | `SESSION_IDLE_MINUTES` | sign SSO users out after this much inactivity (activity extends the session, up to its 8 h cap); `0` disables | `30` |
@@ -222,6 +223,7 @@ Measured on the cluster with `scripts/load-test-k8s.sh` (offline AI provider, on
 | 20 runs started at the same instant against an AI provider that takes 0.25 s per request | 4 run, 16 queue, none refused; all finish in about 31 s; never more than 4 running |
 | 20 requesters uploading a 6 MB Word file at the same moment | all stored in about 40 s (two are read at a time); memory peak about 460 MiB |
 | one project with 1,100 BRDs (up to 165 MB of text) | storing 85 BRDs/s; listing documents 0.04 s; passage search 10 ms; project export streams in 0.3 s with a 210 MiB peak; read into requirements in 44 batched runs |
+| 6 runs of 46 sections against an AI provider that fails 25% of requests (rate limits, server errors, non-JSON replies) | all 6 finish; with three quick attempts per request only 4 did, and a run of hundreds of sections would almost never finish |
 | 300 projects | home list, project summary, metrics scrape and admin overview about 10 ms each |
 | one project with 50,600 requirements | no crash (it ran the pod out of memory before near-duplicate detection was bounded); 3-5 s per heavy call, 372 MiB peak |
 

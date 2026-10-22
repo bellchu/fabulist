@@ -7,6 +7,14 @@ import pytest
 TEST_DB = os.environ.get("TEST_DATABASE_URL", "")
 
 
+@pytest.fixture(autouse=True)
+def instant_retry_waits(monkeypatch):
+    """Retries wait up to a minute between attempts (patient on purpose); a test of a failing provider must not."""
+    from app import llm
+    monkeypatch.setattr(llm, "_sleep", lambda seconds: llm._check_cancelled())  # still notices a cancel, but does not wait
+    llm._cooldowns.clear()
+
+
 @pytest.fixture()
 def client(monkeypatch):
     if not TEST_DB:

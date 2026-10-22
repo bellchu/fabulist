@@ -224,12 +224,41 @@ def burst():
 
 
 class FakeAI(BaseHTTPRequestHandler):
-    """An OpenAI-compatible endpoint that answers every request, after a delay."""
-    served, lock = 0, threading.Lock()
+    """An OpenAI-compatible endpoint that answers every request, after a delay. With FLAKY (a fraction), that share of requests fails the
+    way real providers do: rate limiting (429 with Retry-After), server errors (500) and replies that are not JSON."""
+    served, attempts, failures, lock = 0, 0, {"429": 0, "500": 0, "junk": 0}, threading.Lock()
+    flaky, rnd = 0.0, __import__("random").Random(11)
 
     def do_POST(self):
         self.rfile.read(int(self.headers.get("Content-Length", 0)))
         time.sleep(LLM_LATENCY)
+        with FakeAI.lock:
+            FakeAI.attempts += 1
+            roll = FakeAI.rnd.random()
+        if roll < FakeAI.flaky * 0.6:
+            with FakeAI.lock:
+                FakeAI.failures["429"] += 1
+            body = b'{"error": {"message": "Rate limit reached, please slow down"}}'
+            self.send_response(429)
+            self.send_header("Retry-After", "1")
+        elif roll < FakeAI.flaky * 0.85:
+            with FakeAI.lock:
+                FakeAI.failures["500"] += 1
+            body = b'{"error": {"message": "The server had an error"}}'
+            self.send_response(500)
+        elif roll < FakeAI.flaky:
+            with FakeAI.lock:
+                FakeAI.failures["junk"] += 1
+            body = json.dumps({"choices": [{"message": {"content": "I am sorry, I cannot help with that."}}], "usage": {"prompt_tokens": 40, "completion_tokens": 9}}).encode()
+            self.send_response(200)
+        else:
+            body = None
+        if body is not None:
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         with FakeAI.lock:
             FakeAI.served += 1
         reply = json.dumps([{"statement": "The system shall record every change with the user and time.", "type": "functional", "actors": ["Auditor"]}])
@@ -242,6 +271,49 @@ class FakeAI(BaseHTTPRequestHandler):
 
     def log_message(self, *args):
         pass
+
+
+def flakyai():
+    """Runs against an AI provider that fails a share of its requests (FLAKY, default 0.25: rate limits, server errors, non-JSON replies).
+    A large run makes hundreds of requests, so even a small failure rate means some request fails every retry unless the retries are patient:
+    does the run finish?"""
+    flaky = float(os.environ.get("FLAKY", 0.25))
+    brds = int(os.environ.get("FLAKY_BRDS_EACH", 2))
+    runs = int(os.environ.get("FLAKY_RUNS", 6))
+    FakeAI.flaky = flaky
+    print("\n== flakyai: %d runs of ~%d sections, %.0f%% of provider requests fail" % (runs, brds * 23, flaky * 100))
+    server = ThreadingHTTPServer(("127.0.0.1", 9100), FakeAI)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    with httpx.Client(base_url=BASE, headers=H, timeout=30) as c:
+        c.put("/api/admin/settings", json={"max_chunks_per_run": 2000})
+        prov = c.post("/api/admin/providers", json={"name": "Flaky AI", "kind": "openai", "base_url": "http://127.0.0.1:9100/v1", "model": "m", "api_key": "k"}).json()["id"]
+        c.post(f"/api/admin/providers/{prov}/default", json={})
+        pids = []
+        for i in range(runs):
+            pid = c.post("/api/projects", json={"name": "Flaky %02d" % i, "platform": "generic"}).json()["id"]
+            for k in range(brds):
+                c.post(f"/api/projects/{pid}/documents/text", json={"name": "brd-%d" % k, "text": brd_text("K%02d-%d" % (i, k), BRD_KB)})
+            pids.append(pid)
+        t0 = time.time()
+        for pid in pids:
+            c.post(f"/api/projects/{pid}/runs", json={"stage": "requirements", "scope": "all"})
+        outcomes = {}
+        deadline = time.time() + 1500
+        while time.time() < deadline:
+            states = [c.get(f"/api/projects/{pid}/runs?limit=1").json()[0] for pid in pids]
+            if all(r["status"] not in ("running", "queued") for r in states):
+                break
+            time.sleep(2)
+        for r in states:
+            outcomes[r["status"]] = outcomes.get(r["status"], 0) + 1
+        failed = [r["error"] for r in states if r["status"] == "failed"][:2]
+    server.shutdown()
+    print("%d runs finished in %.0f s: %s" % (runs, time.time() - t0, outcomes))
+    print("provider saw %d requests (%d served OK); injected failures: %s" % (FakeAI.attempts, FakeAI.served, FakeAI.failures))
+    if failed:
+        print("example failure:", failed[0][:200])
+    print("budgets:")
+    budget(outcomes.get("done", 0) == runs, "every run finished despite %.0f%% failing provider requests (%s)" % (flaky * 100, outcomes))
 
 
 def slowai():
@@ -546,6 +618,6 @@ if __name__ == "__main__":
     which = sys.argv[1:] or ["burst", "slowai", "volume"]
     for name in which:
         clean_slate()
-        {"burst": burst, "slowai": slowai, "volume": volume, "bigproject": bigproject, "bigfiles": bigfiles, "manyprojects": manyprojects}[name]()
+        {"burst": burst, "slowai": slowai, "volume": volume, "bigproject": bigproject, "bigfiles": bigfiles, "manyprojects": manyprojects, "flakyai": flakyai}[name]()
     print("\n%s" % ("LOAD TEST OK" if not budget_misses else "LOAD TEST: %d budget(s) missed: %s" % (len(budget_misses), budget_misses)))
     sys.exit(1 if budget_misses else 0)
