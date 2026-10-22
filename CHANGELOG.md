@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Architecture document: the outbound-calls row now says what the code does (the address guard applies to BRD repositories, whose URL any analyst supplies; administrator-configured trackers, webhooks and AI providers may be internal by design).
 - `docs/ARCHITECTURE.md`: components, data flow, the run lifecycle, the design decisions and their reasons, trust boundaries, failure behaviour and known limits (linked from the README). A test checks that every file and setting it names exists.
 - Leaving the Generation settings page with edits that are not saved (another tab, the browser's Back button, reload, closing the tab) now asks "Leave without saving?" instead of silently dropping them; Cancel keeps the page and the edits, and a saved or untouched page leaves at once. The mechanism is one call (`guardLeaving`) that any page can use. Browser test: `tests/ui/leave_guard.py`.
 - A dialog with something typed in it no longer vanishes on a stray click outside it or an Escape: it asks "Close without saving?" (Discard / Cancel) and Cancel keeps the dialog and the text. An untouched dialog, read-only dialogs and the dialog's own Cancel button still close at once. (Drawers already asked.) Browser test: `tests/ui/dialog_discard.py`.
