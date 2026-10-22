@@ -14,6 +14,11 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    return default if value is None else value.strip().lower() in ("1", "true", "yes", "on")
+
+
 # Git revision baked into the image at build time (see Dockerfile / scripts/deploy.sh).
 VERSION = os.environ.get("APP_VERSION", "dev")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -23,6 +28,8 @@ MAX_CONCURRENT_PARSES = _int("MAX_CONCURRENT_PARSES", 2)  # documents parsed at 
 PARSE_WAIT_SECONDS = float(os.environ.get("PARSE_WAIT_SECONDS", "60"))  # how long an upload waits for a parsing slot before being told to retry (503)
 MAX_UNZIPPED_MB = _int("MAX_UNZIPPED_MB", 200)  # DOCX/XLSX are ZIPs: cap what they may expand to (decompression bombs)
 MAX_PDF_PAGES = _int("MAX_PDF_PAGES", 500)
+TRUSTED_PROXY_HOPS = _int("TRUSTED_PROXY_HOPS", 1)  # proxies in front that append to X-Forwarded-For; the client address is that far from the right
+TRUST_CF_CONNECTING_IP = _bool("TRUST_CF_CONNECTING_IP", True)  # behind Cloudflare, its CF-Connecting-IP header is the client; set 0 if the origin is reachable without it
 RATE_LIMIT_PER_MINUTE = _int("RATE_LIMIT_PER_MINUTE", 600)  # API requests per person per minute (burst = the same); 0 = no limit
 MAX_INTERACTIVE_PER_USER = _int("MAX_INTERACTIVE_PER_USER", 3)  # of those, how many one person may have running at once
 MAX_INTERACTIVE_AI_CALLS = _int("MAX_INTERACTIVE_AI_CALLS", 8)  # AI calls made inside a request (refine, estimate, Ask) in flight at once
