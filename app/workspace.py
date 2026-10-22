@@ -450,6 +450,22 @@ def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str
         llm.set_cancel_check(None)
         metrics.inc("fabulist_llm_tokens_total", usage["in"], direction="in")
         metrics.inc("fabulist_llm_tokens_total", usage["out"], direction="out")
+    _record_run_in_history(run_id, pid)
+
+
+def _record_run_in_history(run_id: str, pid: str) -> None:
+    """Who ran what, and how it ended, goes in the project's audit trail (the run list says it too, but the trail is what gets exported as evidence)."""
+    try:
+        run = db.one("SELECT stage, status, actor, item_count, error, provider, model, duration_ms FROM runs WHERE id=%s", (run_id,))
+        if not run or run["status"] not in ("done", "failed", "cancelled"):
+            return
+        what = ("%d item%s" % (run["item_count"], "" if run["item_count"] == 1 else "s")) if run["status"] == "done" else (run["error"] or run["status"])[:150]
+        engine = " · %s%s" % (run["provider"], " " + run["model"] if run["model"] else "") if run["provider"] else ""
+        with db.conn() as c:
+            history.record(c, pid, "run", run_id, "", "ai run " + run["status"], run["actor"] or "anonymous",
+                           "%s · %s%s · %.1f s" % (run["stage"], what, engine, (run["duration_ms"] or 0) / 1000))
+    except Exception:  # noqa: BLE001 - the trail is not allowed to break a run (the project may be gone, for instance)
+        log.exception("could not record run %s in the audit trail", run_id)
 
 
 def _run_stage(run_id: str, pid: str, stage: str, provider_id: str, scope: str, started: float,
@@ -670,11 +686,12 @@ def _recover_stuck_runs(pid: Optional[str]) -> int:
     find it is no longer running and write nothing."""
     cutoff = _stale_cutoff()
     marked = db.rows("UPDATE runs SET status='failed', cancel_requested=TRUE, progress='', error=%s "
-                     "WHERE (%s::text IS NULL OR project_id=%s) AND status='running' AND coalesce(updated, created) < %s RETURNING id, stage",
+                     "WHERE (%s::text IS NULL OR project_id=%s) AND status='running' AND coalesce(updated, created) < %s RETURNING id, stage, project_id",
                      ("Marked as stuck: no progress for %d minutes. The AI provider may have stopped responding; start a new run." % config.STALE_RUN_MINUTES, pid, pid, cutoff))
     for r in marked:
         metrics.inc("fabulist_runs_total", stage=r["stage"], status="failed")
         integrations.announce_run(r["id"])
+        _record_run_in_history(r["id"], r["project_id"])
     return len(marked)
 
 
