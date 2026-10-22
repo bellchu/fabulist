@@ -32,7 +32,7 @@ spec:
     command: [sleep, "3600"]
     workingDir: /src
     volumeMounts: [{name: src, mountPath: /src}]
-    env: [{name: DATABASE_URL, value: "postgresql://f:f@127.0.0.1:5432/f"}, {name: SETTINGS_ENCRYPTION_KEY, value: ui-check}, {name: MAX_CONCURRENT_RUNS, value: "1"}, {name: RATE_LIMIT_PER_MINUTE, value: "0"}]  # one slot, so a second run visibly queues
+    env: [{name: DATABASE_URL, value: "postgresql://f:f@127.0.0.1:5432/f"}, {name: SETTINGS_ENCRYPTION_KEY, value: ui-check}, {name: MAX_CONCURRENT_RUNS, value: "1"}, {name: RATE_LIMIT_PER_MINUTE, value: "0"}, {name: SUPPORT_CONTACT, value: "helpdesk@ui-check.example"}]  # one slot, so a second run visibly queues
   - name: browser
     image: mcr.microsoft.com/playwright/python:v1.49.0-noble
     command: [sleep, "3600"]
