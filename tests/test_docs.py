@@ -32,3 +32,10 @@ def test_the_api_cookbook_only_uses_routes_that_exist(client):
     normalised = {re.sub(r"\{[^}]+\}", "{}", k) for k in spec}
     assert len(paths) >= 6
     assert [p for p in sorted(paths) if re.sub(r"\{[^}]+\}", "{}", p) not in normalised] == []
+
+
+def test_the_changelog_has_an_unreleased_section_on_top_and_dated_releases_below():
+    import re
+    text = open(os.path.join(REPO, "CHANGELOG.md")).read()
+    headings = re.findall(r"^## (.+)$", text, re.M)
+    assert headings[0] == "Unreleased" and all(re.fullmatch(r"\d{4}-\d{2}-\d{2}( .*)?", h) for h in headings[1:]), headings
