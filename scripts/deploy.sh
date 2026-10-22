@@ -50,6 +50,7 @@ if [ -z "$(kubectl -n "$NS" get secret fabulist-app -o jsonpath='{.data.METRICS_
     -p "{\"stringData\":{\"METRICS_TOKEN\":\"$(openssl rand -hex 24)\"}}" >/dev/null
 fi
 kubectl apply -f deploy/k8s/postgres.yaml
+kubectl apply -f deploy/k8s/networkpolicy.yaml
 kubectl -n "$NS" rollout status statefulset/postgres --timeout=240s
 kubectl apply -f deploy/k8s/backup.yaml
 

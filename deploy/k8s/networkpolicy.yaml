@@ -1,0 +1,32 @@
+# Ingress isolation for the fabulist namespace (enforced by Calico). Egress stays open: the app calls AI providers,
+# git hosts and Confluence/Jira. Remove with `kubectl -n fabulist delete networkpolicy --all` to roll back.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fabulist-app-ingress
+  namespace: fabulist
+spec:
+  podSelector:
+    matchLabels: {app: fabulist}
+  policyTypes: [Ingress]
+  ingress:
+    - from:   # the ingress controller (users) and Prometheus (metrics); nothing else in the cluster
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress}}
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: observability}}
+      ports:
+        - {port: 8000, protocol: TCP}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-ingress
+  namespace: fabulist
+spec:
+  podSelector:
+    matchLabels: {app: postgres}
+  policyTypes: [Ingress]
+  ingress:
+    - from:   # the app, the backup job and the audit job, all in this namespace; no other namespace
+        - podSelector: {}
+      ports:
+        - {port: 5432, protocol: TCP}
