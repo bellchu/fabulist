@@ -195,6 +195,18 @@ function renderHome(content, keepView = false) {
   draw();
 }
 
+// An error nobody caught is a bug in the page itself: say so (at most every few seconds) instead of failing silently. The details stay in the
+// browser console; ResizeObserver notices are harmless browser noise.
+let lastCrashNotice = 0;
+function crashed(event) {
+  const text = String((event && (event.message || (event.reason && event.reason.message))) || "");
+  if (/ResizeObserver/.test(text) || Date.now() - lastCrashNotice < 5000) return;
+  lastCrashNotice = Date.now();
+  toast("Something in the page went wrong. If the screen looks wrong, reload it.", "error");
+}
+window.addEventListener("unhandledrejection", crashed);
+window.addEventListener("error", crashed);
+
 // Restores a project from a full archive (Project settings > Download archive) as a new project.
 function importButton() {
   const file = h("input", { type: "file", accept: "application/json,.json", hidden: true, "aria-label": "Project archive file" });
