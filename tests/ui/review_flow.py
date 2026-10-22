@@ -148,7 +148,7 @@ with sync_playwright() as p:
     tabs_top = mp.evaluate("Math.round(document.querySelector('.tabs').getBoundingClientRect().top)")
     check(tabs_top < 400, f"phone: the project header leaves room for content (tabs start at {tabs_top}px)")
     version = api.get(BASE + "/api/meta").json()["version"]
-    check(page.locator("footer.app-footer").inner_text() == f"Fabulist {version}", f"the footer shows the build version ({version})")
+    check(page.locator("footer.app-footer").inner_text().startswith(f"Fabulist {version}"), f"the footer shows the build version ({version})")  # a support contact may follow it
     check(not errors, f"no page errors {errors}")
     browser.close()
 sys.exit(1 if failures else 0)
