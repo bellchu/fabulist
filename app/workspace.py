@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -159,6 +160,25 @@ def search_everywhere(request: Request, q: str = "", limit: int = 30):
 def people() -> List[Dict[str, str]]:
     """Named accounts, for choosing who can see a project (names and roles only)."""
     return db.rows("SELECT username, role FROM users WHERE disabled IS NOT TRUE ORDER BY username")
+
+
+SAMPLE_BRD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples", "order-to-cash-brd.md")
+
+
+@router.post("/api/projects/sample", status_code=201)
+def create_sample_project(request: Request):
+    """A new project holding a small order-to-cash BRD, to try the workflow with (extraction works offline, with no AI provider)."""
+    with open(SAMPLE_BRD, encoding="utf-8") as f:
+        text = f.read()
+    names = {p["name"] for p in db.rows("SELECT name FROM projects")}
+    name = "Sample: order to cash"
+    n = 1
+    while name in names:
+        n += 1
+        name = "Sample: order to cash (%d)" % n
+    project = create_project(ProjectIn(name=name, platform="generic", description="A small BRD to try the workflow with: extract requirements, review them, generate stories."), request)
+    _add_document(project["id"], "order-to-cash-brd.md", text)
+    return project
 
 
 @router.get("/api/projects/{pid}/access")
