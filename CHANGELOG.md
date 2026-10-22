@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Responses of 1 KB or more are compressed (gzip) for clients that accept it. A project of 13,800 requirements sent a 9 MB list on every visit; behind an ingress that does not compress (Cloudflare does, a typical corporate proxy may not) that is all on the wire. Streaming downloads (the project archive) are compressed as they go. Tests: `tests/test_compression.py`.
 - API reference polish found by looking at it: the page was in the browser's serif font (a stray `font-family: inherit` overrode the app's font stack), its introduction paragraphs had no spacing, `*run*` showed its asterisks, and operation names were in Title Case ("Start Run"); now sans-serif, spaced, emphasised and in sentence case ("Start run"), each checked by a test.
 - `UI_ARTIFACTS=dir scripts/ui-check-k8s.sh ...` copies what a browser test saves under `/tmp/artifacts` (screenshots) out of the cluster pod into that local directory, even when a test fails, so a failure can be looked at instead of guessed at.
 - `scripts/release-check-k8s.sh` runs everything that decides whether a build is ready (quality gate, browser suite, the load scenarios, the vulnerability scan of the running image) on the cluster and prints one summary with a pass/fail and time per stage; any stage can be run alone (`gate`, `ui`, `load`, `scan`). The later stages still run after a failure, so one run shows everything that is wrong.
