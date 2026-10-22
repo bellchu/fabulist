@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- The Account page, shown to the bootstrap administrator (who has no named account and so cannot create API tokens), now links straight to Users & roles to create one.
 - The build version (the git commit it was built from) is shown in a footer on every page, so support requests can quote it exactly.
 - Security reporting: GitHub private vulnerability reporting is enabled and SECURITY.md points to it. The Cloudflare edge no longer sends `Strict-Transport-Security: max-age=0`: it now sends `max-age=15552000` (6 months, no preload, not `includeSubDomains` because several unproxied imbell.com hosts do not serve valid HTTPS).
 - Browser test for sign-off baselines (`tests/ui/baselines.py`): create an approved-only baseline, export it, and check that compare ignores new drafts but shows a newly approved story as added.

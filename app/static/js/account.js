@@ -52,7 +52,9 @@ export async function renderAccount(content) {
     tokens ? h("button", { class: "btn btn-primary", onclick: newTokenDialog }, icon("plus"), "New token") : null);
   if (!tokens) {
     mount(content, head, h("div", { class: "card" }, empty({ iconName: "lock", title: "Sign in with a named account",
-      text: "API tokens belong to a named account. This deployment is not signed in, or you are using the bootstrap administrator." })));
+      text: "API tokens belong to a named account. This deployment is not signed in, or you are using the bootstrap administrator.",
+      action: state.me.role === "admin" && state.me.username !== "anonymous"
+        ? h("a", { class: "btn btn-primary", href: "#/admin/users" }, icon("plus"), "Create a named account") : null })));
     return;
   }
   mount(content, head, h("div", { class: "card" }, tokens.length
