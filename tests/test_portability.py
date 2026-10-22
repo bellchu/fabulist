@@ -149,3 +149,24 @@ def test_the_archive_is_streamed_in_document_order_not_built_in_memory(client):
     assert [d["filename"] for d in doc["documents"]] == ["brd-%02d.md" % i for i in range(45)]
     assert list(doc)[:5] == ["format", "version", "exported_at", "project", "documents"], list(doc)
     assert client.get("/api/projects/nope/archive.json").status_code == 404, "a missing project is a 404, not a broken stream"
+
+
+def test_an_archive_of_a_project_with_ai_runs_and_documents_in_its_trail_imports_back(client):
+    """The trail records documents and AI runs too: every kind of entry the app writes must be accepted when the archive comes back (an earlier
+    release wrote 'run' entries that the importer refused as an unknown type)."""
+    import time
+    pid = client.post("/api/projects", json={"name": "Round trip", "platform": "generic"}).json()["id"]
+    client.post("/api/projects/%s/documents/text" % pid, json={"name": "b.md", "text": "# A\nThe system shall export invoices to CSV on request.\n"})
+    client.post("/api/projects/%s/runs" % pid, json={"stage": "requirements"})
+    for _ in range(60):
+        if client.get("/api/projects/%s/runs?limit=1" % pid).json()[0]["status"] not in ("running", "queued"):
+            break
+        time.sleep(0.2)
+    time.sleep(0.2)
+    client.patch("/api/projects/%s" % pid, json={"description": "edited"})
+    client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall email order confirmations to buyers."})
+    archive = client.get("/api/projects/%s/archive.json" % pid).json()
+    kinds = {h["item_type"] for h in archive["history"]}
+    assert {"project", "document", "run", "requirement"} <= kinds, kinds
+    r = client.post("/api/projects/import", json=archive)
+    assert r.status_code == 201, r.text

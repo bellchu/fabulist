@@ -115,6 +115,7 @@ def create_project(body: ProjectIn, request: Request):
                   (pid, body.name.strip(), body.platform, body.description.strip(), db.now(), body.visibility))
         if body.visibility == "members" and who != "anonymous":  # whoever makes a private project is its first member
             c.execute("INSERT INTO project_members (project_id, username, added_by, created) VALUES (%s,%s,%s,%s)", (pid, who, who, db.now()))
+        history.record(c, pid, "project", pid, "", "created", who, "%s (%s%s)" % (body.name.strip(), body.platform, ", private" if body.visibility == "members" else ""))
     return _project(pid)
 
 
@@ -177,7 +178,7 @@ def create_sample_project(request: Request):
         n += 1
         name = "Sample: order to cash (%d)" % n
     project = create_project(ProjectIn(name=name, platform="generic", description="A small BRD to try the workflow with: extract requirements, review them, generate stories."), request)
-    _add_document(project["id"], "order-to-cash-brd.md", text)
+    _document_added(project["id"], _add_document(project["id"], "order-to-cash-brd.md", text), request)
     return project
 
 
@@ -235,13 +236,17 @@ def get_project(pid: str):
 
 
 @router.patch("/api/projects/{pid}")
-def update_project(pid: str, body: ProjectPatch):
+def update_project(pid: str, body: ProjectPatch, request: Request):
     p = _project(pid)
     if body.platform is not None and body.platform not in PLATFORMS:
         raise HTTPException(400, "Unknown platform")
-    db.execute("UPDATE projects SET name=%s, platform=%s, description=%s WHERE id=%s",
-               ((body.name or p["name"]).strip(), body.platform or p["platform"],
-                (p["description"] if body.description is None else body.description).strip(), pid))
+    new = {"name": (body.name or p["name"]).strip(), "platform": body.platform or p["platform"],
+           "description": (p["description"] if body.description is None else body.description).strip()}
+    with db.conn() as c:
+        c.execute("UPDATE projects SET name=%s, platform=%s, description=%s WHERE id=%s", (new["name"], new["platform"], new["description"], pid))
+        changes = history.diff({k: p[k] for k in new}, new)
+        if changes:
+            history.record(c, pid, "project", pid, "", "edited", history.actor(request), new["name"], changes)
     return _project(pid)
 
 
@@ -338,8 +343,14 @@ def _add_document(pid: str, filename: str, text: str) -> Dict[str, Any]:
     return {"id": did, "filename": filename, "chars": len(text), "indexed_chunks": indexed}
 
 
+def _document_added(pid: str, doc: Dict[str, Any], request: Request) -> Dict[str, Any]:
+    with db.conn() as c:
+        history.record(c, pid, "document", doc["id"], "", "added", history.actor(request), doc["filename"])
+    return doc
+
+
 @router.post("/api/projects/{pid}/documents", status_code=201)
-def upload_document(pid: str, file: UploadFile = File(...)):
+def upload_document(pid: str, request: Request, file: UploadFile = File(...)):
     # A plain `def`, not `async def`: parsing, embedding and the inserts are blocking work, and FastAPI runs a plain def in its thread
     # pool. As an async handler this held the whole event loop (health probes included) for the length of every upload.
     _project(pid)
@@ -352,14 +363,14 @@ def upload_document(pid: str, file: UploadFile = File(...)):
             text = parsing.extract_text(name, data)
         except parsing.ParseError as exc:
             raise HTTPException(400, str(exc))
-        return _add_document(pid, name, text)
+        return _document_added(pid, _add_document(pid, name, text), request)
 
 
 @router.post("/api/projects/{pid}/documents/text", status_code=201)
-def add_text_document(pid: str, body: TextDocIn):
+def add_text_document(pid: str, body: TextDocIn, request: Request):
     _project(pid)
     with _document_slot():
-        return _add_document(pid, body.name.strip(), parsing.clip(body.text))
+        return _document_added(pid, _add_document(pid, body.name.strip(), parsing.clip(body.text)), request)
 
 
 @router.get("/api/projects/{pid}/documents")
@@ -380,9 +391,12 @@ def get_document(pid: str, did: str):
 
 
 @router.delete("/api/projects/{pid}/documents/{did}", status_code=204)
-def delete_document(pid: str, did: str):
+def delete_document(pid: str, did: str, request: Request):
     _project(pid)
-    db.execute("DELETE FROM documents WHERE id = %s AND project_id = %s", (did, pid))
+    with db.conn() as c:
+        row = c.execute("DELETE FROM documents WHERE id = %s AND project_id = %s RETURNING filename", (did, pid)).fetchone()
+        if row:
+            history.record(c, pid, "document", did, "", "removed", history.actor(request), row["filename"])
 
 
 @router.post("/api/projects/{pid}/search")

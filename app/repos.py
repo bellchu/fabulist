@@ -228,7 +228,7 @@ def list_repos(pid: str):
 
 
 @router.post("", status_code=201)
-def add_repo(pid: str, body: Dict[str, Any] = Body(...)):
+def add_repo(pid: str, request: Request, body: Dict[str, Any] = Body(...)):
     if not db.one("SELECT 1 AS x FROM projects WHERE id=%s", (pid,)):
         raise HTTPException(404, "Project not found")
     url = str(body.get("url") or "").strip()
@@ -241,8 +241,10 @@ def add_repo(pid: str, body: Dict[str, Any] = Body(...)):
         raise HTTPException(400, str(exc))
     enc = settings.encrypt_secret(token) if token else None
     rid = db.new_id()
-    db.execute("INSERT INTO repositories (id, project_id, url, branch, path_glob, token_enc, key_hint, created) "
-               "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (rid, pid, url, branch, path_glob, enc, "…" + token[-4:] if token else "", db.now()))
+    with db.conn() as c:
+        c.execute("INSERT INTO repositories (id, project_id, url, branch, path_glob, token_enc, key_hint, created) "
+                  "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (rid, pid, url, branch, path_glob, enc, "…" + token[-4:] if token else "", db.now()))
+        history.record(c, pid, "repository", rid, "", "connected", history.actor(request), url)
     return _public(_repo(pid, rid))
 
 
@@ -255,8 +257,9 @@ def sync_repo(pid: str, rid: str, request: Request):
 
 
 @router.delete("/{rid}", status_code=204)
-def delete_repo(pid: str, rid: str):
-    _repo(pid, rid)
+def delete_repo(pid: str, rid: str, request: Request):
+    repo = _repo(pid, rid)
     with db.conn() as c:
         c.execute("DELETE FROM documents WHERE repo_id=%s", (rid,))
         c.execute("DELETE FROM repositories WHERE id=%s", (rid,))
+        history.record(c, pid, "repository", rid, "", "removed", history.actor(request), repo["url"])
