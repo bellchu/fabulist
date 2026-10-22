@@ -1,9 +1,11 @@
 # Fabulist
 
 Turn business requirements documents (BRDs) into a reviewed, traceable agile backlog.
-Built for enterprise application delivery (Salesforce, ERP, CRM) in medical product
+Built for enterprise application delivery (Salesforce, ERP, CRM), first for medical product
 distribution, where requirements vary by product class (cold chain, controlled,
-serialized, kits, devices...).
+serialized, kits, devices...). The business domain the AI is told about and the product
+classes are settings (Admin), so other industries can use it: set the domain, then replace
+the product taxonomy with your own classes (CSV import).
 
 ## Workflow
 
