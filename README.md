@@ -147,11 +147,17 @@ docker run --rm -v "$PWD:/src" -w /src python:3.12-slim sh -c "pip install -q pi
 
 ## Deploy to Kubernetes
 
-`deploy/k8s` contains the namespace, a pgvector Postgres StatefulSet and the app.
+`deploy/k8s` contains the namespace, a pgvector Postgres StatefulSet, the app and its network policy.
 
 ```bash
-FABULIST_HOST=fabulist.example.com DEPLOY_SSH=user@node scripts/deploy.sh
+FABULIST_HOST=fabulist.example.com scripts/deploy.sh
 ```
+
+Needs only `kubectl` access: the image is built **on the cluster** (Kaniko in a throwaway namespace, pushed to the
+node registry at `localhost:32000`, override with `REGISTRY`), so no Docker is needed on your machine.
+The app pod runs with a read-only root filesystem (writable `/tmp` only), no Linux capabilities and the default
+seccomp profile. `networkpolicy.yaml` lets only the ingress controller and Prometheus reach the app and only the
+namespace's own pods reach Postgres (Calico or another policy-enforcing CNI is required for it to take effect).
 
 A nightly CronJob (`deploy/k8s/backup.yaml`) writes `pg_dump` backups to a separate volume and
 keeps 7 days. To restore one:

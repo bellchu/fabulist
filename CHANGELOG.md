@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Docs: the deploy instructions describe the in-cluster build (no `DEPLOY_SSH`, no local Docker), the pod hardening and the network policy.
 - Network isolation (`deploy/k8s/networkpolicy.yaml`, applied by deploy.sh): only the ingress controller and Prometheus can reach the app, and only pods in the fabulist namespace can reach Postgres. Before, any pod in the cluster could connect to both. Verified: another namespace is blocked on both, while the public site, app -> database, Prometheus scraping and the backup job all keep working. Roll back with `kubectl -n fabulist delete networkpolicy --all`.
 - Pod hardening: the app container now runs with a read-only root filesystem (writable `/tmp` emptyDir only), all Linux capabilities dropped, the default seccomp profile and no service-account token; the pod gets a 60 s termination grace period so in-flight generation runs can stop cleanly. Verified that repository cloning works under these settings.
 - The Account page, shown to the bootstrap administrator (who has no named account and so cannot create API tokens), now links straight to Users & roles to create one.

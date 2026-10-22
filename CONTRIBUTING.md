@@ -19,7 +19,7 @@
 
 ## Releasing
 
-`scripts/deploy.sh` builds the image from the **working tree**, so it refuses to run unless you are on a clean, up-to-date `main` (merge first; `ALLOW_DIRTY_DEPLOY=1` is an emergency override that ships whatever is on disk). Never chain a deploy after a command that can fail with `;` (use `&&`). The image carries the commit's short SHA (reported by the authenticated `/api/meta` as `version`) and
+`scripts/deploy.sh` builds the image on the cluster from the files git tracks in your checkout, so it refuses to run unless you are on a clean, up-to-date `main` (merge first; `ALLOW_DIRTY_DEPLOY=1` is an emergency override that ships whatever is on disk). Never chain a deploy after a command that can fail with `;` (use `&&`). The image carries the commit's short SHA (reported by the authenticated `/api/meta` as `version`) and
 is rolled out. After deploying, check `/healthz`, `/api/meta` and that the UI loads. Rollback: redeploy the previous commit; migrations are additive
 (`ADD COLUMN IF NOT EXISTS`), so an older image keeps working against a newer schema.
 
