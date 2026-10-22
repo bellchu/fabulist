@@ -2,6 +2,8 @@
 # Scan a container image for known HIGH/CRITICAL vulnerabilities (OS packages and Python) on the cluster, not on the developer's machine.
 # Default: the image the app is running now. Usage: scripts/scan-image-k8s.sh [image]   (exit 1 when something fixable is found)
 set -euo pipefail
+cd "$(dirname "$0")/.."
+. scripts/lib-cluster.sh; require_cluster
 IMAGE="${1:-$(kubectl -n fabulist get deploy fabulist -o jsonpath='{.spec.template.spec.containers[0].image}')}"
 TRIVY_IMAGE="${TRIVY_IMAGE:-ghcr.io/aquasecurity/trivy:0.58.1}"
 NS="fabulist-scan-$(date +%s)-$$"

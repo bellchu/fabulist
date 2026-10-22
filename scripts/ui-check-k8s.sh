@@ -4,6 +4,7 @@
 # against it. The namespace is always deleted. Usage: scripts/ui-check-k8s.sh [tests/ui/one.py ...]
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. scripts/lib-cluster.sh; require_cluster
 # Docker Hub intermittently refuses to pull on the node (digest/size validation); the AWS public mirror serves the same official image.
 PYTHON_IMAGE="${PYTHON_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim}"
 scripts_to_run=("$@"); [ "${#scripts_to_run[@]}" -gt 0 ] || scripts_to_run=(tests/ui/*.py)

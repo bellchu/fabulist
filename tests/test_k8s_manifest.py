@@ -99,3 +99,21 @@ def test_every_environment_setting_is_documented_in_the_readme():
     readme = open(os.path.join(root, "README.md")).read()
     assert len(names) > 30, "the extractor found the settings"
     assert sorted(n for n in names if n not in readme) == [], "settings the README does not mention"
+
+
+def test_every_cluster_script_checks_the_cluster_first_and_says_what_is_wrong(tmp_path):
+    """The scripts that run on the cluster fail at once, with the reason, when it cannot be reached (a dropped SSH tunnel looked like a
+    websocket error halfway through a test run)."""
+    import glob
+    import subprocess
+    root = os.path.join(os.path.dirname(APP_PATH), "..", "..")
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    (stubs / "kubectl").write_text("#!/bin/bash\necho 'The connection to the server 127.0.0.1:16443 was refused' >&2\nexit 1\n")
+    (stubs / "kubectl").chmod(0o755)
+    scripts = sorted(glob.glob(os.path.join(root, "scripts", "*-k8s.sh")))
+    assert len(scripts) >= 5, scripts
+    for script in scripts:
+        r = subprocess.run(["bash", script] + (["x.py"] if script.endswith("run-py-k8s.sh") else []), capture_output=True, text=True, timeout=60,
+                           env={"PATH": "%s:/usr/bin:/bin" % stubs, "HOME": str(tmp_path)}, cwd=root)
+        assert r.returncode == 2 and "cannot reach the Kubernetes cluster" in r.stderr and "SSH tunnel" in r.stderr, (os.path.basename(script), r.returncode, r.stderr[-300:])

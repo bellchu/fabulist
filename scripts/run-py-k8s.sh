@@ -3,6 +3,7 @@
 # Usage: scripts/run-py-k8s.sh path/to/script.py [args...]    The app's requirements are installed; the repo is at /src (cwd).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. scripts/lib-cluster.sh; require_cluster
 [ "$#" -ge 1 ] || { echo "usage: $0 script.py [args...]" >&2; exit 2; }
 PYTHON_IMAGE="${PYTHON_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim}"
 script="$1"; shift
