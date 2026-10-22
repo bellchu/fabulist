@@ -164,6 +164,7 @@ scripts/load-test-k8s.sh            # load scenarios (tests/load): 20 requesters
 scripts/release-check-k8s.sh        # the whole battery on the cluster (gate, browser suite, load scenarios, image scan, restore drill) and one summary: is this build ready?
 scripts/live-smoke-k8s.sh               # read-only smoke test of the running site: every page, light and dark, no script errors, no serious accessibility problems (FABULIST_HOST=...)
 scripts/run-py-k8s.sh script.py        # run a Python script against the working tree on the cluster (profiling, one-off checks)
+scripts/ship-k8s.sh "title"          # check the committed branch on the cluster (gate + browser suite), then PR, merge and deploy; stops at the first failure (SKIP_DEPLOY=1 for docs/tests)
 scripts/sbom-k8s.sh                 # software bill of materials (CycloneDX JSON) of the app's Python packages; SBOM_SOURCE=image adds the image's operating-system packages (for procurement and security reviews)
 scripts/scan-image-k8s.sh           # Trivy scan of the deployed image for fixable HIGH/CRITICAL vulnerabilities (cluster)
 scripts/ci.sh                    # full local gate: lint, tests, JS check, dependency audit, image build (Docker only)
