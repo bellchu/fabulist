@@ -23,8 +23,8 @@ with sync_playwright() as p:
     pid = ctx.request.post(BASE + "/api/projects", data={"name": "CSV import", "platform": "generic"}, headers=H).json()["id"]
     page = ctx.new_page()
     page.goto(f"{BASE}/#/p/{pid}/requirements")
-    page.get_by_role("button", name="Import CSV").wait_for()
-    file = page.get_by_label("Requirements CSV file")
+    page.get_by_role("button", name="Import file").wait_for()
+    file = page.get_by_label("Requirements file (CSV or Excel)")
 
     file.set_input_files({"name": "reqs.csv", "mimeType": "text/csv", "buffer": GOOD})
     page.wait_for_selector("text=Imported 2 requirements")
@@ -35,6 +35,16 @@ with sync_playwright() as p:
     file.set_input_files({"name": "again.csv", "mimeType": "text/csv", "buffer": GOOD})
     page.wait_for_selector("text=2 already there, skipped")
     check(page.locator("tr.clickable").count() == 2, "importing the same file again adds nothing")
+
+    import io
+    from openpyxl import Workbook
+    wb = Workbook(); ws = wb.active; ws.title = "Requirements"
+    ws.append(["Requirement", "Type"]); ws.append(["Every export shall carry the date it was made.", "constraint"])
+    buf = io.BytesIO(); wb.save(buf)
+    file.set_input_files({"name": "reqs.xlsx", "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "buffer": buf.getvalue()})
+    page.wait_for_selector("text=Imported 1 requirement")
+    page.wait_for_function("document.querySelectorAll('tr.clickable').length === 3", timeout=10000)
+    check(True, "an Excel workbook imports too")
 
     file.set_input_files({"name": "bad.csv", "mimeType": "text/csv", "buffer": BAD})
     page.wait_for_selector("text=Nothing was imported")

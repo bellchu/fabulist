@@ -104,6 +104,29 @@ def _rows_to_text(title: str, rows: List[List[str]]) -> str:
     return "\n".join(out)
 
 
+def xlsx_rows(data: bytes, prefer_sheet: str = "") -> List[Dict[str, str]]:
+    """One sheet of a workbook as rows keyed by its first row (the sheet called `prefer_sheet`, else the first)."""
+    from openpyxl import load_workbook
+
+    try:
+        _check_zip(data)
+        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except ParseError:
+        raise
+    except Exception:  # noqa: BLE001 - openpyxl and zipfile raise many kinds for a file that is not a workbook
+        raise ParseError("The file could not be read as an Excel workbook.")
+    try:
+        sheet = next((ws for ws in wb.worksheets if ws.title.strip().lower() == prefer_sheet.lower()), wb.worksheets[0])
+        grid = [["" if v is None else str(v).strip() for v in row] for row in sheet.iter_rows(values_only=True, max_row=MAX_ROWS + 2)]
+    finally:
+        wb.close()
+    grid = [r for r in grid if any(r)]
+    if not grid:
+        return []
+    header = grid[0]
+    return [{h: (row[i] if i < len(row) else "") for i, h in enumerate(header) if h} for row in grid[1:]]
+
+
 def _xlsx(data: bytes) -> str:
     from openpyxl import load_workbook
 

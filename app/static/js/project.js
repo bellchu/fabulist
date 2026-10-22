@@ -566,17 +566,18 @@ const SORTS = {
   status: (a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status],
 };
 
-// Requirements that already exist in a spreadsheet: pick a CSV (a column called Requirement or Statement is needed).
+// Requirements that already exist in a spreadsheet: pick a .csv or .xlsx (a column called Requirement or Statement is needed).
 function importRequirementsButton() {
-  const file = h("input", { type: "file", accept: ".csv,text/csv", class: "hidden", "aria-label": "Requirements CSV file" });
+  const file = h("input", { type: "file", accept: ".csv,.xlsx", class: "hidden", "aria-label": "Requirements file (CSV or Excel)" });
   file.addEventListener("change", guard(async () => {
     const chosen = file.files[0];
     if (!chosen) return;
-    const r = await api.post(base() + "/requirements/import", { csv: await chosen.text() });
+    const fd = new FormData(); fd.append("file", chosen);
+    const r = await api.upload(base() + "/requirements/import-file", fd);
     toast("Imported " + r.created + " requirement" + (r.created === 1 ? "" : "s") + (r.duplicates_skipped ? " (" + r.duplicates_skipped + " already there, skipped)" : ""), "ok");
     rerender();
   }));
-  return h("span", {}, file, h("button", { class: "btn", title: "Add requirements from a CSV file: a column called Requirement or Statement is needed; Type, Epic, Section, Source ID, Actors and Status are used when present", onclick: () => { file.value = ""; file.click(); } }, icon("upload"), "Import CSV"));
+  return h("span", {}, file, h("button", { class: "btn", title: "Add requirements from a CSV or Excel file: a column called Requirement or Statement is needed; Type, Epic, Section, Source ID, Actors and Status are used when present", onclick: () => { file.value = ""; file.click(); } }, icon("upload"), "Import file"));
 }
 
 async function viewRequirements(body) {
