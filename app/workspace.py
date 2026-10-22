@@ -770,7 +770,7 @@ def cancel_run(pid: str, rid: str):
 @router.get("/api/projects/{pid}/runs")
 def list_runs(pid: str, limit: int = 20):
     _project(pid)
-    return db.rows("SELECT * FROM runs WHERE project_id=%s ORDER BY created DESC, id LIMIT %s", (pid, min(limit, 100)))
+    return db.rows("SELECT * FROM runs WHERE project_id=%s ORDER BY created DESC, id LIMIT %s", (pid, max(1, min(limit, 100))))
 
 
 # ---- requirements --------------------------------------------------------
