@@ -31,6 +31,9 @@ MAX_CONCURRENT_PARSES = _int("MAX_CONCURRENT_PARSES", 2)  # documents parsed at 
 PARSE_WAIT_SECONDS = float(os.environ.get("PARSE_WAIT_SECONDS", "60"))  # how long an upload waits for a parsing slot before being told to retry (503)
 MAX_UNZIPPED_MB = _int("MAX_UNZIPPED_MB", 200)  # DOCX/XLSX are ZIPs: cap what they may expand to (decompression bombs)
 MAX_PDF_PAGES = _int("MAX_PDF_PAGES", 500)
+# Optional: a secret the proxy adds to every request as `X-Origin-Secret` (for Cloudflare: a transform rule that sets the header). When set, the app
+# answers 403 to anything without it, so a client that reaches the origin directly cannot forge CF-Connecting-IP and dodge the per-address limits.
+ORIGIN_SECRET = os.environ.get("ORIGIN_SECRET", "")
 TRUSTED_PROXY_HOPS = _int("TRUSTED_PROXY_HOPS", 1)  # proxies in front that append to X-Forwarded-For; the client address is that far from the right
 TRUST_CF_CONNECTING_IP = _bool("TRUST_CF_CONNECTING_IP", True)  # behind Cloudflare, its CF-Connecting-IP header is the client; set 0 if the origin is reachable without it
 RATE_LIMIT_PER_MINUTE = _int("RATE_LIMIT_PER_MINUTE", 600)  # API requests per person per minute (burst = the same); 0 = no limit
