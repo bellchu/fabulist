@@ -422,11 +422,11 @@ def story_batches(reqs: List[Dict[str, Any]]) -> List[Tuple[str, str, List[Dict[
 
 
 def generate_stories(reqs: List[Dict[str, Any]], project_id: str, platform: str, profile: Dict[str, Any],
-                     opts: Dict[str, Any], progress: Progress, usage: Usage) -> List[Dict[str, Any]]:
+                     opts: Dict[str, Any], progress: Progress, usage: Usage, taken: Optional[set] = None) -> List[Dict[str, Any]]:
     if profile["kind"] == "mock":
         progress("Drafting stories for %d requirements" % len(reqs))
         raw = mock_stories(reqs)
-        return _finalize(raw, reqs)
+        return _finalize(raw, reqs, taken)
     batches = story_batches(reqs)
     if len(batches) > int(opts["max_chunks_per_run"]):
         raise ValueError("Too many requirement groups (%d) for one run (limit %d). Raise 'Max sections per run' in Admin > Generation "
@@ -451,17 +451,21 @@ def generate_stories(reqs: List[Dict[str, Any]], project_id: str, platform: str,
                 s.setdefault("epic", epic)
                 s.setdefault("feature", section)
                 raw.append(s)
-    return _finalize(raw, reqs)
+    return _finalize(raw, reqs, taken)
 
 
-def _finalize(raw: List[Dict[str, Any]], reqs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _finalize(raw: List[Dict[str, Any]], reqs: List[Dict[str, Any]], taken: Optional[set] = None) -> List[Dict[str, Any]]:
     """Normalise the stories from every batch. Titles are not unique across a large run (an AI writes 'Manage users' in many
     feature areas), and dropping the later story also dropped its requirement links, silently uncovering those requirements:
     - same title in the same feature area: one story twice; merge it (links and any new criteria are kept);
-    - same title in another feature area: a different story; keep it, with the feature in the title to tell them apart."""
+    - same title in another feature area: a different story; keep it, with the feature in the title to tell them apart.
+    `taken` holds (title, feature) of stories that already exist when stories are being added to a backlog: a new story never takes the title
+    of one of those (it gets the feature, and a number if that is taken too), and an existing story is never merged into or changed."""
     valid = {r["key"] for r in reqs}
     out: List[Dict[str, Any]] = []
     by_title: Dict[str, List[Dict[str, Any]]] = {}
+    existing_titles = {t for t, _ in (taken or set())}
+    used = set(existing_titles)
     for r in raw:
         s = normalize_story(r)
         if not s:
@@ -474,8 +478,13 @@ def _finalize(raw: List[Dict[str, Any]], reqs: List[Dict[str, Any]]) -> List[Dic
             twin["acceptance_criteria"] += [a for a in s["acceptance_criteria"] if a not in twin["acceptance_criteria"]][:max(0, 12 - len(twin["acceptance_criteria"]))]
             continue
         _enrich(s, s["title"] + " " + s["narrative"])
-        if by_title.get(key):
+        if by_title.get(key) or key in existing_titles:
             s["title"] = ("%s (%s)" % (s["title"], s.get("feature") or "other"))[:200]
+            n = 2
+            while _norm_key(s["title"]) in used:  # still taken: number it
+                s["title"] = ("%s (%s) %d" % (s["title"].split(" (")[0], s.get("feature") or "other", n))[:200]
+                n += 1
+        used.add(_norm_key(s["title"]))
         by_title.setdefault(key, []).append(s)
         out.append(s)
     return out
