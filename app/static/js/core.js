@@ -82,12 +82,15 @@ async function request(method, path, body, isForm) {
   }
   if (!r.ok) {
     if (r.status === 401 && onUnauthorized) onUnauthorized();
-    let msg = r.status + " " + r.statusText;
-    try {
-      const j = await r.json();
-      if (typeof j.detail === "string") msg = j.detail;
-      else if (Array.isArray(j.detail)) msg = j.detail.map((d) => (d.loc ? d.loc.slice(1).join(".") + ": " : "") + d.msg).join("; ");
-    } catch (_) { /* non-JSON error body */ }
+    // A 401 in the browser means the sign-in lapsed: say what to do rather than the bare "Not authenticated".
+    let msg = r.status === 401 ? "Your sign-in has expired. Reload the page to sign in again." : r.status + " " + r.statusText;
+    if (r.status !== 401) {
+      try {
+        const j = await r.json();
+        if (typeof j.detail === "string") msg = j.detail;
+        else if (Array.isArray(j.detail)) msg = j.detail.map((d) => (d.loc ? d.loc.slice(1).join(".") + ": " : "") + d.msg).join("; ");
+      } catch (_) { /* non-JSON error body */ }
+    }
     throw new Error(msg);
   }
   if (r.status === 204) return null;

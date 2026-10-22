@@ -62,5 +62,14 @@ with sync_playwright() as p:
     page.get_by_role("button", name="Retry").click()
     page.wait_for_selector("tr.clickable")
     check(True, "Retry recovers after the database is back")
+
+    # the sign-in lapses (a 401 with basic auth): say what to do
+    page.route("**/api/projects/*/requirements", lambda r: r.fulfill(status=401, content_type="application/json", body='{"detail":"Not authenticated"}'))
+    page.goto(f"{BASE}/#/p/{pid}/stories")
+    page.wait_for_selector(".story-card, tr.clickable")
+    page.goto(f"{BASE}/#/p/{pid}/requirements")
+    page.wait_for_selector(".callout.error")
+    check("sign-in has expired" in page.locator(".callout.error").first.inner_text(), "401: the message says the sign-in expired and to reload")
+    page.unroute("**/api/projects/*/requirements")
     browser.close()
 sys.exit(1 if failures else 0)
