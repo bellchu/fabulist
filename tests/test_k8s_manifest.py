@@ -89,3 +89,13 @@ def test_the_wait_for_runs_can_be_skipped_and_does_nothing_when_idle(tmp_path):
     assert skipped.returncode == 0 and skipped.stdout == "" and skipped.stderr == "", "DEPLOY_WAIT_FOR_RUNS=0 does not even look"
     idle = _wait_for_runs(tmp_path, [0], 15, name="idle")
     assert idle.returncode == 0 and idle.stdout == "" and idle.stderr == "", "nothing running: no message, no wait"
+
+
+def test_every_environment_setting_is_documented_in_the_readme():
+    import re
+    root = os.path.join(os.path.dirname(APP_PATH), "..", "..")
+    sources = "".join(open(os.path.join(root, "app", f)).read() for f in ("config.py", "db.py", "sso.py", "llm.py"))
+    names = set(re.findall(r'(?:environ\.get|_int|_bool|getenv)\(\s*"([A-Z][A-Z0-9_]+)"', sources))
+    readme = open(os.path.join(root, "README.md")).read()
+    assert len(names) > 30, "the extractor found the settings"
+    assert sorted(n for n in names if n not in readme) == [], "settings the README does not mention"
