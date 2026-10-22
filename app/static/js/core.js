@@ -130,7 +130,7 @@ export function guard(fn) {
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-function layer(panel, onClose) {
+function layer(panel, onClose, canDismiss) {
   const opener = document.activeElement;
   const overlay = h("div", { class: "overlay" });
   const close = () => {
@@ -138,9 +138,11 @@ function layer(panel, onClose) {
     if (opener && opener.isConnected && opener.focus) opener.focus();  // return focus where the user was
     onClose && onClose();
   };
+  // A click outside or Escape may need to ask first (a form with typing in it); the dialog's own buttons always close at once.
+  const dismiss = async () => { if (!canDismiss || (await canDismiss())) close(); };
   const keys = (e) => {
     if (!panel.isConnected || panel !== [...document.querySelectorAll(".modal, .drawer")].pop()) return;  // topmost layer only
-    if (e.key === "Escape") { e.stopPropagation(); close(); return; }
+    if (e.key === "Escape") { e.stopPropagation(); dismiss(); return; }
     if (e.key !== "Tab") return;
     const items = [...panel.querySelectorAll(FOCUSABLE)].filter((el) => el.offsetParent !== null);
     if (!items.length) return;
@@ -148,7 +150,7 @@ function layer(panel, onClose) {
     if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   };
-  overlay.addEventListener("click", close);
+  overlay.addEventListener("click", dismiss);
   document.addEventListener("keydown", keys);
   document.body.append(overlay, panel);
   return close;
@@ -162,7 +164,9 @@ export function modal({ title, body, actions = [], wide = false, description }) 
   const panel = h("div", { class: "modal" + (wide ? " wide" : ""), role: "dialog", "aria-modal": "true", "aria-labelledby": titleId },
     h("div", { class: "modal-head" }, h("h2", { id: titleId }, title), description ? h("p", { class: "muted small", style: { marginTop: "4px" } }, description) : null),
     h("div", { class: "modal-body" }, body), foot);
-  const close = layer(panel);
+  let typed = false;  // only forms (dialogs with actions) can hold work worth protecting
+  const close = layer(panel, null, () => !typed || confirmBox("What you typed in this dialog will be lost.", { okLabel: "Discard", title: "Close without saving?" }));
+  if (actions.length) panel.addEventListener("input", () => { typed = true; }), panel.addEventListener("change", () => { typed = true; });
   for (const a of actions) {
     foot.append(h("button", { class: "btn " + (a.kind || ""), onclick: guard(async () => { if ((await a.onClick()) !== false) close(); }) }, a.label));
   }
