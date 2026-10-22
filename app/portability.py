@@ -17,7 +17,7 @@ log = logging.getLogger("fabulist.portability")
 router = APIRouter()
 FORMAT, VERSION = "fabulist-project", 1
 MAX_ITEMS = 20_000  # per collection (history may hold 10x)
-HISTORY_TYPES = {"requirement", "story", "project", "repository", "push", "baseline"}
+HISTORY_TYPES = {"requirement", "story", "project", "repository", "push", "baseline", "document", "run"}
 REQ_STATUSES, STORY_STATUSES = {"draft", "approved", "excluded"}, {"draft", "approved", "rejected"}
 
 

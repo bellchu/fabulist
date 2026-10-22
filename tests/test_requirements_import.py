@@ -70,7 +70,7 @@ def test_it_is_audited_and_cannot_touch_an_archived_project(client):
     pid = _project(client)
     _import(client, pid, CSV)
     trail = client.get("/api/projects/%s/history" % pid).json()
-    assert sum(1 for e in trail if e["action"] == "created") == 3 and any(e["action"] == "imported" for e in trail)
+    assert sum(1 for e in trail if e["action"] == "created" and e["item_type"] == "requirement") == 3 and any(e["action"] == "imported" for e in trail)
     client.post("/api/projects/%s/archive" % pid, json={})
     assert _import(client, pid, "Requirement\nThe system shall be impossible to add to now.\n").status_code == 409
 

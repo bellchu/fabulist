@@ -407,9 +407,9 @@ def test_audit_trail_csv_export_is_complete_oldest_first_and_formula_safe(client
     assert resp.status_code == 200 and resp.headers["content-type"].startswith("text/csv")
     assert 'filename="audit-export-audit-trail.csv"' in resp.headers["content-disposition"]
     rows = list(csv.DictReader(io.StringIO(resp.text)))
-    assert [x["Action"] for x in rows] == ["created", "edited"]
-    assert rows[1]["Item"] == "REQ-001" and rows[1]["Actor"] == "anonymous"
-    assert "statement" in rows[1]["Changes"]
+    assert [x["Action"] for x in rows] == ["created", "created", "edited"]  # the project, then the requirement, then its edit
+    assert rows[0]["Type"] == "project" and rows[2]["Item"] == "REQ-001" and rows[2]["Actor"] == "anonymous"
+    assert "statement" in rows[2]["Changes"]
     assert not any(c.startswith("=") for x in rows for c in x.values())
     assert client.get("/api/projects/nope/history.csv").status_code == 404
 
@@ -438,7 +438,7 @@ def test_history_filters_and_cursor_paging(client):
     assert len(page1) == 2 and page1[0]["n"] > page1[1]["n"]
     page2 = client.get(base, params={"limit": 2, "before": page1[-1]["n"]}).json()
     assert len(page2) == 2 and page2[0]["n"] < page1[-1]["n"]
-    assert client.get(base, params={"action": "created"}).json().__len__() == 5
+    assert client.get(base, params={"action": "created"}).json().__len__() == 6  # five requirements and the project
     assert client.get(base, params={"action": "deleted"}).json() == []
     assert client.get(base, params={"actor": "nobody"}).json() == []
     f = client.get(base + "/filters").json()
