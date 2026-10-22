@@ -566,13 +566,26 @@ const SORTS = {
   status: (a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status],
 };
 
+// Requirements that already exist in a spreadsheet: pick a CSV (a column called Requirement or Statement is needed).
+function importRequirementsButton() {
+  const file = h("input", { type: "file", accept: ".csv,text/csv", class: "hidden", "aria-label": "Requirements CSV file" });
+  file.addEventListener("change", guard(async () => {
+    const chosen = file.files[0];
+    if (!chosen) return;
+    const r = await api.post(base() + "/requirements/import", { csv: await chosen.text() });
+    toast("Imported " + r.created + " requirement" + (r.created === 1 ? "" : "s") + (r.duplicates_skipped ? " (" + r.duplicates_skipped + " already there, skipped)" : ""), "ok");
+    rerender();
+  }));
+  return h("span", {}, file, h("button", { class: "btn", title: "Add requirements from a CSV file: a column called Requirement or Statement is needed; Type, Epic, Section, Source ID, Actors and Status are used when present", onclick: () => { file.value = ""; file.click(); } }, icon("upload"), "Import CSV"));
+}
+
 async function viewRequirements(body) {
   const [reqs, talk] = await Promise.all([api.get(base() + "/requirements"), api.get(base() + "/comments")]);
   mount(body, runPanel("requirements"));
   if (!reqs.length) {
     mount(body, h("div", { class: "card" }, empty({ iconName: "list", title: "No requirements yet",
       text: ctx.project.documents ? "Extract requirements from your BRDs, or add them manually." : "Add BRDs on the Sources tab first.",
-      action: writer(h("button", { class: "btn", onclick: () => reqDrawer(null) }, icon("plus"), "Add manually")) })));
+      action: writer(h("span", { class: "row" }, importRequirementsButton(), h("button", { class: "btn", onclick: () => reqDrawer(null) }, icon("plus"), "Add manually"))) })));
     return;
   }
   const selected = new Set();
@@ -648,6 +661,7 @@ async function viewRequirements(body) {
 
   count.textContent = reqs.filter((r) => r.status === "approved").length + " of " + reqs.length + " approved";
   mount(body, h("div", { class: "toolbar" }, q, type, status, h("label", { class: "switch small" }, flagged, "Flagged only"), count,
+    writer(importRequirementsButton()),
     writer(h("button", { class: "btn", onclick: () => reqDrawer(null) }, icon("plus"), "Add requirement"))), bulk, tableBox);
   renderTable();
 }
