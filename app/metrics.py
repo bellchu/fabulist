@@ -14,6 +14,7 @@ HELP = {
     "fabulist_llm_tokens_total": ("counter", "LLM tokens consumed, by direction."),
     "fabulist_tracker_items_total": ("counter", "Items pushed to issue trackers, by result."),
     "fabulist_http_request_duration_seconds": ("histogram", "HTTP request latency by route."),
+    "fabulist_rate_limited_total": ("counter", "API requests refused because one person or address went over RATE_LIMIT_PER_MINUTE."),
     "fabulist_auth_failures_total": ("counter", "Failed authentication attempts by kind (basic, token, throttled)."),
     "fabulist_edit_conflicts_total": ("counter", "Saves refused because the item changed since it was opened."),
     "fabulist_ai_busy_total": ("counter", "Interactive AI requests refused because too many were already in flight."),

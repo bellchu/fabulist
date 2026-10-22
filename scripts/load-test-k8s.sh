@@ -27,7 +27,7 @@ spec:
     workingDir: /src
     command: [sh, -c, 'while [ ! -f /src/.ready ]; do sleep 1; done; pip install -q --root-user-action=ignore -r requirements.txt && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log']
     volumeMounts: [{name: src, mountPath: /src}]
-    env: [{name: DATABASE_URL, value: "postgresql://f:f@127.0.0.1:5432/f"}, {name: SETTINGS_ENCRYPTION_KEY, value: load-test}, {name: PYTHONDONTWRITEBYTECODE, value: "1"}, {name: METRICS_TOKEN, value: load-metrics}, {name: MALLOC_ARENA_MAX, value: "${MALLOC_ARENA_MAX:-2}"}]
+    env: [{name: DATABASE_URL, value: "postgresql://f:f@127.0.0.1:5432/f"}, {name: SETTINGS_ENCRYPTION_KEY, value: load-test}, {name: PYTHONDONTWRITEBYTECODE, value: "1"}, {name: METRICS_TOKEN, value: load-metrics}, {name: RATE_LIMIT_PER_MINUTE, value: "0"}, {name: MALLOC_ARENA_MAX, value: "${MALLOC_ARENA_MAX:-2}"}]
     resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}   # as in deploy/k8s/app.yaml
     startupProbe: {httpGet: {path: /healthz, port: 8000}, periodSeconds: 5, failureThreshold: 90}
     readinessProbe: {httpGet: {path: /healthz, port: 8000}, periodSeconds: 10}

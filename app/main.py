@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.gzip import GZipMiddleware
 
-from . import admin, config, db, exporters, integrations, llm, metrics, pipeline, portability, repos, settings, sso, taxonomy, users, workspace
+from . import admin, config, db, exporters, integrations, llm, metrics, pipeline, portability, ratelimit, repos, settings, sso, taxonomy, users, workspace
 from .profiles import PLATFORMS
 
 log = logging.getLogger("fabulist")
@@ -223,6 +223,13 @@ async def auth_and_guards(request: Request, call_next):
         request.state.user, request.state.role, request.state.via_token = (who[0] if token else creds[0]), role, bool(token)
         if path.startswith("/api/") and not users.allowed(role, request.method, path):
             return JSONResponse({"detail": "Your role (%s) does not allow this action" % role}, status_code=403)
+    if path.startswith("/api/") and path not in PROBES:
+        who = getattr(request.state, "user", "anonymous")
+        wait = ratelimit.take(who if who != "anonymous" else "ip:" + (request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+                                                                    or (request.client.host if request.client else "")))
+        if wait:
+            metrics.inc("fabulist_rate_limited_total")
+            return JSONResponse({"detail": "Too many requests: slow down and try again shortly"}, status_code=429, headers={"Retry-After": str(max(1, int(wait + 0.999)))})
     if (request.method in ("POST", "PUT", "PATCH", "DELETE") and path.startswith("/api/")
             and not getattr(request.state, "via_token", False)  # a bearer token is never sent by a browser on its own
             and request.headers.get("x-requested-with") != CSRF_HEADER):

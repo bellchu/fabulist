@@ -23,6 +23,7 @@ MAX_CONCURRENT_PARSES = _int("MAX_CONCURRENT_PARSES", 2)  # documents parsed at 
 PARSE_WAIT_SECONDS = float(os.environ.get("PARSE_WAIT_SECONDS", "60"))  # how long an upload waits for a parsing slot before being told to retry (503)
 MAX_UNZIPPED_MB = _int("MAX_UNZIPPED_MB", 200)  # DOCX/XLSX are ZIPs: cap what they may expand to (decompression bombs)
 MAX_PDF_PAGES = _int("MAX_PDF_PAGES", 500)
+RATE_LIMIT_PER_MINUTE = _int("RATE_LIMIT_PER_MINUTE", 600)  # API requests per person per minute (burst = the same); 0 = no limit
 MAX_INTERACTIVE_PER_USER = _int("MAX_INTERACTIVE_PER_USER", 3)  # of those, how many one person may have running at once
 MAX_INTERACTIVE_AI_CALLS = _int("MAX_INTERACTIVE_AI_CALLS", 8)  # AI calls made inside a request (refine, estimate, Ask) in flight at once
 LLM_MAX_ATTEMPTS = _int("LLM_MAX_ATTEMPTS", 6)  # tries per AI request on rate limits, server errors and network failures (waits grow, up to a minute)
