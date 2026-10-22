@@ -1,5 +1,5 @@
 // App shell, routing and the projects home view.
-import { h, mount, icon, api, guard, toast, modal, field, requireValue, select, empty, badge, timeAgo, meter, setUnauthorizedHandler, markScrollRegions, accessPicker } from "./core.js";
+import { h, mount, icon, api, guard, toast, modal, field, requireValue, select, empty, badge, timeAgo, meter, setUnauthorizedHandler, markScrollRegions, accessPicker, guardLeaving, hasPendingEdits, confirmBox } from "./core.js";
 import { renderProject } from "./project.js";
 import { renderAdmin } from "./admin.js";
 import { renderAccount } from "./account.js";
@@ -84,6 +84,7 @@ function focusKey() {
 let rendering = 0;
 async function route() {
   const ticket = ++rendering;
+  guardLeaving(null);  // each page registers its own
   const hash = location.hash, refocus = focusKey();
   const parts = location.hash.replace(/^#\/?/, "").split("/");
   // Delayed so fast navigations don't flash; slow ones show the old page is being replaced.
@@ -229,5 +230,21 @@ const scheduleScrollCheck = () => { cancelAnimationFrame(scrollCheck); scrollChe
 new MutationObserver(scheduleScrollCheck).observe(document.body, { childList: true, subtree: true });
 window.addEventListener("resize", scheduleScrollCheck);
 
-window.addEventListener("hashchange", route);
+// Leaving a page with unsaved edits: put the address back, ask, and only then go on to where the person was heading.
+let shown = location.hash, reverting = false;
+window.addEventListener("hashchange", async () => {
+  if (reverting) { reverting = false; return; }
+  const target = location.hash;
+  if (target !== shown && hasPendingEdits()) {
+    reverting = true;
+    location.hash = shown;
+    if (await confirmBox("What you changed on this page has not been saved.", { okLabel: "Discard", title: "Leave without saving?" })) {
+      guardLeaving(null);
+      location.hash = target;
+    }
+    return;
+  }
+  shown = target;
+  route();
+});
 route();

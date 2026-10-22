@@ -68,7 +68,7 @@ with sync_playwright() as p:
     ben.wait_for_selector("text=Confidential programme")
     check(ben.locator(".project-card", has_text="Confidential programme").get_by_text("Private").count() == 1, "ben: once added, the project is listed, marked Private")
     ben.locator(".project-card", has_text="Confidential programme").click()
-    ben.wait_for_selector(".page-head")
+    ben.locator(".page-head h1", has_text="Confidential programme").wait_for()  # not just any .page-head: the list page has one too
     check(ben.locator(".page-head h1").inner_text() == "Confidential programme", "ben: and he can open it")
 
     priya.get_by_role("button", name="Edit", exact=True).click()

@@ -1,5 +1,5 @@
 // Admin dashboard: usage overview, AI provider profiles, generation settings, activity log.
-import { h, mount, icon, api, guard, toast, modal, confirmBox, download, badge, statusTone, meter, fmt, duration, timeAgo, field, select, segmented, empty } from "./core.js";
+import { h, mount, icon, api, guard, toast, modal, confirmBox, download, guardLeaving, badge, statusTone, meter, fmt, duration, timeAgo, field, select, segmented, empty } from "./core.js";
 import { state, setCrumbs } from "./main.js";
 import { when } from "./account.js";
 
@@ -179,7 +179,8 @@ async function viewSettings(content) {
     chunk_chars: num("chunk_chars", "500"), max_chunks_per_run: num("max_chunks_per_run"), ai_concurrency: num("ai_concurrency"), rag_top_k: num("rag_top_k"),
     embed_model: h("input", { type: "text", value: v.embed_model, placeholder: "e.g. text-embedding-3-small" }),
   };
-  let redact = v.redact_pii;
+  let redact = v.redact_pii, edited = false;
+  guardLeaving(() => edited);
   const embedProvider = select([["", "Offline hashing (no external calls)"], ...prov.providers.filter((p) => p.kind === "openai").map((p) => [p.id, p.name + " · " + p.base_url])], v.embed_provider_id);
   const embedList = h("datalist", { id: "embed-models" });
   inputs.embed_model.setAttribute("list", "embed-models");
@@ -198,11 +199,14 @@ async function viewSettings(content) {
     const body = { redact_pii: redact, embed_provider_id: embedProvider.value };
     for (const [k, el] of Object.entries(inputs)) body[k] = el.value;
     const r = await api.put("/api/admin/settings", body);
+    edited = false;
     toast("Settings saved", "ok");
     if (r.reindex_recommended && (await confirmBox("The embeddings configuration changed. Rebuild the search index for all documents now?", { okLabel: "Rebuild index" }))) {
       await api.post("/api/admin/reindex"); toast("Re-indexing started");
     }
   });
+  content.addEventListener("input", () => { edited = true; });
+  content.addEventListener("change", () => { edited = true; });
   mount(content, 
     head("Generation settings", "Parameters applied to every extraction and story-generation run.", h("button", { class: "btn btn-primary", onclick: save }, "Save settings")),
     card("Model parameters", "Sent with each AI request.",
@@ -226,7 +230,7 @@ async function viewSettings(content) {
         await api.post("/api/admin/reindex"); toast("Re-indexing started");
       }) }, icon("refresh"), "Rebuild search index"))),
     card("Privacy", "Applies to text sent to external AI providers.",
-      field("Mask personal identifiers", segmented([[true, "On"], [false, "Off"]], redact, (x) => (redact = x)),
+      field("Mask personal identifiers", segmented([[true, "On"], [false, "Off"]], redact, (x) => { redact = x; edited = true; }),
         "Emails, phone numbers, SSNs and long account/card numbers are replaced with placeholders before leaving the cluster.")));
 }
 

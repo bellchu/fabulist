@@ -158,6 +158,12 @@ function layer(panel, onClose, canDismiss) {
 
 let layerSeq = 0;
 
+// A page with edits that are not saved yet registers a function that says so; leaving it (another route, reload, closing the tab) then asks first.
+let pendingEdits = null;
+export const guardLeaving = (isDirty) => { pendingEdits = isDirty; };
+export const hasPendingEdits = () => !!(pendingEdits && pendingEdits());
+window.addEventListener("beforeunload", (e) => { if (hasPendingEdits()) e.preventDefault(); });
+
 export function modal({ title, body, actions = [], wide = false, description }) {
   const foot = h("div", { class: "modal-foot" });
   const titleId = "dlg-" + ++layerSeq;
