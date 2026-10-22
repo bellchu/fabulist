@@ -100,23 +100,38 @@ def _tokens(text: str) -> set:
     return {t for t in re.findall(r"[a-z0-9]+", text.lower()) if t not in _STOP and len(t) > 1}
 
 
-def duplicate_pairs(reqs: List[Dict[str, Any]], threshold: float = 0.85) -> Dict[str, List[str]]:
-    """Map requirement key -> keys of near-duplicates (token Jaccard >= threshold), exactly.
+MAX_PARTNERS = 8  # near-duplicates listed per requirement: a set of N alike statements must not store N*N pairs
+MAX_COMPARISONS = 600_000  # candidate comparisons per call, well under a second of work on the worst input; see duplicate_pairs
+
+
+def duplicate_pairs(reqs: List[Dict[str, Any]], threshold: float = 0.85, max_comparisons: int = MAX_COMPARISONS) -> Dict[str, List[str]]:
+    """Map requirement key -> keys of near-duplicates (token Jaccard >= threshold), exactly for ordinary sets.
 
     Prefix filtering (AllPairs): with tokens ordered rare-first, two sets whose Jaccard is at least t must share a token
     among the first n - ceil(t*n) + 1 of each, so only requirements sharing one of those few rare tokens are compared, and
     a length filter drops partners that are too short. The old shortcut (ignore tokens used by more than 10% of the
-    requirements) was fast but, on a repetitive BRD vocabulary, left nothing to compare and found no duplicates at all."""
-    items = [(r["key"], _tokens(r.get("statement", ""))) for r in reqs]
-    items = [(k, t) for k, t in items if len(t) >= 3]
+    requirements) was fast but, on a repetitive BRD vocabulary, left nothing to compare and found no duplicates at all.
+
+    Three limits keep a pathological set (thousands of statements generated from one template) from taking minutes or gigabytes:
+    statements with identical wording are compared once, as a group; at most MAX_PARTNERS keys are listed per requirement; and after
+    `max_comparisons` candidate comparisons the search stops. Whatever was found by then is still correct; only completeness suffers."""
+    groups: Dict[frozenset, List[str]] = {}
+    for r in reqs:
+        tokens = frozenset(_tokens(r.get("statement", "")))
+        if len(tokens) >= 3:
+            groups.setdefault(tokens, []).append(r["key"])
+    items = list(groups.items())
     freq: Dict[str, int] = {}
-    for _, ts in items:
+    for ts, _ in items:
         for tok in ts:
             freq[tok] = freq.get(tok, 0) + 1
-    items.sort(key=lambda kt: len(kt[1]))  # shorter first: every partner already indexed is no longer than the current one
+    items.sort(key=lambda kv: len(kv[0]))  # shorter first: every partner already indexed is no longer than the current one
     index: Dict[str, List[int]] = {}
-    out: Dict[str, List[str]] = {}
-    for i, (key, ts) in enumerate(items):
+    partners: Dict[int, List[int]] = {}
+    budget = max_comparisons
+    for i, (ts, _keys) in enumerate(items):
+        if budget <= 0:
+            break
         ordered = sorted(ts, key=lambda tok: (freq[tok], tok))
         need = math.ceil(threshold * len(ordered))  # a partner shorter than this cannot reach the threshold
         prefix = ordered[: len(ordered) - need + 1]
@@ -126,10 +141,26 @@ def duplicate_pairs(reqs: List[Dict[str, Any]], threshold: float = 0.85) -> Dict
                 if j in seen:
                     continue
                 seen.add(j)
-                other_key, other = items[j]
+                budget -= 1
+                other = items[j][0]
                 if len(other) >= need and len(ts & other) / len(ts | other) >= threshold:
-                    out.setdefault(key, []).append(other_key)
-                    out.setdefault(other_key, []).append(key)
+                    if len(partners.setdefault(i, [])) < MAX_PARTNERS:
+                        partners[i].append(j)
+                    if len(partners.setdefault(j, [])) < MAX_PARTNERS:
+                        partners[j].append(i)
+            if budget <= 0:
+                break
         for tok in prefix:
             index.setdefault(tok, []).append(i)
-    return {k: sorted(v) for k, v in out.items()}
+    out: Dict[str, List[str]] = {}
+    smallest = {gi: sorted(keys)[:MAX_PARTNERS + 1] for gi, (_ts, keys) in enumerate(items)}  # all that can ever be listed from a group
+    for gi, (_ts, keys) in enumerate(items):
+        linked = partners.get(gi, [])
+        if len(keys) < 2 and not linked:
+            continue
+        for key in keys:
+            found = {k for k in smallest[gi] if k != key}
+            for pj in linked:
+                found.update(smallest[pj])
+            out[key] = sorted(found)[:MAX_PARTNERS]
+    return out

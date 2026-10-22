@@ -4,6 +4,7 @@ import logging
 import re
 import threading
 import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -44,6 +45,9 @@ class RunIn(BaseModel):
     stage: str
     provider_id: Optional[str] = None
     scope: str = "all"  # stories stage: "approved" or "all" (non-excluded)
+    # requirements stage: "all" starts over from every BRD in one run; "new" reads only BRDs not yet read and adds to what exists;
+    # "reset" starts over in batches: the first batch replaces everything (when it is saved), the rest then show as new
+    documents: str = "all"
 
 
 class SearchIn(BaseModel):
@@ -105,6 +109,7 @@ def get_project(pid: str):
     active = [r for r in reqs if r["status"] != "excluded"]
     live = [s for s in stories if s["status"] != "rejected"]
     covered = {k for s in live for k in s["requirement_ids"]}
+    p["documents_new"] = db.one("SELECT count(*) AS n FROM documents WHERE project_id=%s AND extracted IS NULL", (pid,))["n"]
     p["coverage"] = round(100 * sum(1 for r in active if r["key"] in covered) / len(active)) if active else 0
     p["requirement_quality"] = round(sum(r["quality_score"] for r in active) / len(active)) if active else 0
     p["story_quality"] = round(sum(s["quality_score"] for s in live) / len(live)) if live else 0
@@ -202,7 +207,7 @@ def add_text_document(pid: str, body: TextDocIn):
 def list_documents(pid: str):
     _project(pid)
     # One pass over the project's chunks, not a count per document: the correlated subquery was quadratic (5 s for 1,100 BRDs).
-    return db.rows("SELECT d.id, d.filename, length(d.text) AS chars, d.created, d.source, d.path, d.repo_id, coalesce(c.n, 0) AS chunks "
+    return db.rows("SELECT d.id, d.filename, length(d.text) AS chars, d.created, d.source, d.path, d.repo_id, d.extracted, coalesce(c.n, 0) AS chunks "
                    "FROM documents d LEFT JOIN (SELECT document_id, count(*) AS n FROM chunks WHERE project_id = %s GROUP BY document_id) c "
                    "ON c.document_id = d.id WHERE d.project_id = %s ORDER BY d.created", (pid, pid))
 
@@ -257,7 +262,7 @@ class RunCancelled(Exception):
     pass
 
 
-def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str) -> None:
+def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str, documents: str = "all") -> None:
     # A queued run waits for a pool worker; claim it now. If it was cancelled (or failed by a restart) while waiting, there is nothing to do.
     if not db.one("UPDATE runs SET status='running', updated=%s WHERE id=%s AND status IN ('queued', 'running') RETURNING id", (db.now(), run_id)):
         return
@@ -279,7 +284,7 @@ def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str
 
     llm.set_cancel_check(cancelled)  # also checked inside the provider's retries and backoff
     try:
-        _run_stage(run_id, pid, stage, provider_id, scope, started, usage, progress)
+        _run_stage(run_id, pid, stage, provider_id, scope, started, usage, progress, documents)
     finally:
         llm.set_cancel_check(None)
         metrics.inc("fabulist_llm_tokens_total", usage["in"], direction="in")
@@ -287,12 +292,28 @@ def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str
 
 
 def _run_stage(run_id: str, pid: str, stage: str, provider_id: str, scope: str, started: float,
-               usage: Dict[str, int], progress: Any) -> None:
+               usage: Dict[str, int], progress: Any, documents: str = "all") -> None:
     try:
         project = _project(pid)
         profile = settings.get_provider(provider_id)
         opts = settings.get_settings()
-        if stage == "requirements":
+        incremental = stage == "requirements" and documents in ("new", "reset")
+        reset = incremental and documents == "reset"
+        existing: List[Dict[str, Any]] = []
+        before: Dict[str, str] = {}
+        if incremental:
+            # Only the BRDs not yet read, as many as fit the limit; the requirements that exist stay exactly as they are.
+            try:
+                batch, _, _ = _next_batch(pid, opts, include_read=reset)
+            except _TooBig as exc:
+                raise ValueError(str(exc))
+            if not batch:
+                raise ValueError("No new BRDs to extract.")
+            docs = db.rows("SELECT id, filename, text FROM documents WHERE id = ANY(%s) ORDER BY created, id", ([d["id"] for d in batch],))
+            existing = [] if reset else [dict(r["data"], _id=r["id"]) for r in db.rows("SELECT id, data FROM requirements WHERE project_id=%s ORDER BY seq", (pid,))]
+            before = {e["_id"]: e.get("source_ref", "") for e in existing}
+            items = pipeline.extract_requirements(docs, project["platform"], profile, opts, progress, usage, existing=existing)
+        elif stage == "requirements":
             docs = db.rows("SELECT id, filename, text FROM documents WHERE project_id=%s ORDER BY created", (pid,))
             items = pipeline.extract_requirements(docs, project["platform"], profile, opts, progress, usage)
         else:
@@ -304,7 +325,8 @@ def _run_stage(run_id: str, pid: str, stage: str, provider_id: str, scope: str, 
         progress("Saving results")
         if stage == "requirements":
             sql = "INSERT INTO requirements (id, project_id, seq, data) VALUES (%s,%s,%s,%s)"
-            params = [(db.new_id(), pid, i, json.dumps(x)) for i, x in enumerate(items)]
+            first_seq = db.one("SELECT coalesce(max(seq) + 1, 0) AS n FROM requirements WHERE project_id=%s", (pid,))["n"] if incremental and not reset else 0
+            params = [(db.new_id(), pid, first_seq + i, json.dumps(x)) for i, x in enumerate(items)]
         else:
             sql = "INSERT INTO stories (id, project_id, run_id, seq, data) VALUES (%s,%s,%s,%s,%s)"
             params = [(db.new_id(), pid, run_id, i, json.dumps(x)) for i, x in enumerate(items)]
@@ -313,12 +335,20 @@ def _run_stage(run_id: str, pid: str, stage: str, provider_id: str, scope: str, 
             current = c.execute("SELECT status FROM runs WHERE id=%s FOR UPDATE", (run_id,)).fetchone()
             if not current or current["status"] != "running":
                 raise RunCancelled()
-            # Stories link to requirement keys, so re-extracting requirements resets the backlog too.
-            c.execute("DELETE FROM stories WHERE project_id = %s", (pid,))
-            if stage == "requirements":
-                c.execute("DELETE FROM requirements WHERE project_id = %s", (pid,))
+            if not incremental or reset:
+                # Stories link to requirement keys, so re-extracting requirements resets the backlog too.
+                c.execute("DELETE FROM stories WHERE project_id = %s", (pid,))
+                if stage == "requirements":
+                    c.execute("DELETE FROM requirements WHERE project_id = %s", (pid,))
+            if reset:
+                c.execute("UPDATE documents SET extracted = NULL WHERE project_id = %s", (pid,))  # everything is unread again, bar this batch (marked below)
             with c.cursor() as cur:
                 cur.executemany(sql, params)
+            for e in existing:  # a requirement repeated in the new BRDs keeps one row but learns where else it was stated
+                if e.get("source_ref", "") != before[e["_id"]]:
+                    c.execute("UPDATE requirements SET data = jsonb_set(data, '{source_ref}', to_jsonb(%s::text)), rev = rev + 1 WHERE id = %s", (e["source_ref"], e["_id"]))
+            if stage == "requirements":
+                c.execute("UPDATE documents SET extracted = %s WHERE id = ANY(%s)", (db.now(), [d["id"] for d in docs]))
             c.execute("UPDATE runs SET status='done', item_count=%s, story_count=%s, progress='', tokens_in=%s, "
                       "tokens_out=%s, duration_ms=%s, requests=%s WHERE id=%s",
                       (len(items), len(items), usage["in"], usage["out"], int((time.monotonic() - started) * 1000), usage.get("requests", 0), run_id))
@@ -365,6 +395,32 @@ def _stale_cutoff() -> str:
     return (datetime.now(timezone.utc) - timedelta(minutes=config.STALE_RUN_MINUTES)).isoformat(timespec="milliseconds")
 
 
+class _TooBig(Exception):
+    """A single BRD that alone has more sections than one run may read."""
+    def __init__(self, filename: str, sections: int, limit: int):
+        super().__init__("%s produces %d sections, above the limit of %d. Raise 'Max sections per run' in Admin > Generation settings or split the document."
+                         % (filename, sections, limit))
+
+
+def _next_batch(pid: str, opts: Dict[str, Any], include_read: bool = False) -> Tuple[List[Dict[str, Any]], int, int]:
+    """The BRDs not yet read that the next run would take, oldest first, as many as fit within 'Max sections per run', with their
+    section count, and how many are left for later runs. A project of a thousand BRDs is read in a few such runs, none of which touches
+    what the earlier ones produced."""
+    limit, chunk = int(opts["max_chunks_per_run"]), int(opts["chunk_chars"])
+    pending = db.rows("SELECT id, filename FROM documents WHERE project_id=%s AND (%s OR extracted IS NULL) ORDER BY created, id", (pid, include_read))
+    batch: List[Dict[str, Any]] = []
+    sections = 0
+    for d in pending:
+        n = len(pipeline.chunk_sections(db.one("SELECT text FROM documents WHERE id=%s", (d["id"],))["text"], chunk))
+        if sections + n > limit:
+            if not batch:
+                raise _TooBig(d["filename"], n, limit)
+            break
+        batch.append(d)
+        sections += n
+    return batch, sections, len(pending) - len(batch)
+
+
 def _requests_needed(pid: str, stage: str, scope: str, opts: Dict[str, Any]) -> Tuple[int, int]:
     """(AI requests a run would make, items it reads), from the same batching the run uses. Documents are read a few at a time:
     a project with a thousand BRDs must not be held in memory just to count its sections."""
@@ -380,14 +436,26 @@ def _requests_needed(pid: str, stage: str, scope: str, opts: Dict[str, Any]) -> 
 
 
 @router.get("/api/projects/{pid}/runs/estimate")
-def estimate_run(pid: str, stage: str, scope: str = "all"):
+def estimate_run(pid: str, stage: str, scope: str = "all", documents: str = "all"):
     """What a run would ask of the AI provider, before anyone clicks: the number of requests (exact, from the same batching the
     run uses), and a time and token guess calibrated from this installation's own finished runs of that stage."""
     _project(pid)
-    if stage not in STAGES or scope not in ("approved", "all"):
-        raise HTTPException(400, "Unknown stage or scope")
+    if stage not in STAGES or scope not in ("approved", "all") or documents not in ("all", "new", "reset"):
+        raise HTTPException(400, "Unknown stage, scope or documents")
     opts = settings.get_settings()
-    requests, items = _requests_needed(pid, stage, scope, opts)
+    extra: Dict[str, Any] = {}
+    if stage == "requirements":
+        extra["new_documents"] = db.one("SELECT count(*) AS n FROM documents WHERE project_id=%s AND extracted IS NULL", (pid,))["n"]
+    if stage == "requirements" and documents in ("new", "reset"):
+        try:
+            batch, requests, remaining = _next_batch(pid, opts, include_read=documents == "reset")
+            items = len(batch)
+            extra.update(batch_documents=len(batch), remaining_documents=remaining)
+        except _TooBig as exc:
+            requests, items = int(opts["max_chunks_per_run"]) + 1, 0
+            extra.update(batch_documents=0, remaining_documents=extra["new_documents"], too_big=str(exc))
+    else:
+        requests, items = _requests_needed(pid, stage, scope, opts)
     past = db.rows("SELECT requests, duration_ms, tokens_in + tokens_out AS tokens FROM runs WHERE stage=%s AND status='done' AND requests > 0 "
                    "ORDER BY created DESC LIMIT 10", (stage,))
     seconds = tokens = None
@@ -397,8 +465,8 @@ def estimate_run(pid: str, stage: str, scope: str = "all"):
         seconds = round(requests * sum(r["duration_ms"] for r in past) / 1000 / total)
         tokens = round(requests * sum(r["tokens"] for r in past) / total)
         basis = "Based on your last %d run%s (%d requests)." % (len(past), "" if len(past) == 1 else "s", total)
-    return {"stage": stage, "scope": scope, "items": items, "requests": requests, "limit": int(opts["max_chunks_per_run"]),
-            "over_limit": requests > int(opts["max_chunks_per_run"]), "seconds": seconds, "tokens": tokens, "basis": basis}
+    return dict({"stage": stage, "scope": scope, "documents": documents, "items": items, "requests": requests, "limit": int(opts["max_chunks_per_run"]),
+                 "over_limit": requests > int(opts["max_chunks_per_run"]), "seconds": seconds, "tokens": tokens, "basis": basis}, **extra)
 
 
 def _recover_stuck_runs(pid: str) -> None:
@@ -424,9 +492,19 @@ def start_run(pid: str, body: RunIn, request: Request):
         raise HTTPException(400, "The provider %s has no API key. Add one in Admin > AI providers." % profile["name"])
     if body.stage == "requirements" and not db.one("SELECT 1 AS x FROM documents WHERE project_id=%s LIMIT 1", (pid,)):
         raise HTTPException(400, "Add at least one BRD document first")
+    if body.documents not in ("all", "new", "reset"):
+        raise HTTPException(400, "Unknown documents choice")
     # Refuse what can never succeed before creating a run (it used to start, then fail seconds later with the same message).
     limit = int(settings.get_settings()["max_chunks_per_run"])
-    needed, _ = _requests_needed(pid, body.stage, body.scope, settings.get_settings())
+    if body.stage == "requirements" and body.documents in ("new", "reset"):
+        try:
+            if not _next_batch(pid, settings.get_settings(), include_read=body.documents == "reset")[0]:
+                raise HTTPException(400, "No new BRDs to extract. Add BRDs on the Sources tab, or choose all BRDs to start over.")
+        except _TooBig as exc:
+            raise HTTPException(400, str(exc))
+        needed = 0
+    else:
+        needed, _ = _requests_needed(pid, body.stage, body.scope, settings.get_settings())
     if needed > limit and (body.stage == "requirements" or profile["kind"] != "mock"):
         raise HTTPException(400, ("Documents produce %d sections, above the limit of %d. Raise 'Max sections per run' in Admin > Generation settings "
                                   "or split the documents." % (needed, limit)) if body.stage == "requirements" else
@@ -452,7 +530,7 @@ def start_run(pid: str, body: RunIn, request: Request):
                                 headers={"Retry-After": "60"})
         c.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, actor, created) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
                   (rid, pid, status, body.stage, profile["name"], profile["model"], history.actor(request), db.now()))
-    _run_pool().submit(_execute_run, rid, pid, body.stage, profile["id"], body.scope)
+    _run_pool().submit(_execute_run, rid, pid, body.stage, profile["id"], body.scope, body.documents)
     return {"id": rid, "status": status}
 
 
@@ -485,9 +563,34 @@ STORY_FIELDS = {"epic", "feature", "title", "persona", "narrative", "acceptance_
                 "labels", "requirement_ids", "product_scope", "variant_criteria", "compliance_tags", "open_questions", "notes"}
 
 
+_dupe_cache: "OrderedDict[str, Tuple[Tuple[int, int, int, int], Dict[str, List[str]]]]" = OrderedDict()
+_dupe_lock = threading.Lock()
+
+
+def _duplicates(pid: str, out: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """Near-duplicate pairs for the project's requirements, kept until one changes. Every summary, list and estimate request needs them,
+    and on thousands of requirements working them out is the most expensive part of answering. The stamp changes with every edit,
+    status change (each bumps `rev`), addition and removal."""
+    stamp = db.one("SELECT count(*) AS n, coalesce(sum(rev), 0) AS r, coalesce(sum(hashtext(id)::bigint), 0) AS h, "
+                   "count(*) FILTER (WHERE status = 'excluded') AS x FROM requirements WHERE project_id=%s", (pid,))
+    key = (stamp["n"], int(stamp["r"]), int(stamp["h"]), stamp["x"])
+    with _dupe_lock:
+        hit = _dupe_cache.get(pid)
+        if hit and hit[0] == key:
+            _dupe_cache.move_to_end(pid)
+            return hit[1]
+    dupes = quality.duplicate_pairs([r for r in out if r["status"] != "excluded"])
+    with _dupe_lock:
+        _dupe_cache[pid] = (key, dupes)
+        _dupe_cache.move_to_end(pid)
+        while len(_dupe_cache) > 32:  # bounded: only recently used projects are kept
+            _dupe_cache.popitem(last=False)
+    return dupes
+
+
 def _requirements(pid: str) -> List[Dict[str, Any]]:
     out = [db.item_row(r, "REQ") for r in db.rows("SELECT * FROM requirements WHERE project_id=%s ORDER BY seq", (pid,))]
-    dupes = quality.duplicate_pairs([r for r in out if r["status"] != "excluded"])
+    dupes = _duplicates(pid, out)
     for item in out:
         item["issues"] = quality.requirement_issues(item)
         if item["key"] in dupes:

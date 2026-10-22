@@ -983,3 +983,28 @@ def test_listing_documents_counts_chunks_per_document_and_the_lookup_is_indexed(
     # the per-document count and the cascade on delete look chunks up by document: without this index each is a scan of every chunk
     defs = [r["indexdef"] for r in db.rows("SELECT indexdef FROM pg_indexes WHERE tablename = 'chunks'")]
     assert any(d.endswith("(document_id)") for d in defs), "chunks needs an index on document_id: %s" % defs
+
+
+def test_duplicate_analysis_is_cached_per_project_and_recomputed_when_a_requirement_changes(client, monkeypatch):
+    from app import quality
+    calls = []
+    real = quality.duplicate_pairs
+    monkeypatch.setattr(quality, "duplicate_pairs", lambda reqs, *a, **k: (calls.append(len(reqs)), real(reqs, *a, **k))[1])
+    pid = client.post("/api/projects", json={"name": "Cache", "platform": "generic"}).json()["id"]
+    api = "/api/projects/%s" % pid
+    a = client.post(api + "/requirements", json={"statement": "The system shall export every invoice to CSV for the finance team."}).json()
+    client.post(api + "/requirements", json={"statement": "The system shall export every invoice to CSV for the finance team!"})
+    first = client.get(api + "/requirements").json()
+    n = len(calls)
+    for _ in range(3):
+        client.get(api + "/requirements")
+        client.get(api)
+    assert len(calls) == n, "unchanged requirements: the analysis is not repeated (%d calls became %d)" % (n, len(calls))
+    assert any(i["code"] == "duplicate" for i in first[0]["issues"]) and any(i["code"] == "duplicate" for i in first[1]["issues"])
+    client.patch(api + "/requirements/" + a["id"], json={"statement": "The system shall archive closed orders after seven years automatically."})
+    after = client.get(api + "/requirements").json()
+    assert len(calls) == n + 1, "an edit invalidates it"
+    assert not any(i["code"] == "duplicate" for r in after for i in r["issues"]), "and the stale duplicate flags are gone"
+    client.patch(api + "/requirements/" + after[1]["id"], json={"status": "excluded"})
+    client.get(api + "/requirements")
+    assert len(calls) == n + 2, "excluding one changes what is compared"

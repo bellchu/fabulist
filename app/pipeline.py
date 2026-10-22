@@ -304,13 +304,16 @@ def mock_requirements(section: Dict[str, str]) -> List[Dict[str, Any]]:
 
 
 def extract_requirements(documents: List[Dict[str, Any]], platform: str, profile: Dict[str, Any],
-                         opts: Dict[str, Any], progress: Progress, usage: Usage) -> List[Dict[str, Any]]:
+                         opts: Dict[str, Any], progress: Progress, usage: Usage,
+                         existing: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """Requirements from `documents`. With `existing` (requirements already kept), a statement they already contain is not added again:
+    its source is recorded on the existing requirement instead (the dict in `existing` is updated in place), and only new ones are returned."""
     work = [(d, ch) for d in documents for ch in chunk_sections(d["text"], int(opts["chunk_chars"]))]
     if len(work) > int(opts["max_chunks_per_run"]):
         raise ValueError("Documents produce %d sections, above the limit of %d. Raise 'Max sections per run' in Admin > Generation settings or split the documents."
                          % (len(work), opts["max_chunks_per_run"]))
     out: List[Dict[str, Any]] = []
-    seen: Dict[str, Dict[str, Any]] = {}
+    seen: Dict[str, Dict[str, Any]] = {_norm_key(e["statement"]): e for e in existing or [] if e.get("statement")}
     context = _platform_context(platform)
 
     def read(i: int) -> List[Any]:

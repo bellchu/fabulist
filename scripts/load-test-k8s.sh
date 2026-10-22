@@ -2,7 +2,7 @@
 # Load test on the cluster, not on the developer's machine. Runs the app from the working tree with the production pod's limits
 # and probes (1 GiB memory, the same liveness probe) against a throwaway pgvector database and the offline AI provider (no AI spend),
 # then runs tests/load/brd_load.py scenarios from a separate load-generator container. Always deletes its namespace.
-# Usage: scripts/load-test-k8s.sh [burst] [slowai] [volume]     (default: all)   env: REQUESTERS BRDS_EACH VOLUME_BRDS BRD_KB VOLUME_KB LLM_LATENCY SLOW_BRDS_EACH
+# Usage: scripts/load-test-k8s.sh [burst] [slowai] [volume] [bigproject]     (default: the first three)   env: REQUESTERS BRDS_EACH VOLUME_BRDS BRD_KB VOLUME_KB LLM_LATENCY SLOW_BRDS_EACH BIG_BRDS MAX_BATCHES
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PYTHON_IMAGE="${PYTHON_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim}"
@@ -35,7 +35,7 @@ spec:
     image: ${PYTHON_IMAGE}
     command: [sleep, "7200"]
     volumeMounts: [{name: src, mountPath: /src}]
-    env: [{name: BASE_URL, value: "http://127.0.0.1:8000"}, {name: METRICS_TOKEN, value: load-metrics}, {name: REQUESTERS, value: "${REQUESTERS:-20}"}, {name: BRDS_EACH, value: "${BRDS_EACH:-20}"}, {name: VOLUME_BRDS, value: "${VOLUME_BRDS:-1100}"}, {name: BRD_KB, value: "${BRD_KB:-30}"}, {name: VOLUME_KB, value: "${VOLUME_KB:-10}"}, {name: LLM_LATENCY, value: "${LLM_LATENCY:-0.25}"}, {name: SLOW_BRDS_EACH, value: "${SLOW_BRDS_EACH:-2}"}]
+    env: [{name: BASE_URL, value: "http://127.0.0.1:8000"}, {name: METRICS_TOKEN, value: load-metrics}, {name: REQUESTERS, value: "${REQUESTERS:-20}"}, {name: BRDS_EACH, value: "${BRDS_EACH:-20}"}, {name: VOLUME_BRDS, value: "${VOLUME_BRDS:-1100}"}, {name: BRD_KB, value: "${BRD_KB:-30}"}, {name: VOLUME_KB, value: "${VOLUME_KB:-10}"}, {name: LLM_LATENCY, value: "${LLM_LATENCY:-0.25}"}, {name: SLOW_BRDS_EACH, value: "${SLOW_BRDS_EACH:-2}"}, {name: BIG_BRDS, value: "${BIG_BRDS:-300}"}, {name: MAX_BATCHES, value: "${MAX_BATCHES:-60}"}]
 YAML
 kubectl -n "$NS" wait --for=condition=Ready pod/load --timeout=300s >/dev/null || true
 until kubectl -n "$NS" exec load -c db -- pg_isready -q -h 127.0.0.1 -U f -d f 2>/dev/null; do sleep 1; done
@@ -45,7 +45,13 @@ for _ in $(seq 1 120); do kubectl -n "$NS" exec load -c loadgen -- python -c "im
 status=0
 for s in "${scenarios[@]}"; do
   kubectl -n "$NS" exec load -c loadgen -- sh -c "cd /src && python -u tests/load/brd_load.py $s" || status=1
-  peak="$(kubectl -n "$NS" exec load -c app -- sh -c 'cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo 0')"
-  echo "app memory peak so far: $((peak / 1048576)) MiB of 1024 MiB | app container restarts: $(kubectl -n "$NS" get pod load -o jsonpath='{.status.containerStatuses[?(@.name=="app")].restartCount}')"
+  peak="$(kubectl -n "$NS" exec load -c app -- sh -c 'cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo 0' 2>/dev/null || echo 0)"
+  restarts="$(kubectl -n "$NS" get pod load -o jsonpath='{.status.containerStatuses[?(@.name=="app")].restartCount}')"
+  echo "app memory peak so far: $((peak / 1048576)) MiB of 1024 MiB | app container restarts: $restarts"
+  if [ "${restarts:-0}" != 0 ]; then
+    echo "!! the app container was restarted: last termination reason: $(kubectl -n "$NS" get pod load -o jsonpath='{.status.containerStatuses[?(@.name=="app")].lastState.terminated.reason}')" >&2
+    kubectl -n "$NS" logs load -c app --previous --tail=8 2>&1 | cut -c1-200 >&2 || true
+    status=1
+  fi
 done
 exit $status
