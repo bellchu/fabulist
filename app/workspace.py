@@ -51,6 +51,7 @@ class RunIn(BaseModel):
     documents: str = "all"
     # stories stage: "all" starts over from every requirement in scope; "uncovered" writes stories only for requirements no story covers,
     # in batches that fit the limit, and adds them to the stories that exist
+    # "reset" starts over in batches, as for requirements: the first batch replaces every story when it is saved, the rest then have none
     stories_for: str = "all"
 
 
@@ -352,7 +353,8 @@ def _run_stage(run_id: str, pid: str, stage: str, provider_id: str, scope: str, 
         # `mode` is `documents` (all / new / reset) for the requirements stage and `stories_for` (all / uncovered) for the stories stage
         incremental = stage == "requirements" and mode in ("new", "reset")
         reset = incremental and mode == "reset"
-        adding_stories = stage == "stories" and mode == "uncovered"
+        adding_stories = stage == "stories" and mode in ("uncovered", "reset")
+        reset_stories = adding_stories and mode == "reset"
         existing: List[Dict[str, Any]] = []
         before: Dict[str, str] = {}
         if incremental:
@@ -372,11 +374,11 @@ def _run_stage(run_id: str, pid: str, stage: str, provider_id: str, scope: str, 
             items = pipeline.extract_requirements(docs, project["platform"], profile, opts, progress, usage)
         elif adding_stories:
             # Only the requirements no story covers, as many feature-area groups as fit the limit; existing stories stay exactly as they are.
-            reqs, _, _ = _uncovered_batch(pid, scope, opts)
+            reqs, _, _ = _uncovered_batch(pid, scope, opts, ignore_stories=reset_stories)
             if not reqs:
                 raise ValueError("No requirements without a story.")
-            taken = {(pipeline._norm_key(r["data"].get("title", "")), pipeline._norm_key(r["data"].get("feature") or ""))
-                     for r in db.rows("SELECT data FROM stories WHERE project_id=%s", (pid,))}
+            taken = set() if reset_stories else {(pipeline._norm_key(r["data"].get("title", "")), pipeline._norm_key(r["data"].get("feature") or ""))
+                                                 for r in db.rows("SELECT data FROM stories WHERE project_id=%s", (pid,))}
             items = pipeline.generate_stories(reqs, pid, project["platform"], profile, opts, progress, usage, taken=taken)
         else:
             reqs = [r for r in _requirements(pid)
@@ -391,14 +393,14 @@ def _run_stage(run_id: str, pid: str, stage: str, provider_id: str, scope: str, 
             params = [(db.new_id(), pid, first_seq + i, json.dumps(x)) for i, x in enumerate(items)]
         else:
             sql = "INSERT INTO stories (id, project_id, run_id, seq, data) VALUES (%s,%s,%s,%s,%s)"
-            first_story = db.one("SELECT coalesce(max(seq) + 1, 0) AS n FROM stories WHERE project_id=%s", (pid,))["n"] if adding_stories else 0
+            first_story = db.one("SELECT coalesce(max(seq) + 1, 0) AS n FROM stories WHERE project_id=%s", (pid,))["n"] if adding_stories and not reset_stories else 0
             params = [(db.new_id(), pid, run_id, first_story + i, json.dumps(x)) for i, x in enumerate(items)]
         with db.conn() as c:
             # A run that was cancelled or marked stuck while its AI call hung must not replace results when it finally returns.
             current = c.execute("SELECT status FROM runs WHERE id=%s FOR UPDATE", (run_id,)).fetchone()
             if not current or current["status"] != "running":
                 raise RunCancelled()
-            if (not incremental and not adding_stories) or reset:
+            if (not incremental and not adding_stories) or reset or reset_stories:
                 # Stories link to requirement keys, so re-extracting requirements resets the backlog too.
                 c.execute("DELETE FROM stories WHERE project_id = %s", (pid,))
                 if stage == "requirements":
@@ -484,11 +486,11 @@ def _next_batch(pid: str, opts: Dict[str, Any], include_read: bool = False) -> T
     return batch, sections, len(pending) - len(batch)
 
 
-def _uncovered_batch(pid: str, scope: str, opts: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], int, int]:
-    """The requirements in scope that no story covers yet, as many feature-area groups as fit within 'Max sections per run', how many groups
-    that is, and how many requirements are left for later runs."""
+def _uncovered_batch(pid: str, scope: str, opts: Dict[str, Any], ignore_stories: bool = False) -> Tuple[List[Dict[str, Any]], int, int]:
+    """The requirements in scope that no story covers yet (all of them when starting over), as many feature-area groups as fit within
+    'Max sections per run', how many groups that is, and how many requirements are left for later runs."""
     reqs = _requirements(pid)
-    covered = {k for s in _stories(pid, reqs) for k in s.get("requirement_ids", [])}
+    covered = set() if ignore_stories else {k for s in _stories(pid, reqs) for k in s.get("requirement_ids", [])}
     todo = [r for r in reqs if r["key"] not in covered and (r["status"] == "approved" or (scope == "all" and r["status"] == "draft"))]
     batches = pipeline.story_batches(todo)[: int(opts["max_chunks_per_run"])]
     taken = [r for _epic, _section, items in batches for r in items]
@@ -514,7 +516,7 @@ def estimate_run(pid: str, stage: str, scope: str = "all", documents: str = "all
     """What a run would ask of the AI provider, before anyone clicks: the number of requests (exact, from the same batching the
     run uses), and a time and token guess calibrated from this installation's own finished runs of that stage."""
     _project(pid)
-    if stage not in STAGES or scope not in ("approved", "all") or documents not in ("all", "new", "reset") or stories_for not in ("all", "uncovered"):
+    if stage not in STAGES or scope not in ("approved", "all") or documents not in ("all", "new", "reset") or stories_for not in ("all", "uncovered", "reset"):
         raise HTTPException(400, "Unknown stage, scope, documents or stories_for")
     opts = settings.get_settings()
     extra: Dict[str, Any] = {}
@@ -528,8 +530,8 @@ def estimate_run(pid: str, stage: str, scope: str = "all", documents: str = "all
         except _TooBig as exc:
             requests, items = int(opts["max_chunks_per_run"]) + 1, 0
             extra.update(batch_documents=0, remaining_documents=extra["new_documents"], too_big=str(exc))
-    elif stage == "stories" and stories_for == "uncovered":
-        batch, requests, remaining = _uncovered_batch(pid, scope, opts)
+    elif stage == "stories" and stories_for in ("uncovered", "reset"):
+        batch, requests, remaining = _uncovered_batch(pid, scope, opts, ignore_stories=stories_for == "reset")
         items = len(batch)
         extra.update(batch_requirements=len(batch), remaining_requirements=remaining)
     else:
@@ -570,7 +572,7 @@ def start_run(pid: str, body: RunIn, request: Request):
         raise HTTPException(400, "The provider %s has no API key. Add one in Admin > AI providers." % profile["name"])
     if body.stage == "requirements" and not db.one("SELECT 1 AS x FROM documents WHERE project_id=%s LIMIT 1", (pid,)):
         raise HTTPException(400, "Add at least one BRD document first")
-    if body.documents not in ("all", "new", "reset") or body.stories_for not in ("all", "uncovered"):
+    if body.documents not in ("all", "new", "reset") or body.stories_for not in ("all", "uncovered", "reset"):
         raise HTTPException(400, "Unknown documents or stories_for choice")
     mode = body.documents if body.stage == "requirements" else body.stories_for  # what the run was asked to do beyond its stage
     # Refuse what can never succeed before creating a run (it used to start, then fail seconds later with the same message).
@@ -582,9 +584,10 @@ def start_run(pid: str, body: RunIn, request: Request):
         except _TooBig as exc:
             raise HTTPException(400, str(exc))
         needed = 0
-    elif body.stage == "stories" and body.stories_for == "uncovered":
-        if not _uncovered_batch(pid, body.scope, settings.get_settings())[0]:
-            raise HTTPException(400, "No requirements without a story to write stories for. Add requirements, or choose all requirements to start over.")
+    elif body.stage == "stories" and body.stories_for in ("uncovered", "reset"):
+        if not _uncovered_batch(pid, body.scope, settings.get_settings(), ignore_stories=body.stories_for == "reset")[0]:
+            raise HTTPException(400, "No requirements without a story to write stories for. Add requirements, or choose all requirements to start over." if body.stories_for == "uncovered"
+                                else "No requirements in scope. Extract and review requirements first.")
         needed = 0
     else:
         needed, _ = _requests_needed(pid, body.stage, body.scope, settings.get_settings())

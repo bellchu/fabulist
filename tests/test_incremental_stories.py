@@ -79,6 +79,33 @@ def test_a_large_backlog_gets_its_stories_in_batches_that_fit_the_limit(client):
     assert len(_stories(client, pid)) == 4 and client.get("/api/projects/%s" % pid).json()["coverage"] == 100
 
 
+def test_starting_over_works_in_batches_and_only_replaces_when_its_first_batch_is_saved(client, monkeypatch):
+    pid = _project(client)
+    for n in range(4):
+        _req(client, pid, "The system shall support the capability number %d for the buyer in area %d." % (n, n), section="Area %d" % n)
+    assert _run(client, pid, "all")["status"] == "done"
+    old = _stories(client, pid)
+    assert len(old) == 4
+    client.patch("/api/projects/%s/stories/%s" % (pid, old[0]["id"]), json={"notes": "to be replaced"})
+    client.put("/api/admin/settings", json={"max_chunks_per_run": 2})  # only two of the four groups fit one run
+    est = client.get("/api/projects/%s/runs/estimate" % pid, params={"stage": "stories", "stories_for": "reset"}).json()
+    assert est["batch_requirements"] == 2 and est["remaining_requirements"] == 2 and est["requests"] == 2 and est["over_limit"] is False, est
+
+    boom = pipeline.generate_stories
+    monkeypatch.setattr(pipeline, "generate_stories", lambda *a, **k: (_ for _ in ()).throw(ValueError("provider down")))
+    failed = _run(client, pid, "reset")
+    assert failed["status"] == "failed" and len(_stories(client, pid)) == 4, "a failed start-over replaces nothing"
+    monkeypatch.setattr(pipeline, "generate_stories", boom)
+
+    first = _run(client, pid, "reset")
+    assert first["status"] == "done" and first["item_count"] == 2
+    after = _stories(client, pid)
+    assert [s["key"] for s in after] == ["US-001", "US-002"] and not any(s.get("notes") == "to be replaced" for s in after), "replaced by the first batch, numbering from the start"
+    left = client.get("/api/projects/%s/runs/estimate" % pid, params={"stage": "stories", "stories_for": "uncovered"}).json()
+    assert left["batch_requirements"] == 2, "the other two requirements now have no story"
+    assert _run(client, pid)["status"] == "done" and len(_stories(client, pid)) == 4
+
+
 def test_a_new_story_never_takes_the_title_of_an_existing_one():
     reqs = [{"key": "REQ-9", "statement": "The system shall manage users for the finance team.", "type": "functional"}]
     raw = [{"title": "Manage users", "narrative": "As an admin, I want to manage users, so that access is controlled.", "acceptance_criteria": ["Given a, when b, then c"],
