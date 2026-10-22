@@ -318,6 +318,44 @@ def slowai():
     budget(max(bystander.lat.get("bystander /healthz", [99])) < 5, "the health probe stayed responsive while 20 runs worked and queued")
 
 
+def manyprojects():
+    """A company-wide installation: hundreds of projects. The home page lists them all with their counts, and everyone opens it first."""
+    n = int(os.environ.get("MANY_PROJECTS", 300))
+    print("\n== manyprojects: %d projects with 2 BRDs and 20 requirements each" % n)
+    def seed(lo, hi):
+        with httpx.Client(base_url=BASE, headers=H, timeout=120) as c:
+            for k in range(lo, hi):
+                pid = c.post("/api/projects", json={"name": "Programme %04d" % k, "platform": "generic"}).json()["id"]
+                for d in range(2):
+                    c.post(f"/api/projects/{pid}/documents/text", json={"name": "brd-%d" % d, "text": brd_text("P%04d-%d" % (k, d), 4)})
+                for r in range(20):
+                    c.post(f"/api/projects/{pid}/requirements", json={"statement": "The system shall support capability %d of programme %d." % (r, k)})
+    t0 = time.time()
+    per = n // 6
+    ts = [threading.Thread(target=seed, args=(w * per, (w + 1) * per if w < 5 else n)) for w in range(6)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    print("seeded %d projects in %.0f s" % (n, time.time() - t0))
+    ops = Timings()
+    with httpx.Client(base_url=BASE, headers=H, timeout=120) as c:
+        for _ in range(5):
+            r = timed(c, ops, "GET projects (home)", "GET", "/api/projects")
+        print("home payload: %.0f KB for %d projects" % (len(r.content) / 1024, len(r.json())))
+        pid = r.json()[0]["id"]
+        for _ in range(5):
+            timed(c, ops, "GET project (summary)", "GET", f"/api/projects/{pid}")
+            timed(c, ops, "GET /api/meta", "GET", "/api/meta")
+            timed(c, ops, "GET /metrics", "GET", "/metrics", headers={"Authorization": "Bearer " + METRICS_TOKEN})
+        timed(c, ops, "GET admin overview", "GET", "/api/admin/overview")
+    ops.report()
+    memory("after")
+    print("budgets:")
+    worst = lambda label: max(ops.lat.get(label, [999]))  # noqa: E731
+    budget(worst("GET projects (home)") < 2, "the home page list answers within 2 s with %d projects (%.2f s)" % (n, worst("GET projects (home)")))
+    budget(worst("GET /metrics") < 2, "the metrics scrape stays quick (%.2f s)" % worst("GET /metrics"))
+    budget(worst("GET admin overview") < 3, "the admin overview stays quick (%.2f s)" % worst("GET admin overview"))
+
+
 def bigfiles():
     """20 requesters upload one large Word file each at the same moment: parsing a big .docx holds a multiple of its size in memory, so
     this is where uploads could take the app down. Each file is about FILE_MB megabytes zipped, built from non-repeating text."""
@@ -508,6 +546,6 @@ if __name__ == "__main__":
     which = sys.argv[1:] or ["burst", "slowai", "volume"]
     for name in which:
         clean_slate()
-        {"burst": burst, "slowai": slowai, "volume": volume, "bigproject": bigproject, "bigfiles": bigfiles}[name]()
+        {"burst": burst, "slowai": slowai, "volume": volume, "bigproject": bigproject, "bigfiles": bigfiles, "manyprojects": manyprojects}[name]()
     print("\n%s" % ("LOAD TEST OK" if not budget_misses else "LOAD TEST: %d budget(s) missed: %s" % (len(budget_misses), budget_misses)))
     sys.exit(1 if budget_misses else 0)
