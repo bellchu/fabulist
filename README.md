@@ -276,6 +276,8 @@ What to turn when it is not enough: more concurrent AI runs (`MAX_CONCURRENT_RUN
 
 ### Runbook
 
+A person who hits an unexpected error sees a reference (also the `X-Request-ID` response header). Search the JSON logs for that value (`request_id`): the access line has the route, status and user, and the error line has the stack trace.
+
 | Alert | Check |
 |---|---|
 | FabulistDown | `kubectl -n fabulist get pods`; app logs; `/healthz` (readiness) returns 503 when Postgres is unreachable, which only takes the pod out of rotation (`/livez`, the liveness probe, does not look at the database, so an outage never restarts the app and its AI runs); API calls then return a 503 with `Retry-After`, so check `postgres-0` too. The app reconnects by itself when the database returns. |

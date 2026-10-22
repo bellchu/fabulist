@@ -91,6 +91,8 @@ async function request(method, path, body, isForm) {
         else if (Array.isArray(j.detail)) msg = j.detail.map((d) => (d.loc ? d.loc.slice(1).join(".") + ": " : "") + d.msg).join("; ");
       } catch (_) { /* non-JSON error body */ }
     }
+    // An unexpected server error carries a reference the person can quote to their administrator; the log has the details under the same id.
+    if (r.status >= 500 && r.status !== 503 && r.headers.get("x-request-id") && !/reference/i.test(msg)) msg += " (reference " + r.headers.get("x-request-id") + ")";
     throw new Error(msg);
   }
   if (r.status === 204) return null;

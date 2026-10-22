@@ -1,9 +1,11 @@
 import asyncio
 import json
 import logging
+import re
 import secrets
 from urllib.parse import quote
 import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
@@ -146,6 +148,7 @@ def custom_openapi() -> Dict[str, Any]:
     return spec
 
 
+REQUEST_ID = re.compile(r"[A-Za-z0-9._-]{8,64}")  # what a caller may send as X-Request-ID
 PROBES = ("/healthz", "/livez")  # open to the platform: no sign-in, not counted in request metrics
 
 app = FastAPI(title="Fabulist", lifespan=lifespan, dependencies=[Depends(project_guards)], docs_url=None, redoc_url=None)
@@ -271,9 +274,12 @@ async def observe(request: Request, call_next):
     """JSON access log line and Prometheus metrics per request (route templates, not raw paths)."""
     started = time.monotonic()
     status = 500
+    incoming = request.headers.get("x-request-id", "")
+    request.state.request_id = incoming if REQUEST_ID.fullmatch(incoming) else uuid.uuid4().hex[:12]  # a caller's own trace id is kept; anything odd is replaced
     try:
         response = await call_next(request)
         status = response.status_code
+        response.headers["X-Request-ID"] = request.state.request_id
         return response
     finally:
         route = getattr(request.scope.get("route"), "path", None) or ("/static" if request.url.path.startswith("/static/") else "other")
@@ -283,7 +289,7 @@ async def observe(request: Request, call_next):
             metrics.observe_request(route, elapsed)
             access_log.info("request", extra={"fields": {"method": request.method, "route": route, "path": request.url.path,
                                                          "status": status, "ms": int(elapsed * 1000),
-                                                         "user": getattr(request.state, "user", "")}})
+                                                         "user": getattr(request.state, "user", ""), "request_id": request.state.request_id}})
 
 
 @app.get("/metrics", include_in_schema=False)
@@ -313,6 +319,15 @@ async def ai_busy(_request: Request, exc: Exception):
     metrics.inc("fabulist_ai_busy_total")
     reason = str(exc).rstrip(".") or "The AI service is busy with other requests"  # the pool is full, or this person has used their share of it
     return JSONResponse({"detail": reason + ". Try again in a moment."}, status_code=429, headers={"Retry-After": "5"})
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request: Request, exc: Exception):
+    """Anything not handled above: no internals in the answer, but an id the person can quote and the log can be searched for."""
+    rid = getattr(request.state, "request_id", "") or uuid.uuid4().hex[:12]
+    log.error("unhandled error", exc_info=exc, extra={"fields": {"request_id": rid, "method": request.method, "path": request.url.path}})
+    return JSONResponse({"detail": "Something went wrong on our side. If it keeps happening, tell your administrator this reference: " + rid, "request_id": rid},
+                        status_code=500, headers={"X-Request-ID": rid})
 
 
 @app.exception_handler(settings.SettingsError)
