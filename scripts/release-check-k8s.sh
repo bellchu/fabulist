@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Everything that decides whether a build is ready, on the cluster, in one go: the quality gate, the browser suite, the load scenarios and the
-# vulnerability scan of the image that is running. Prints one summary; exit status 1 if any stage failed (the later stages still run).
-# Usage: scripts/release-check-k8s.sh [stage ...]   stages: gate ui load scan (default: all)   env: LOAD_SCENARIOS (default below)
+# vulnerability scan of the image that is running, and the backup/restore drill. Prints one summary; exit status 1 if any stage failed (the later stages still run).
+# Usage: scripts/release-check-k8s.sh [stage ...]   stages: gate ui load scan restore (default: all)   env: LOAD_SCENARIOS (default below)
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . scripts/lib-cluster.sh; require_cluster
-stages=("$@"); [ "${#stages[@]}" -gt 0 ] || stages=(gate ui load scan)
+stages=("$@"); [ "${#stages[@]}" -gt 0 ] || stages=(gate ui load scan restore)
 LOAD_SCENARIOS="${LOAD_SCENARIOS:-burst slowai flakyai volume bigfiles manyprojects}"
 declare -a names results seconds
 run() {  # name command...
@@ -21,6 +21,7 @@ for stage in "${stages[@]}"; do
     ui)   run "browser suite" scripts/ui-check-k8s.sh ;;
     load) run "load scenarios ($LOAD_SCENARIOS)" scripts/load-test-k8s.sh $LOAD_SCENARIOS ;;
     scan) run "image vulnerability scan" scripts/scan-image-k8s.sh ;;
+    restore) run "backup and restore drill" scripts/restore-drill-k8s.sh ;;
     *) echo "unknown stage: $stage" >&2; exit 2 ;;
   esac
 done
