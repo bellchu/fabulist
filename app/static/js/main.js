@@ -98,6 +98,17 @@ function focusKey() {
 }
 
 let rendering = 0;
+// A screen reader cannot see that a navigation changed the page: a polite live region, outside the part that is rebuilt on every route, says where it led.
+const announcer = h("div", { id: "route-announcer", class: "sr-only", "aria-live": "polite", "aria-atomic": "true" });
+document.body.append(announcer);
+let announcedHash = null;
+function announceRoute() {
+  if (location.hash === announcedHash) return;  // a redraw of the same screen is not news
+  announcedHash = location.hash;
+  announcer.textContent = "";
+  setTimeout(() => { announcer.textContent = document.title; }, 50);
+}
+
 async function route() {
   const ticket = ++rendering;
   guardLeaving(null);  // each page registers its own
@@ -115,6 +126,7 @@ async function route() {
     else if (parts[0] === "account") await renderAccount(content);
     else if (parts[0] === "search") await renderSearch(content, decodeURIComponent(parts.slice(1).join("/")));
     else renderHome(content);
+    if (ticket === rendering) announceRoute();
     if (refocus && ticket === rendering && location.hash === hash && (!document.activeElement || document.activeElement === document.body)) {
       document.querySelector("#app " + refocus)?.focus();
     }
