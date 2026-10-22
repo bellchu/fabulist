@@ -27,3 +27,12 @@ def test_every_cluster_script_is_documented():
     readme = open(os.path.join(os.path.dirname(SCRIPTS), "README.md")).read()
     missing = [os.path.basename(p) for p in glob.glob(os.path.join(SCRIPTS, "*-k8s.sh")) if os.path.basename(p) not in readme]
     assert missing == []
+
+
+def test_the_ship_script_checks_before_it_publishes_and_never_merges_on_a_failed_check():
+    text = open(os.path.join(SCRIPTS, "ship-k8s.sh")).read()
+    assert "set -euo pipefail" in text
+    check, push, merge, deploy = (text.index(x) for x in ("release-check-k8s.sh ${STAGES", "git push", "gh pr merge", "scripts/deploy.sh"))
+    assert check < push < merge < deploy
+    assert "|| true" not in text and "set +e" not in text, "a failed check must stop the script"
+    assert '"$branch" != main' in text and "git status --porcelain" in text
