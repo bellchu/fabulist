@@ -147,7 +147,7 @@ scripts/test.sh                  # lint + tests in a Python 3.12 container
 scripts/ci-k8s.sh                # the same gate (minus image build) in a temporary cluster namespace; needs only kubectl
 scripts/ui-check-k8s.sh             # browser regression checks (tests/ui) in a temporary cluster namespace
 scripts/load-test-k8s.sh            # load scenarios (tests/load): 20 requesters x 20 BRDs at once; a project with 1,000+ BRDs (cluster, offline AI provider)
-scripts/release-check-k8s.sh        # the whole battery on the cluster (gate, browser suite, load scenarios, image scan) and one summary: is this build ready?
+scripts/release-check-k8s.sh        # the whole battery on the cluster (gate, browser suite, load scenarios, image scan, restore drill) and one summary: is this build ready?
 scripts/scan-image-k8s.sh           # Trivy scan of the deployed image for fixable HIGH/CRITICAL vulnerabilities (cluster)
 scripts/ci.sh                    # full local gate: lint, tests, JS check, dependency audit, image build (Docker only)
 ```
@@ -189,7 +189,7 @@ keeps 7 days. To restore one:
 kubectl -n fabulist exec -i postgres-0 -- pg_restore -U fabulist -d fabulist --clean --if-exists --exit-on-error < fabulist-YYYYMMDD-HHMMSS.dump
 ```
 
-The flags matter: plain `--clean` restores the data into an empty database but prints dozens of "does not exist" errors and exits 1, so you cannot tell whether it worked. With `--if-exists --exit-on-error` a good restore is silent and exits 0, and it works both into a fresh database and over a populated one. `scripts/restore-drill.sh` proves this end to end with Docker only (seed through the app, dump like the CronJob, restore into a fresh database, then check row counts, app health, semantic search and baselines). Run it after changing the schema or the backup job.
+The flags matter: plain `--clean` restores the data into an empty database but prints dozens of "does not exist" errors and exits 1, so you cannot tell whether it worked. With `--if-exists --exit-on-error` a good restore is silent and exits 0, and it works both into a fresh database and over a populated one. `scripts/restore-drill-k8s.sh` proves this end to end on the cluster (and `scripts/restore-drill.sh` with local Docker) (seed through the app, dump like the CronJob, restore into a fresh database, then check row counts, app health, semantic search and baselines). Run it after changing the schema or the backup job.
 
 The script generates the database password, the Basic-auth password and the encryption key
 in-cluster on first deploy. They are never stored in the repository.
