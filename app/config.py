@@ -22,6 +22,7 @@ MAX_DOC_CHARS = _int("MAX_DOC_CHARS", 2_000_000)
 MAX_UNZIPPED_MB = _int("MAX_UNZIPPED_MB", 200)  # DOCX/XLSX are ZIPs: cap what they may expand to (decompression bombs)
 MAX_PDF_PAGES = _int("MAX_PDF_PAGES", 500)
 MAX_INTERACTIVE_AI_CALLS = _int("MAX_INTERACTIVE_AI_CALLS", 8)  # AI calls made inside a request (refine, estimate, Ask) in flight at once
+MAX_QUEUED_RUNS = _int("MAX_QUEUED_RUNS", 50)  # runs allowed to wait for a free slot; beyond this the server says it is full (429)
 MAX_CONCURRENT_RUNS = _int("MAX_CONCURRENT_RUNS", 4)  # AI runs in progress at once (they run in their own pool, never in the request threads)
 STALE_RUN_MINUTES = _int("STALE_RUN_MINUTES", 15)  # a run with no progress for this long is marked stuck and stops blocking its project
 REPO_CLONE_TIMEOUT = _int("REPO_CLONE_TIMEOUT", 60)  # seconds; keep under the proxy timeout (~100 s)

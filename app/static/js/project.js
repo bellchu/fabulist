@@ -127,6 +127,7 @@ const LARGE_RUN = 20;  // from this many AI requests a run asks for confirmation
 function runPanel(stage) {
   const run = ctx.project.runs[stage];
   const running = run && run.status === "running";
+  const queued = run && run.status === "queued";
   const scope = select([["all", "Approved + draft requirements"], ["approved", "Approved requirements only"]], "all", { "aria-label": "Requirement scope" });
   const isReq = stage === "requirements";
   // Say why a run cannot start instead of failing after the click.
@@ -164,6 +165,13 @@ function runPanel(stage) {
       writer(h("button", { class: "btn btn-sm btn-ghost btn-danger", onclick: guard(async () => {
         await api.post(base() + "/runs/" + run.id + "/cancel"); toast("Cancelling after the current AI request…");
       }) }, "Cancel run")));
+  } else if (queued) {
+    // The server queues a run when every slot is busy; it starts by itself, in order.
+    statusLine = h("div", { class: "row small", style: { flexBasis: "100%" } }, badge("Queued", "amber"),
+      h("span", { class: "muted grow" }, "Waiting for a free slot: position " + (run.queue_position || 1) + " of " + (run.queue_length || 1) + ". It starts by itself; you can leave this page."),
+      writer(h("button", { class: "btn btn-sm btn-ghost btn-danger", onclick: guard(async () => {
+        await api.post(base() + "/runs/" + run.id + "/cancel"); toast("Removed from the queue"); rerender();
+      }) }, "Remove from queue")));
   } else if (run && run.status === "cancelled") {
     statusLine = h("div", { class: "callout warn small", style: { flexBasis: "100%" } }, icon("info"), "Last run was cancelled; existing data was kept.");
   } else if (run && run.status === "failed") {
@@ -182,18 +190,21 @@ function runPanel(stage) {
           : "Builds epics, features and INVEST stories with Gherkin criteria, linked to requirement IDs."),
         blocked && !readOnly() ? h("div", { class: "small", id: "run-blocked-" + stage, style: { color: "var(--amber)", marginTop: "2px" } }, blocked) : null),
       isReq || readOnly() ? null : scope,
-      writer(h("button", { class: "btn btn-primary", disabled: running || !!blocked, title: blocked || null, "aria-describedby": blocked ? "run-blocked-" + stage : null, onclick: start }, icon("sparkles"), running ? "Running…" : isReq ? (ctx.project.requirements ? "Re-extract" : "Extract") : (ctx.project.stories ? "Regenerate" : "Generate"))),
+      writer(h("button", { class: "btn btn-primary", disabled: running || queued || !!blocked, title: blocked || null, "aria-describedby": blocked ? "run-blocked-" + stage : null, onclick: start }, icon("sparkles"), running ? "Running…" : queued ? "Queued…" : isReq ? (ctx.project.requirements ? "Re-extract" : "Extract") : (ctx.project.stories ? "Regenerate" : "Generate"))),
       running ? h("div", { class: "progress-line" }) : null, statusLine));
 }
 
 function schedulePoll() {
-  const running = Object.values(ctx.project.runs || {}).some((r) => r && r.status === "running");
-  if (!running) return;
+  const waiting = (r) => r && (r.status === "running" || r.status === "queued");
+  const before = Object.values(ctx.project.runs || {}).filter(waiting).map((r) => r.status).sort().join();
+  if (!before) return;
   const pid = ctx.pid;
   pollTimer = setTimeout(guard(async () => {
     if (!ctx || ctx.pid !== pid) return;
     const runs = await api.get(base() + "/runs?limit=2");
-    const active = runs.find((r) => r.status === "running");
+    const active = runs.find(waiting);
+    if (active && active.status === "queued" && before.includes("queued")) { schedulePoll(); return; }  // still in line
+    if (active && !before.includes(active.status)) { rerender(); return; }  // it just left the queue: show the running state
     if (active) {
       const el = document.getElementById("run-progress");
       if (el) el.textContent = active.progress || "Working…";

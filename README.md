@@ -110,7 +110,8 @@ def verify(secret: str, body: bytes, headers, tolerance=300) -> bool:
 | `REPO_CLONE_TIMEOUT`, `MAX_REPO_MB` | seconds a Git sync may spend cloning (keep under the proxy timeout), and the size a clone may grow to before it is stopped | `60`, `500` |
 | `MAX_ARCHIVE_MB` | size of a project archive that may be imported | `50` |
 | `MAX_INTERACTIVE_AI_CALLS` | AI calls made inside a request (Refine, Estimate, Ask the BRDs, provider test) in flight at once; beyond that the request is refused immediately with `429` instead of holding a web thread | `8` |
-| `MAX_CONCURRENT_RUNS` | AI runs in progress at once on this server; they run in their own pool so they can never starve the web requests, and a start beyond the limit gets `429` with `Retry-After` | `4` |
+| `MAX_CONCURRENT_RUNS` | AI runs in progress at once on this server; they run in their own pool so they can never starve the web requests. A run started beyond the limit is queued (see `MAX_QUEUED_RUNS`) | `4` |
+| `MAX_QUEUED_RUNS` | Runs allowed to wait for a free slot, oldest first; a start beyond this gets `429` with `Retry-After`. Waiting runs are lost (failed with a clear message) if the server restarts | `50` |
 | `STALE_RUN_MINUTES` | an AI run with no progress for this long is marked stuck and stops blocking its project (starting a new run recovers it) | `15` |
 | `MAX_DOC_CHARS` | characters kept per pasted/parsed document; API bodies above `max(MAX_UPLOAD_MB, 4 x MAX_DOC_CHARS bytes) + 1 MiB` get `413` | 2000000 |
 | `METRICS_TOKEN` | bearer token for `/metrics` (disabled when unset) | - |
@@ -211,7 +212,7 @@ in-cluster on first deploy. They are never stored in the repository.
 | FabulistDatabaseUnavailable | The app is up but `fabulist_database_up` is 0 and users get 503s. `kubectl -n fabulist get pods` and `describe pod postgres-0`; check its volume and logs. No app restart is needed: it reconnects by itself. |
 | FabulistAuthFailureSpike | Filter the JSON logs for `failed sign-in` and look at `ip` and `user`. Repeated failures are throttled per user and per address; disable or rotate the targeted account and block the source at the edge if it persists. |
 | FabulistHighErrorRate | Filter logs for `status >= 500`; look for database errors or provider timeouts. |
-| (AI runs refused) | Users see "N AI runs are already in progress" (429). `fabulist_runs_total{status="rejected"}` counts them; raise `MAX_CONCURRENT_RUNS` if the node and the AI provider can take more. |
+| (AI runs queued or refused) | Runs beyond `MAX_CONCURRENT_RUNS` wait in a queue (`fabulist_queued_runs`; alert `FabulistRunQueueBacklog` when more than 20 wait for 30 minutes). Only a full queue is refused with 429 (`fabulist_runs_total{status="rejected"}`). Raise `MAX_CONCURRENT_RUNS` if the node and the AI provider can take more. |
 | FabulistAIRunsFailing | Admin → Activity shows each run's error. A run whose provider stopped answering is marked *stuck* after `STALE_RUN_MINUTES` and Cancel takes effect within one provider timeout. Use Admin → AI providers → Test to verify the endpoint, key and model. |
 | FabulistDependencyAudit | `kubectl -n fabulist logs job/<latest fabulist-dep-audit job>` lists packages and fixed versions; upgrade `requirements.txt`, run `scripts/test.sh`, redeploy. |
 | FabulistBackupMissing | `kubectl -n fabulist get jobs` and the `fabulist-backup` job logs; make sure the backups volume has space. |

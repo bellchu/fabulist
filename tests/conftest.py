@@ -27,6 +27,6 @@ def client(monkeypatch):
         # A background AI run must not outlive its test: on a slow machine it would run into the next one
         # (and touch shared state such as the taxonomy cache).
         for _ in range(150):
-            if not db.one("SELECT 1 AS x FROM runs WHERE status='running'"):
+            if not db.one("SELECT 1 AS x FROM runs WHERE status IN ('running', 'queued')"):
                 break
             time.sleep(0.2)

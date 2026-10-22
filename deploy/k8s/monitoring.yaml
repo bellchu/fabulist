@@ -53,6 +53,13 @@ spec:
           annotations:
             summary: Fabulist is using over 85% of its memory limit and will be killed (OOM) if it grows
             runbook: "README.md#runbook: look for very large projects or exports in progress, then raise the pod memory limit"
+        - alert: FabulistRunQueueBacklog
+          expr: fabulist_queued_runs > 20
+          for: 30m
+          labels: {severity: warning, team: fabulist}
+          annotations:
+            summary: More than 20 AI runs have been waiting for a free slot for 30 minutes
+            runbook: "README.md#runbook: runs are slow or stuck (check the AI provider), or MAX_CONCURRENT_RUNS is too low for the demand"
         - alert: FabulistAuthFailureSpike
           expr: sum(increase(fabulist_auth_failures_total[10m])) > 50
           for: 5m
