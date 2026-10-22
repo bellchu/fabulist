@@ -87,6 +87,26 @@ fi
 # time to finish: up to DEPLOY_WAIT_FOR_RUNS minutes (default 15; 0 skips).
 scripts/wait-for-runs.sh "$NS"
 
+# The running app logs in as a role that can read and write data but cannot change the schema or rewrite the audit tables. The original owner login
+# becomes MIGRATION_DATABASE_URL: the app uses it for a moment at startup to upgrade the schema and grant the app role its rights. Done once, and only
+# when the secret does not have it yet. To go back: put the MIGRATION_DATABASE_URL value into DATABASE_URL and delete the key (README, Operations).
+if [ -z "$(kubectl -n "$NS" get secret fabulist-db -o jsonpath='{.data.MIGRATION_DATABASE_URL}')" ]; then
+  owner_url=$(kubectl -n "$NS" get secret fabulist-db -o jsonpath='{.data.DATABASE_URL}' | base64 -d)
+  app_pw=$(openssl rand -hex 24)
+  kubectl -n "$NS" exec -i postgres-0 -- psql -q -U fabulist -d fabulist -v ON_ERROR_STOP=1 -v pw="$app_pw" -f - >/dev/null <<'SQL'
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'fabulist_app') THEN
+    CREATE ROLE fabulist_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
+  END IF;
+END $$;
+ALTER ROLE fabulist_app PASSWORD :'pw';
+SQL
+  kubectl -n "$NS" patch secret fabulist-db --type merge -p "$(python3 -c '
+import json, sys
+print(json.dumps({"stringData": {"MIGRATION_DATABASE_URL": sys.argv[1], "DATABASE_URL": "postgresql://fabulist_app:%s@postgres.%s.svc.cluster.local:5432/fabulist" % (sys.argv[2], sys.argv[3])}}))' "$owner_url" "$app_pw" "$NS")" >/dev/null
+  echo "The app now runs as the role fabulist_app (no schema changes, audit tables read and append only)."
+fi
+
 sed -e "s|IMAGE|${IMAGE}|" -e "s|FABULIST_HOST|${FABULIST_HOST}|" deploy/k8s/app.yaml | kubectl apply -f -
 sed -e "s|IMAGE|${IMAGE}|" deploy/k8s/audit.yaml | kubectl apply -f -
 kubectl -n "$NS" rollout status deploy/fabulist --timeout=240s

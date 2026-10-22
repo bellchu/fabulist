@@ -136,3 +136,10 @@ def test_a_slow_schema_upgrade_is_not_killed_by_the_liveness_probe():
     period = int(startup.split("periodSeconds:")[1].split()[0])
     failures = int(startup.split("failureThreshold:")[1].split()[0])
     assert "/livez" in startup and period * failures >= 300
+
+
+def test_the_app_runs_as_a_role_that_cannot_change_the_schema():
+    deploy = open(os.path.join(os.path.dirname(APP_PATH), "..", "..", "scripts", "deploy.sh")).read()
+    import re
+    assert re.search(r"- name: MIGRATION_DATABASE_URL.*?key: MIGRATION_DATABASE_URL\s+optional: true", APP, re.S), "optional: an install without the second login still starts"
+    assert "CREATE ROLE fabulist_app" in deploy and "NOSUPERUSER" in deploy and "MIGRATION_DATABASE_URL" in deploy

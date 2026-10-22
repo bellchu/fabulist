@@ -1,6 +1,7 @@
 """Postgres persistence (psycopg 3) with pgvector for retrieval."""
 import json
 import os
+import re
 import threading
 import uuid
 from contextlib import contextmanager
@@ -8,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, List, Optional, Sequence
 
 import psycopg
+from psycopg.conninfo import conninfo_to_dict
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
@@ -179,8 +181,35 @@ def close() -> None:
         _pools.clear()
 
 
+_ROLE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+
+
+@contextmanager
+def _schema_owner() -> Iterator[psycopg.Connection]:
+    """The migration login when there is one (one short-lived connection), else the ordinary pool."""
+    if not config.MIGRATION_DATABASE_URL:
+        with conn() as c:
+            yield c
+        return
+    with psycopg.connect(config.MIGRATION_DATABASE_URL, row_factory=dict_row, connect_timeout=10) as c:
+        yield c
+
+
+def _grant_runtime_role(c: psycopg.Connection) -> None:
+    """Everything the app does with data, and nothing more. History and the administrative trail can be added to and read but not changed:
+    a project's history still goes with the project, because the cascade runs with the owner's rights."""
+    role = conninfo_to_dict(config.DATABASE_URL).get("user", "")
+    if not _ROLE.match(role) or role == conninfo_to_dict(config.MIGRATION_DATABASE_URL).get("user"):
+        return  # same login for both (or an odd name): nothing to separate
+    for stmt in ('GRANT USAGE ON SCHEMA public TO "%s"' % role,
+                 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "%s"' % role,
+                 'REVOKE UPDATE, DELETE, TRUNCATE ON history, admin_audit FROM "%s"' % role,
+                 'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "%s"' % role):
+        c.execute(stmt)
+
+
 def init() -> None:
-    with conn() as c:
+    with _schema_owner() as c:
         # Serialize concurrent startups (multiple replicas) on schema creation.
         c.execute("SELECT pg_advisory_xact_lock(727274)")
         had_table = c.execute("SELECT 1 FROM information_schema.tables WHERE table_name = 'documents'").fetchone()
@@ -190,6 +219,8 @@ def init() -> None:
         if had_table and not had_flag:
             # Upgrading: documents that already sit behind requirements have been read; those of projects with none are new.
             c.execute("UPDATE documents SET extracted = created WHERE project_id IN (SELECT DISTINCT project_id FROM requirements)")
+        if config.MIGRATION_DATABASE_URL:
+            _grant_runtime_role(c)
 
 
 def rows(sql: str, args: Sequence[Any] = ()) -> List[Dict[str, Any]]:

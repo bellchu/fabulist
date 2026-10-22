@@ -44,6 +44,12 @@ spec:
                 secretKeyRef:
                   name: fabulist-db
                   key: DATABASE_URL
+            - name: MIGRATION_DATABASE_URL        # the schema owner: used at startup only (see scripts/deploy.sh)
+              valueFrom:
+                secretKeyRef:
+                  name: fabulist-db
+                  key: MIGRATION_DATABASE_URL
+                  optional: true
           lifecycle:
             preStop:
               exec: {command: [sleep, "8"]}   # the ingress stops sending requests before the server gets SIGTERM
