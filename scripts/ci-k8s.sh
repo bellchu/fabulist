@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Quality gate that runs on the cluster, not on the developer's machine: lint, tests against a throwaway
 # pgvector database, frontend syntax check and dependency audit, in a temporary namespace that is always deleted.
-# Needs only kubectl access (and git, tar). Sends the working tree (tracked + new, not ignored files).
+# Optional: PYTEST_ARGS="..." REPEAT=N (see below). Needs only kubectl access (and git, tar). Sends the working tree (tracked + new, not ignored files).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 . scripts/lib-cluster.sh; require_cluster
@@ -38,9 +38,10 @@ kubectl -n "$NS" wait --for=condition=Ready pod/ci --timeout=300s >/dev/null
 until kubectl -n "$NS" exec ci -c db -- pg_isready -q -h 127.0.0.1 -U fabulist -d fabulist_test; do sleep 1; done
 git ls-files -z --cached --others --exclude-standard | COPYFILE_DISABLE=1 tar --null -T - -cf - | kubectl -n "$NS" exec -i ci -c py -- tar -xf - -C /src
 echo "== lint + tests"
+# PYTEST_ARGS narrows the run (e.g. "tests/test_api.py -k stuck"); REPEAT=N runs it N times, to chase a test that fails now and then.
 kubectl -n "$NS" exec ci -c py -- sh -c \
-  'apt-get update -qq >/dev/null && apt-get install -y -qq git >/dev/null && pip install -q --root-user-action=ignore -r requirements-dev.txt \
-   && python -m pyflakes app tests && python -m pytest -q -p no:cacheprovider'
+  "apt-get update -qq >/dev/null && apt-get install -y -qq git >/dev/null && pip install -q --root-user-action=ignore -r requirements-dev.txt \
+   && python -m pyflakes app tests && for i in \$(seq 1 ${REPEAT:-1}); do python -m pytest -q -p no:cacheprovider ${PYTEST_ARGS:-} || exit 1; done"
 echo "== frontend"
 kubectl -n "$NS" exec ci -c node -- sh -c \
   'set -e; mkdir /t; for f in app/static/js/*.js; do cp "$f" "/t/$(basename "$f" .js).mjs"; done; for f in /t/*.mjs; do node --check "$f"; done; echo "js ok"'
