@@ -60,6 +60,21 @@ Large inputs are incremental: `documents` = all / new / reset and `stories_for` 
 | Deploy | New pod ready before the old one stops; the old one drains 8 s; the deploy waits for executing runs first. |
 | Lost data | Nightly `pg_dump`; `scripts/restore-drill-k8s.sh` proves a restore end to end. |
 
+## Running more than one replica
+
+The supported setup is one replica (`replicas: 1`). A rolling deploy briefly runs two, and the design already copes with that: the run queue and admission are in the database (one advisory lock, global limits), a run is claimed by exactly one instance and records its owner, instances beat into a table so a starting server leaves live instances' runs alone and the sweeper fails the runs of one that stopped, and schema upgrades are serialised by an advisory lock.
+
+What is still per instance, and would differ with a permanent second replica:
+
+| Per instance | Effect with two replicas |
+|---|---|
+| Rate limit and failed-sign-in throttle | Each instance counts separately: a client can make up to twice the limit. |
+| Fair use of interactive AI calls, the interactive AI pool and the document-parse slots | Limits are per instance (twice the capacity, not a shared limit). |
+| Caches (taxonomy, user lookups, duplicate detection per project) | Short-lived, invalidated in the instance that made the change: another instance can serve stale data for up to the cache lifetime (taxonomy 30 s). |
+| `MAX_CONCURRENT_RUNS` threads | The limit on running runs is global (database), but each instance has its own worker pool, so a queued run waits for the instance that took it. |
+
+None of these is a correctness problem for runs or data, which is why a rolling deploy is safe; they are why a second permanent replica is not yet a supported setup.
+
 ## Known limits
 
 At most `MAX_CONCURRENT_RUNS` (default 4) runs execute at once. The UI loads whole requirement lists (compressed, drawn 300 rows at a time) rather than paging on the server. Quality scoring costs about 3 s per heavy call at 50,000 requirements. Only synthetic files and providers are load-tested. See "Capacity and sizing" in the README.
