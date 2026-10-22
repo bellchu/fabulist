@@ -127,6 +127,34 @@ def list_projects(request: Request, archived: bool = False):
     return db.rows(sql + " ORDER BY p.created DESC", args)
 
 
+def _like(q: str) -> str:
+    """The query as a case-insensitive 'contains' pattern in which % and _ are ordinary characters."""
+    return "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+@router.get("/api/search")
+def search_everywhere(request: Request, q: str = "", limit: int = 30):
+    """Projects by name, requirements by statement and stories by title or narrative, across the projects this person may see (archived ones
+    are left out). The same visibility rule as the project list: private projects exist only for their members and administrators."""
+    q = q.strip()
+    if len(q) < 2:
+        raise HTTPException(400, "Type at least 2 characters")
+    limit = max(1, min(limit, 50))
+    pattern = _like(q)
+    visible, args = "p.archived IS NULL", []  # type: str, List[Any]
+    if getattr(request.state, "role", "admin") != "admin":
+        visible += " AND (p.visibility = 'everyone' OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.username = %s))"
+        args.append(history.actor(request))
+    projects = db.rows("SELECT p.id, p.name, p.platform FROM projects p WHERE %s AND p.name ILIKE %%s ORDER BY p.name LIMIT %%s" % visible, (*args, pattern, limit))
+    reqs = db.rows("SELECT r.project_id, p.name AS project_name, r.seq, r.status, r.data->>'statement' AS statement FROM requirements r JOIN projects p ON p.id = r.project_id "
+                   "WHERE %s AND r.data->>'statement' ILIKE %%s ORDER BY p.name, r.seq LIMIT %%s" % visible, (*args, pattern, limit))
+    stories = db.rows("SELECT s.project_id, p.name AS project_name, s.seq, s.status, s.data->>'title' AS title FROM stories s JOIN projects p ON p.id = s.project_id "
+                      "WHERE %s AND (s.data->>'title' ILIKE %%s OR s.data->>'narrative' ILIKE %%s) ORDER BY p.name, s.seq LIMIT %%s" % visible, (*args, pattern, pattern, limit))
+    return {"projects": projects,
+            "requirements": [dict(r, key=history.item_key("requirement", r.pop("seq"))) for r in reqs],
+            "stories": [dict(s, key=history.item_key("story", s.pop("seq"))) for s in stories]}
+
+
 @router.get("/api/people")
 def people() -> List[Dict[str, str]]:
     """Named accounts, for choosing who can see a project (names and roles only)."""

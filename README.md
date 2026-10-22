@@ -15,6 +15,9 @@ IDs → human review → epics, features and stories → requirements traceabili
    adds, updates or removes documents as files change. Passages are embedded into
    Postgres/pgvector for semantic search and retrieval-augmented generation. **Ask the BRDs**
    answers questions from retrieved passages only, with numbered citations.
+   The search box at the top finds projects by name and, across every project you can open, requirements and
+   stories by their words (`GET /api/search`); archived projects and private projects you are not part of are
+   left out.
 2. **Requirements**: the AI engine extracts atomic requirements (business, functional,
    non-functional, constraint, rule), keeping BRD IDs and source references. Each one is
    checked against ISO/IEC/IEEE 29148 quality characteristics: ambiguous terms, TBDs, weak
