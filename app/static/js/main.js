@@ -66,6 +66,12 @@ export function setCrumbs(...parts) {
     out.push(typeof p === "string" ? h("strong", {}, p) : h("a", { href: p.href }, p.label));
   });
   el.replaceChildren(...out);
+  // The page title says where you are (tabs, history, screen readers): the deepest crumb first, then the ones above it.
+  setTitle(...parts.map((p) => (typeof p === "string" ? p : p.label)).reverse());
+}
+
+export function setTitle(...names) {
+  document.title = [...names.filter(Boolean), "Fabulist"].join(" · ");
 }
 
 export async function refreshProjects() {
