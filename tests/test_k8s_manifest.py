@@ -117,3 +117,9 @@ def test_every_cluster_script_checks_the_cluster_first_and_says_what_is_wrong(tm
         r = subprocess.run(["bash", script] + (["x.py"] if script.endswith("run-py-k8s.sh") else []), capture_output=True, text=True, timeout=60,
                            env={"PATH": "%s:/usr/bin:/bin" % stubs, "HOME": str(tmp_path)}, cwd=root)
         assert r.returncode == 2 and "cannot reach the Kubernetes cluster" in r.stderr and "SSH tunnel" in r.stderr, (os.path.basename(script), r.returncode, r.stderr[-300:])
+
+
+def test_a_deploy_does_not_drop_requests():
+    # the old pod keeps serving until the new one is ready, and lingers a few seconds after leaving the endpoints
+    assert "maxUnavailable: 0" in APP and "maxSurge: 1" in APP
+    assert "preStop" in APP and "sleep" in APP

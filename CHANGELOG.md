@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- A deploy no longer drops requests: the live site answered 504 for a few seconds right after one, because the old pod got SIGTERM while the ingress was still sending it traffic. The rollout is now explicit (new pod ready before the old one stops: `maxUnavailable: 0`), the old pod waits 8 s (`preStop`) before shutting down, and readiness is checked every 5 s. Test: `tests/test_k8s_manifest.py`.
 - Responses of 1 KB or more are compressed (gzip) for clients that accept it. A project of 13,800 requirements sent a 9 MB list on every visit; behind an ingress that does not compress (Cloudflare does, a typical corporate proxy may not) that is all on the wire. Streaming downloads (the project archive) are compressed as they go. Tests: `tests/test_compression.py`.
 - API reference polish found by looking at it: the page was in the browser's serif font (a stray `font-family: inherit` overrode the app's font stack), its introduction paragraphs had no spacing, `*run*` showed its asterisks, and operation names were in Title Case ("Start Run"); now sans-serif, spaced, emphasised and in sentence case ("Start run"), each checked by a test.
 - `UI_ARTIFACTS=dir scripts/ui-check-k8s.sh ...` copies what a browser test saves under `/tmp/artifacts` (screenshots) out of the cluster pod into that local directory, even when a test fails, so a failure can be looked at instead of guessed at.

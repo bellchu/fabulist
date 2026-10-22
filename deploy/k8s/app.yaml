@@ -7,6 +7,9 @@ metadata:
   namespace: fabulist
 spec:
   replicas: 1   # background generation runs in-process; keep a single replica
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}   # the new pod is ready before the old one is stopped
   selector:
     matchLabels:
       app: fabulist
@@ -41,9 +44,12 @@ spec:
                 secretKeyRef:
                   name: fabulist-db
                   key: DATABASE_URL
+          lifecycle:
+            preStop:
+              exec: {command: [sleep, "8"]}   # the ingress stops sending requests before the server gets SIGTERM
           readinessProbe:
             httpGet: {path: /healthz, port: 8000}
-            periodSeconds: 10
+            periodSeconds: 5
           livenessProbe:
             httpGet: {path: /healthz, port: 8000}
             initialDelaySeconds: 15
