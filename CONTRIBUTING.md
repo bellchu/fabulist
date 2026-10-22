@@ -10,6 +10,7 @@
    scripts/ci-k8s.sh   # runs on the cluster (kubectl only): lint, tests on a throwaway pgvector DB, JS check, pip-audit
    scripts/ci.sh       # same plus the image build, on a local Docker daemon
    scripts/ui-check-k8s.sh   # browser checks (tests/ui/*.py, Playwright) against the app, on the cluster
+   scripts/scan-image-k8s.sh # known HIGH/CRITICAL vulnerabilities in the deployed image (OS and Python packages), on the cluster
    ```
 
 4. One feature or fix per PR, squash-merged into `main`. Use conventional commit titles

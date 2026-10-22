@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- `scripts/scan-image-k8s.sh` scans the deployed image (or any image) with Trivy on the cluster for fixable HIGH/CRITICAL vulnerabilities in OS and Python packages, complementing `pip-audit`. The image running now is clean (Debian 13.7, 0 findings); the script exits 1 on a vulnerable image (checked against an old Python 3.8 image: 61 findings).
 - Repository settings (owner-approved): `main` is protected against force-push and deletion with linear history required, merged branches are deleted automatically, and Dependabot vulnerability alerts are on. Documented in CONTRIBUTING.
 - Keyboard test now also covers dialogs: a form dialog and a confirmation take focus, trap Tab, close on Escape and return focus to the opener, and Enter on the confirm button completes the action.
 - Keyboard: after sorting a table with Enter/Space, focus stays on the column header (it used to fall to the page, so a keyboard or screen-reader user had to Tab back to sort again). Browser test: `tests/ui/keyboard.py` (drawer focus trap and focus return, sorting, selection, bulk bar, all without a mouse).
