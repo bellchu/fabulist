@@ -75,7 +75,11 @@ async function request(method, path, body, isForm) {
     if (isForm) opts.body = body;
     else { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
   }
-  const r = await fetch(path, opts);
+  let r;
+  try { r = await fetch(path, opts); } catch (_) {
+    // fetch() only rejects when no response came back (offline, dropped connection, server down); its own message ("Failed to fetch") means nothing to a user.
+    throw new Error("Can't reach the server. Check your connection and try again.");
+  }
   if (!r.ok) {
     if (r.status === 401 && onUnauthorized) onUnauthorized();
     let msg = r.status + " " + r.statusText;
