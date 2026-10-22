@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Dependabot version updates (`.github/dependabot.yml`): weekly pull requests for the Python pins and the base image (alerts alone only said something was vulnerable). They are verified with the cluster release check like any change; a test keeps `.github/workflows` from appearing (no GitHub Actions budget).
 - **A request-rate ceiling per person.** Nothing stopped one runaway script (a retry loop on an API token, a mis-written integration) from sending thousands of requests a minute and starving everyone else of the app's threads and database connections. Each person (or, with no sign-in, each client address) now has a token bucket of `RATE_LIMIT_PER_MINUTE` requests (default 600, burst the same; `0` turns it off); beyond it the API answers `429` with `Retry-After`, counted in `fabulist_rate_limited_total`. Health probes, the page and its static files are never limited, memory is bounded, and other people are unaffected. Tests: `tests/test_ratelimit.py`.
 - Architecture document: the outbound-calls row now says what the code does (the address guard applies to BRD repositories, whose URL any analyst supplies; administrator-configured trackers, webhooks and AI providers may be internal by design).
 - `docs/ARCHITECTURE.md`: components, data flow, the run lifecycle, the design decisions and their reasons, trust boundaries, failure behaviour and known limits (linked from the README). A test checks that every file and setting it names exists.
