@@ -440,9 +440,11 @@ function sortHeader(label, cls, key, prefix, redraw) {
   if (!key) return h("th", { class: cls }, label);
   const on = filters[prefix + "Sort"] === key, dir = filters[prefix + "Dir"];
   return h("th", { class: cls, "aria-sort": on ? (dir > 0 ? "ascending" : "descending") : "none" },
-    h("button", { type: "button", class: "th-sort", onclick: () => {
+    h("button", { type: "button", class: "th-sort", "data-sort": prefix + ":" + key, onclick: () => {
       if (!on) { filters[prefix + "Sort"] = key; filters[prefix + "Dir"] = 1; } else if (dir > 0) filters[prefix + "Dir"] = -1; else filters[prefix + "Sort"] = "";
       redraw();
+      // redrawing replaced this button: put focus back so the keyboard user can keep sorting
+      document.querySelector('[data-sort="' + prefix + ":" + key + '"]')?.focus();
     } }, label, on ? (dir > 0 ? " ▲" : " ▼") : null));
 }
 
