@@ -7,6 +7,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from collections import OrderedDict
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
@@ -438,8 +439,8 @@ class RunCancelled(Exception):
 def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str, mode: str = "all") -> None:
     # A queued run waits for a pool worker; claim it now. Exactly one server can: if it was cancelled, failed, or already taken by another
     # server (a rolling deploy briefly runs two), there is nothing to do.
-    if not db.one("UPDATE runs SET status='running', claimed=TRUE, updated=%s, started=%s WHERE id=%s AND claimed = FALSE AND status IN ('queued', 'running') RETURNING id",
-                  (db.now(), db.now(), run_id)):
+    if not db.one("UPDATE runs SET status='running', claimed=TRUE, owner=%s, updated=%s, started=%s WHERE id=%s AND claimed = FALSE AND status IN ('queued', 'running') RETURNING id",
+                  (INSTANCE, db.now(), db.now(), run_id)):
         return
     started = time.monotonic()
     usage = {"in": 0, "out": 0}
@@ -689,9 +690,35 @@ def estimate_run(pid: str, stage: str, scope: str = "all", documents: str = "all
                  "over_limit": requests > int(opts["max_chunks_per_run"]), "seconds": seconds, "tokens": tokens, "basis": basis}, **extra)
 
 
+INSTANCE = uuid.uuid4().hex[:10]  # this server process, for run ownership
+INSTANCE_DEAD_SECONDS = 45  # an instance that has not beaten for this long has stopped
+
+
+def heartbeat() -> None:
+    """Say this server instance is alive (every few seconds), and forget instances that have been gone for a day."""
+    now = db.now()
+    with db.conn() as c:
+        c.execute("INSERT INTO instances (id, started, seen) VALUES (%s,%s,%s) ON CONFLICT (id) DO UPDATE SET seen = EXCLUDED.seen", (INSTANCE, now, now))
+        c.execute("DELETE FROM instances WHERE seen < %s", ((datetime.now(timezone.utc) - timedelta(days=1)).isoformat(timespec="milliseconds"),))
+
+
 def recover_all_stuck_runs() -> int:
     """The same recovery for every project (the background sweeper); returns how many runs were marked."""
     return _recover_stuck_runs(None)
+
+
+def _recover_orphaned_runs(pid: Optional[str]) -> int:
+    """Running runs whose server instance stopped (it has not beaten for INSTANCE_DEAD_SECONDS, or never registered): nothing is executing them."""
+    alive_since = (datetime.now(timezone.utc) - timedelta(seconds=INSTANCE_DEAD_SECONDS)).isoformat(timespec="milliseconds")
+    marked = db.rows("UPDATE runs SET status='failed', cancel_requested=TRUE, progress='', error='Interrupted: the server that was running it stopped. Start it again.' "
+                     "WHERE (%s::text IS NULL OR project_id=%s) AND status='running' AND owner IS NOT NULL AND owner <> %s "
+                     "AND NOT EXISTS (SELECT 1 FROM instances i WHERE i.id = runs.owner AND i.seen >= %s) RETURNING id, stage, project_id",
+                     (pid, pid, INSTANCE, alive_since))
+    for r in marked:
+        metrics.inc("fabulist_runs_total", stage=r["stage"], status="failed")
+        integrations.announce_run(r["id"])
+        _record_run_in_history(r["id"], r["project_id"])
+    return len(marked)
 
 
 def _recover_stuck_runs(pid: Optional[str]) -> int:
@@ -706,7 +733,7 @@ def _recover_stuck_runs(pid: Optional[str]) -> int:
         metrics.inc("fabulist_runs_total", stage=r["stage"], status="failed")
         integrations.announce_run(r["id"])
         _record_run_in_history(r["id"], r["project_id"])
-    return len(marked)
+    return len(marked) + _recover_orphaned_runs(pid)
 
 
 @router.post("/api/projects/{pid}/runs", status_code=202)

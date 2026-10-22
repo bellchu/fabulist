@@ -23,7 +23,7 @@ BRD (upload, text, repository) → parsed and split into sections (`parsing.py`)
 
 ## Runs
 
-A run is a row in `runs`. Admission is one atomic step under a Postgres advisory lock: one run per project, at most `MAX_CONCURRENT_RUNS` running, the rest `queued` (bounded by `MAX_QUEUED_RUNS`). A worker claims a run exclusively (`claimed`), so two servers during a rolling deploy cannot execute it twice. Background AI calls across all runs are capped (`MAX_RUN_AI_CALLS`). Results are written at the end in one transaction, so a failed or cancelled run changes nothing.
+A run is a row in `runs`. Admission is one atomic step under a Postgres advisory lock: one run per project, at most `MAX_CONCURRENT_RUNS` running, the rest `queued` (bounded by `MAX_QUEUED_RUNS`). A worker claims a run exclusively (`claimed`) and records which server instance owns it (`owner`), so two servers during a rolling deploy cannot execute it twice. Every instance beats into the `instances` table every 10 s; a server starting leaves the runs of a live instance alone, and the once-a-minute sweeper fails the runs of an instance that has not beaten for 45 s (it stopped), whichever server notices first. Only runs nobody owns (rows from before owners were recorded) are failed at startup. Background AI calls across all runs are capped (`MAX_RUN_AI_CALLS`). Results are written at the end in one transaction, so a failed or cancelled run changes nothing.
 
 Large inputs are incremental: `documents` = all / new / reset and `stories_for` = all / uncovered / reset let a project of a thousand BRDs be read in batches without touching reviewed work.
 
