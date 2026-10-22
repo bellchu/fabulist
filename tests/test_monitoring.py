@@ -41,3 +41,23 @@ def test_memory_is_exposed_and_alerted_on(client, monkeypatch):
     assert int(values["fabulist_process_peak_resident_memory_bytes"]) >= int(values["fabulist_process_resident_memory_bytes"]) * 0.9
     assert "fabulist_memory_limit_bytes" in values
     assert "FabulistMemoryNearLimit" in MONITORING
+
+
+def _dashboard():
+    import json
+    block = MONITORING.split("fabulist.json: |\n", 1)[1]
+    return json.loads(re.sub(r"(?m)^    ", "", block.split("\n---", 1)[0]))
+
+
+def test_the_dashboard_is_valid_json_and_graphs_the_capacity_signals():
+    dash = _dashboard()
+    panels = {p["title"]: p for p in dash["panels"]}
+    queue, memory = panels["AI runs: running and waiting in the queue"], panels["Memory against the container limit"]
+    exprs = lambda p: [t["expr"] for t in p["targets"]]  # noqa: E731
+    assert "fabulist_running_runs" in exprs(queue) and "fabulist_queued_runs" in exprs(queue)
+    assert {"fabulist_process_resident_memory_bytes", "fabulist_process_peak_resident_memory_bytes", "fabulist_memory_limit_bytes"} <= set(exprs(memory))
+    assert memory["fieldConfig"]["defaults"]["unit"] == "bytes"
+    boxes = [(p["gridPos"]["x"], p["gridPos"]["y"], p["gridPos"]["w"], p["gridPos"]["h"]) for p in dash["panels"] if p["type"] != "row"]
+    for i, (x1, y1, w1, h1) in enumerate(boxes):
+        for x2, y2, w2, h2 in boxes[i + 1:]:
+            assert x1 + w1 <= x2 or x2 + w2 <= x1 or y1 + h1 <= y2 or y2 + h2 <= y1, f"dashboard panels overlap: {(x1, y1, w1, h1)} and {(x2, y2, w2, h2)}"
