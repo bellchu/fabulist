@@ -263,7 +263,7 @@ in-cluster on first deploy. They are never stored in the repository.
 
 ### Capacity and sizing
 
-Measured on the cluster with `scripts/load-test-k8s.sh` (offline AI provider, one app pod with 1 GiB of memory and the default settings above). Re-run it after changing limits or the pod's resources.
+Measured on the cluster with `scripts/load-test-k8s.sh` (offline AI provider, one app pod with 1 GiB of memory, deliberately less than the 1.5 GiB production pod, and the default settings above). Re-run it after changing limits or the pod's resources.
 
 | Scenario | Result |
 |---|---|

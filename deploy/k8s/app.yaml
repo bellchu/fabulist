@@ -65,7 +65,7 @@ spec:
             periodSeconds: 20
           resources:
             requests: {cpu: 100m, memory: 256Mi}
-            limits: {memory: 1Gi}
+            limits: {memory: 1536Mi}   # the load tests run at 1 GiB on purpose (scripts/load-test-k8s.sh): the headroom is for what they cannot imagine
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true

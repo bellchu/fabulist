@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- The app pod's memory limit is 1.5 GiB (was 1 GiB). The full release check's worst case (20 simultaneous 6 MB uploads on top of the other scenarios) peaked at 856 MiB, 84% of 1 GiB and right at the alert line, with nothing wrong; production should not live there. The load tests keep running at 1 GiB on purpose, so what passes them has headroom (a test pins both). The node has the room (36% of its memory requested, the pod's request is unchanged).
 - The search results screen's page title names the query ("“invoices” · Search · Fabulist"), so tab lists and history tell two searches apart.
 - The Documents card on the Sources tab had its table touching the heading (the earlier spacing rule only covered a table that is a direct sibling of the heading; this one sits in a wrapper). Found in a visual pass; browser test `tests/ui/card_spacing.py` measures the gap.
 - The requirement mix legend on a project's Overview lists only the kinds that are there (it listed "business 0, constraint 0 ..." for every kind). Found in a visual pass over a project with a full workflow; browser test `tests/ui/overview_mix.py`.
