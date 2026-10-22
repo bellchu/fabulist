@@ -14,3 +14,10 @@ def test_a_kubectl_exec_fed_by_a_heredoc_passes_stdin_on():
             if re.search(r"kubectl .*\bexec\b", line) and "<<" in line and not re.search(r"\bexec\b[^|]*\s-[a-z]*i\b", line):
                 bad.append("%s:%d" % (os.path.basename(path), n))
     assert not bad, bad
+
+
+def test_dependency_updates_are_proposed_and_no_github_actions_are_used():
+    root = os.path.dirname(SCRIPTS)
+    config = open(os.path.join(root, ".github", "dependabot.yml")).read()
+    assert "package-ecosystem: pip" in config and "package-ecosystem: docker" in config
+    assert not os.path.exists(os.path.join(root, ".github", "workflows")), "no budget for GitHub Actions: checks run on the cluster"
