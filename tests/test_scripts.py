@@ -21,3 +21,9 @@ def test_dependency_updates_are_proposed_and_no_github_actions_are_used():
     config = open(os.path.join(root, ".github", "dependabot.yml")).read()
     assert "package-ecosystem: pip" in config and "package-ecosystem: docker" in config
     assert not os.path.exists(os.path.join(root, ".github", "workflows")), "no budget for GitHub Actions: checks run on the cluster"
+
+
+def test_every_cluster_script_is_documented():
+    readme = open(os.path.join(os.path.dirname(SCRIPTS), "README.md")).read()
+    missing = [os.path.basename(p) for p in glob.glob(os.path.join(SCRIPTS, "*-k8s.sh")) if os.path.basename(p) not in readme]
+    assert missing == []

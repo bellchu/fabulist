@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- `scripts/sbom-k8s.sh` writes a software bill of materials (CycloneDX JSON: 35 components with exact versions, transitive packages included) for the app's pinned Python packages, built on the cluster with `pip-audit` (already a tool of the project, so no new dependency). Procurement and security reviews of enterprise software ask for one.
 - The README cookbook's request sequence is now run as a test (`tests/test_cookbook_flow.py`): a personal API token takes a BRD through upload, extraction, bulk approval, story generation and Excel export.
 - README: an automation cookbook (create a project, upload a BRD, run, wait, approve, generate stories, export; how to treat 429 and 503). A test checks every route it names exists in the API description.
 - **The client address can no longer be chosen by the client.** Sign-in throttling per address and the new rate limit took the *left-most* `X-Forwarded-For` entry, which is whatever the client claimed: sending a different value with each request dodged the per-address throttle. One helper (`app/netaddr.py`) now returns Cloudflare's `CF-Connecting-IP` when `TRUST_CF_CONNECTING_IP` is on (the default, as before), else the entry `TRUSTED_PROXY_HOPS` (default 1) from the right, which is the address the nearest proxy saw, else the peer. Per-user throttling was never affected. If the origin can be reached without going through Cloudflare, set `TRUST_CF_CONNECTING_IP=0`. Tests: `tests/test_client_address.py`.
