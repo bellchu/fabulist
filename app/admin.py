@@ -37,7 +37,7 @@ def overview() -> Dict[str, Any]:
 @router.get("/runs")
 def runs(limit: int = 50):
     return db.rows("""SELECT r.*, p.name AS project_name FROM runs r LEFT JOIN projects p ON p.id = r.project_id
-                      ORDER BY r.created DESC, r.id LIMIT %s""", (min(limit, 200),))
+                      ORDER BY r.created DESC, r.id LIMIT %s""", (max(1, min(limit, 200)),))
 
 
 @router.get("/audit")
