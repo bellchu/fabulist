@@ -58,7 +58,7 @@ Large inputs are incremental: `documents` = all / new / reset and `stories_for` 
 | AI provider slow or throttling | Requests retry (up to `LLM_MAX_ATTEMPTS`, honouring `Retry-After`); a rate limit pauses every call to that host; `FabulistAIProviderThrottling` fires. Quota exhaustion is not retried. |
 | Pod killed (OOM, node loss) | Executing runs are marked failed with a clear message; queued runs start again on the new pod; `FabulistRestarting` fires. |
 | Deploy | New pod ready before the old one stops; the old one drains 8 s; the deploy waits for executing runs first. |
-| Lost data | Nightly `pg_dump`; `scripts/restore-drill-k8s.sh` proves a restore end to end. |
+| Lost data | Nightly `pg_dump` (7 days plus the Sunday of each of the last 5 weeks); every Sunday a CronJob test-restores the newest dump into a scratch database and raises `FabulistRestoreCheckFailed` if it cannot; `scripts/restore-drill-k8s.sh` proves a restore end to end on every release check. |
 
 ## Running more than one replica
 
