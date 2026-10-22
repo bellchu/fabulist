@@ -68,3 +68,9 @@ def test_the_escape_hatch_skips_the_guard(checkout):
     (checkout / "stray.js").write_text("wip")
     r = deploy(checkout, ALLOW_DIRTY_DEPLOY="1")
     assert "Refusing" not in r.stderr
+
+
+def test_a_deploy_ends_with_a_look_at_what_was_deployed():
+    deploy = open(os.path.join(REPO, "scripts", "deploy.sh")).read()
+    assert "scripts/live-smoke-k8s.sh" in deploy and "SKIP_SMOKE" in deploy and "rollout undo" in deploy
+    assert deploy.index("Deployed ${IMAGE}") < deploy.index("live-smoke-k8s.sh"), "the smoke test runs after the rollout, never instead of it"

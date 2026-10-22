@@ -116,3 +116,8 @@ if kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1; then
 fi
 echo "Deployed ${IMAGE} at http://${FABULIST_HOST}"
 echo "Basic-auth credentials: kubectl -n ${NS} get secret fabulist-app -o jsonpath='{.data}'"
+# Look at what was just deployed, read-only, the way a browser would (SKIP_SMOKE=1 skips it). A problem is reported with a failing exit status,
+# after the deploy itself, so the rollout is not undone behind your back: roll back with `kubectl -n fabulist rollout undo deploy/fabulist`.
+if [ -z "${SKIP_SMOKE:-}" ]; then
+  scripts/live-smoke-k8s.sh || { echo "Deployed, but the live smoke test found problems (above). Roll back with: kubectl -n ${NS} rollout undo deploy/fabulist" >&2; exit 1; }
+fi
