@@ -29,6 +29,9 @@ with sync_playwright() as p:
     names = page.locator(".docs-group > summary").all_inner_texts()
     check(len(names) >= 8 and any(n.startswith("Runs") for n in names) and any(n.startswith("Requirements") for n in names), f"the groups are listed ({len(names)}: {[n.split(chr(10))[0] for n in names][:6]}...)")
     check("Bearer" in page.locator("#intro").inner_text() and "X-Requested-With" in page.locator("#intro").inner_text(), "the introduction explains authentication")
+    font = page.evaluate("getComputedStyle(document.body).fontFamily")
+    check("serif" not in font.replace("sans-serif", "") and ("Helvetica" in font or "Roboto" in font or "Segoe" in font), f"the page uses the app's sans-serif font stack ({font[:60]})")
+    check(page.locator("#intro em").count() == 1 and "*" not in page.locator("#intro").inner_text(), "emphasis in the introduction is rendered, not shown as asterisks")
     total = page.locator(".docs-op").count()
     check(total > 80 and f"{total} operations" in page.locator("#count").inner_text(), f"every operation is rendered ({total})")
 

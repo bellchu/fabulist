@@ -2,6 +2,7 @@
 # Browser checks on the cluster, not on the developer's machine: starts the app from the working tree against a
 # throwaway pgvector database in a temporary namespace and runs each tests/ui/*.py (Playwright, headless Chromium)
 # against it. The namespace is always deleted. Usage: scripts/ui-check-k8s.sh [tests/ui/one.py ...]
+# UI_ARTIFACTS=dir copies what tests save under /tmp/artifacts (screenshots) to that local directory, even when a test fails.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 . scripts/lib-cluster.sh; require_cluster
@@ -9,7 +10,11 @@ cd "$(dirname "$0")/.."
 PYTHON_IMAGE="${PYTHON_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim}"
 scripts_to_run=("$@"); [ "${#scripts_to_run[@]}" -gt 0 ] || scripts_to_run=(tests/ui/*.py)
 NS="fabulist-ui-$(date +%s)-$$"
-trap 'kubectl delete namespace "$NS" --wait=false >/dev/null 2>&1 || true' EXIT
+collect_artifacts() {  # screenshots and other files tests leave in /tmp/artifacts come back to UI_ARTIFACTS (a local directory), pass or fail
+  [ -n "${UI_ARTIFACTS:-}" ] || return 0
+  mkdir -p "$UI_ARTIFACTS" && kubectl -n "$NS" cp -c browser ui:/tmp/artifacts "$UI_ARTIFACTS" >/dev/null 2>&1 || true
+}
+trap 'collect_artifacts; kubectl delete namespace "$NS" --wait=false >/dev/null 2>&1 || true' EXIT
 kubectl create namespace "$NS" >/dev/null
 kubectl -n "$NS" apply -f - >/dev/null <<YAML
 apiVersion: v1
