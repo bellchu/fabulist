@@ -39,3 +39,10 @@ def test_the_changelog_has_an_unreleased_section_on_top_and_dated_releases_below
     text = open(os.path.join(REPO, "CHANGELOG.md")).read()
     headings = re.findall(r"^## (.+)$", text, re.M)
     assert headings[0] == "Unreleased" and all(re.fullmatch(r"\d{4}-\d{2}-\d{2}( .*)?", h) for h in headings[1:]), headings
+
+
+def test_every_test_the_acceptance_page_names_exists():
+    text = open(os.path.join(REPO, "docs", "ACCEPTANCE.md")).read()
+    paths = set(re.findall(r"`((?:tests|scripts)/[\w./-]+)`", text))
+    assert len(paths) >= 30
+    assert [p for p in sorted(paths) if not os.path.exists(os.path.join(REPO, p))] == []

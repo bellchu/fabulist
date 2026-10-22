@@ -302,7 +302,7 @@ A person who hits an unexpected error sees a reference (also the `X-Request-ID` 
 
 ## Architecture
 
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how the pieces fit, the design decisions and why, the trust boundaries and what happens when something fails.
+[docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) lists what to check before rollout and which automated test proves each point. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how the pieces fit, the design decisions and why, the trust boundaries and what happens when something fails.
 
 ## Contributing
 
