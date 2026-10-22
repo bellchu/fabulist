@@ -93,6 +93,20 @@ spec:
           annotations:
             summary: The weekly dependency audit found vulnerable Python packages (or could not run)
             runbook: "README.md#runbook: read the fabulist-dep-audit job log, upgrade pins, run scripts/test.sh, redeploy"
+        - alert: FabulistRateLimiting
+          expr: increase(fabulist_rate_limited_total[10m]) > 100
+          for: 10m
+          labels: {severity: warning, team: fabulist}
+          annotations:
+            summary: Requests are being refused for going over the per-person rate limit (a runaway script, or a limit set too low)
+            runbook: "README.md#runbook: find the person or address in the access logs, fix the loop or raise RATE_LIMIT_PER_MINUTE"
+        - alert: FabulistOriginRefusals
+          expr: increase(fabulist_origin_refused_total[10m]) > 20
+          for: 10m
+          labels: {severity: warning, team: fabulist}
+          annotations:
+            summary: Requests are arriving without the origin secret (someone is reaching the app directly, or the proxy rule was lost)
+            runbook: "README.md#runbook: check the proxy's X-Origin-Secret rule against ORIGIN_SECRET; unexpected sources are probing the origin"
         - alert: FabulistRestarting
           expr: increase(kube_pod_container_status_restarts_total{namespace="fabulist", container="fabulist"}[1h]) >= 2
           labels: {severity: warning, team: fabulist}
@@ -635,6 +649,40 @@ data:
          "expr": "sum by (reason) (increase(fabulist_llm_retries_total[5m]))",
          "refId": "A",
          "legendFormat": "{{reason}}"
+        }
+       ]
+      },
+      {
+       "type": "timeseries",
+       "title": "Refused requests (5 min): rate limit and wrong origin",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 0,
+        "y": 53,
+        "w": 24,
+        "h": 7
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "increase(fabulist_rate_limited_total[5m])",
+         "refId": "A",
+         "legendFormat": "over the rate limit (429)"
+        },
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "increase(fabulist_origin_refused_total[5m])",
+         "refId": "B",
+         "legendFormat": "not through the proxy (403)"
         }
        ]
       },
