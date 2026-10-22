@@ -75,3 +75,12 @@ def test_every_alert_has_a_runbook_row():
     alerts = re.findall(r"- alert: (\w+)", MONITORING)
     assert len(alerts) >= 10 and "FabulistRestarting" in alerts
     assert [a for a in alerts if "| %s |" % a not in readme] == []
+
+
+def test_the_database_size_is_exposed_and_alerted_on(client, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "METRICS_TOKEN", "t")
+    text = client.get("/metrics", headers={"Authorization": "Bearer t"}).text
+    size = [l for l in text.splitlines() if l.startswith("fabulist_database_size_bytes ")]
+    assert size and int(size[0].split()[1]) > 100_000
+    assert "FabulistDatabaseLarge" in MONITORING and "fabulist_database_size_bytes" in MONITORING
