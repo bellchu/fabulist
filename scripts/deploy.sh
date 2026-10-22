@@ -83,6 +83,22 @@ if [ -z "${SKIP_IMAGE_SCAN:-}" ]; then
   scripts/scan-image-k8s.sh "$IMAGE" || { echo "Refusing to deploy $IMAGE: image scan failed (SKIP_IMAGE_SCAN=1 overrides)." >&2; exit 1; }
 fi
 
+# Replacing the server fails the AI runs that are executing (a run cannot be resumed without redoing its AI work and cost), so give them
+# time to finish: wait up to DEPLOY_WAIT_FOR_RUNS minutes (default 15) while any are running. DEPLOY_WAIT_FOR_RUNS=0 skips the wait.
+wait_minutes="${DEPLOY_WAIT_FOR_RUNS:-15}"
+running_runs() {
+  kubectl -n "$NS" exec deploy/fabulist -- python -c "from app import db; print(db.one(\"SELECT count(*) AS n FROM runs WHERE status = 'running'\")['n'])" 2>/dev/null || echo 0
+}
+if [ "$wait_minutes" != 0 ] && kubectl -n "$NS" get deploy/fabulist >/dev/null 2>&1; then
+  waited=0
+  while [ "$(running_runs)" != 0 ] && [ "$waited" -lt $((wait_minutes * 60)) ]; do
+    [ "$waited" = 0 ] && echo "AI runs are executing; waiting up to ${wait_minutes} minutes for them to finish before replacing the server (DEPLOY_WAIT_FOR_RUNS=0 skips this)."
+    sleep 20
+    waited=$((waited + 20))
+  done
+  [ "$(running_runs)" = 0 ] || echo "WARNING: $(running_runs) AI run(s) still executing after ${wait_minutes} minutes; they will fail with 'Interrupted by server restart'." >&2
+fi
+
 sed -e "s|IMAGE|${IMAGE}|" -e "s|FABULIST_HOST|${FABULIST_HOST}|" deploy/k8s/app.yaml | kubectl apply -f -
 sed -e "s|IMAGE|${IMAGE}|" deploy/k8s/audit.yaml | kubectl apply -f -
 kubectl -n "$NS" rollout status deploy/fabulist --timeout=240s

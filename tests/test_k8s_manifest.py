@@ -43,3 +43,11 @@ def test_the_image_limits_malloc_arenas_so_big_uploads_do_not_fragment_the_heap_
 def test_giving_memory_back_never_raises():
     from app import workspace
     workspace._give_memory_back()
+
+
+def test_deploy_waits_for_running_ai_runs_before_replacing_the_server_and_can_be_told_not_to():
+    deploy = open(os.path.join(os.path.dirname(APP_PATH), "..", "..", "scripts", "deploy.sh")).read()
+    wait, apply = deploy.index("DEPLOY_WAIT_FOR_RUNS"), deploy.index("deploy/k8s/app.yaml | kubectl apply")
+    assert wait < apply, "the wait must come before the new image is applied (a restart fails the runs that are executing)"
+    assert "status = 'running'" in deploy or "status='running'" in deploy
+    assert "DEPLOY_WAIT_FOR_RUNS=0" in deploy, "and the wait is documented as skippable"
