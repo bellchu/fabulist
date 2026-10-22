@@ -947,8 +947,7 @@ _LIST_FIELDS = ("actors", "product_scope", "compliance_tags")
 def import_requirements(pid: str, request: Request, body: Dict[str, Any] = Body(...)):
     """Add requirements from CSV text (a spreadsheet saved as CSV, or Fabulist's own Requirements export). See `_import_rows`."""
     _project(pid)
-    rows = list(csv.DictReader(io.StringIO(str(body.get("csv") or "").lstrip("\ufeff"))))
-    return _import_rows(pid, rows, history.actor(request), "CSV")
+    return _import_rows(pid, _csv_rows(str(body.get("csv") or "")), history.actor(request), "CSV")
 
 
 @router.post("/api/projects/{pid}/requirements/import-file")
@@ -971,8 +970,18 @@ def import_requirements_file(pid: str, request: Request, file: UploadFile = File
             text = data.decode("utf-8-sig")
         except UnicodeDecodeError:
             text = data.decode("latin-1")  # a spreadsheet saved as "CSV" on Windows is often not UTF-8
-        return _import_rows(pid, list(csv.DictReader(io.StringIO(text))), history.actor(request), "CSV")
+        return _import_rows(pid, _csv_rows(text), history.actor(request), "CSV")
     raise HTTPException(400, "Choose a .csv or .xlsx file")
+
+
+csv.field_size_limit(config.MAX_UPLOAD_BYTES)  # the default (128 KB per cell) turned a long cell into a server error; long statements are cut to their own limit later
+
+
+def _csv_rows(text: str) -> List[Dict[str, Any]]:
+    try:
+        return list(csv.DictReader(io.StringIO(text.lstrip("\ufeff"))))
+    except csv.Error as exc:
+        raise HTTPException(400, "The file could not be read as CSV (%s)" % exc)
 
 
 def _import_rows(pid: str, rows: List[Dict[str, Any]], who: str, origin: str) -> Dict[str, int]:
