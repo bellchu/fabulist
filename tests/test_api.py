@@ -656,7 +656,7 @@ def test_a_run_with_a_provider_that_needs_a_key_but_has_none_is_refused_at_the_s
     assert r.status_code == 400 and "no API key" in r.json()["detail"] and "AI providers" in r.json()["detail"]
     assert client.get("/api/projects/%s/runs" % pid).json() == [], "no run was recorded"
     # self-hosted OpenAI-compatible endpoints legitimately need no key
-    local = client.post("/api/admin/providers", json={"name": "Ollama", "kind": "openai", "base_url": "http://ollama:11434/v1", "model": "m"}).json()["id"]
+    local = client.post("/api/admin/providers", json={"name": "Ollama", "kind": "openai", "base_url": "http://127.0.0.1:9/v1", "model": "m"}).json()["id"]
     assert client.post("/api/projects/%s/runs" % pid, json={"stage": "requirements", "provider_id": local}).status_code == 202
     _wait(client, pid)
 
