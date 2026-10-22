@@ -309,8 +309,10 @@ class RunCancelled(Exception):
 
 
 def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str, documents: str = "all") -> None:
-    # A queued run waits for a pool worker; claim it now. If it was cancelled (or failed by a restart) while waiting, there is nothing to do.
-    if not db.one("UPDATE runs SET status='running', updated=%s WHERE id=%s AND status IN ('queued', 'running') RETURNING id", (db.now(), run_id)):
+    # A queued run waits for a pool worker; claim it now. Exactly one server can: if it was cancelled, failed, or already taken by another
+    # server (a rolling deploy briefly runs two), there is nothing to do.
+    if not db.one("UPDATE runs SET status='running', claimed=TRUE, updated=%s WHERE id=%s AND claimed = FALSE AND status IN ('queued', 'running') RETURNING id",
+                  (db.now(), run_id)):
         return
     started = time.monotonic()
     usage = {"in": 0, "out": 0}
@@ -574,10 +576,24 @@ def start_run(pid: str, body: RunIn, request: Request):
             metrics.inc("fabulist_runs_total", stage=body.stage, status="rejected")
             raise HTTPException(429, "%d AI runs are in progress and the queue is full (%d waiting). Try again in a few minutes." % (busy, waiting),
                                 headers={"Retry-After": "60"})
-        c.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, actor, created) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                  (rid, pid, status, body.stage, profile["name"], profile["model"], history.actor(request), db.now()))
+        c.execute("INSERT INTO runs (id, project_id, status, stage, provider, model, actor, created, provider_id, run_scope, run_documents) "
+                  "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                  (rid, pid, status, body.stage, profile["name"], profile["model"], history.actor(request), db.now(), profile["id"], body.scope, body.documents))
     _run_pool().submit(_execute_run, rid, pid, body.stage, profile["id"], body.scope, body.documents)
     return {"id": rid, "status": status}
+
+
+def resume_waiting_runs() -> int:
+    """After a restart, start again the runs that were still waiting for a slot (oldest first), instead of failing them. A waiting run has
+    done no work yet, so nothing is lost; one that cannot be resumed (it predates this) is failed with a message. Returns how many resumed."""
+    resumed = 0
+    for r in db.rows("SELECT id, project_id, stage, provider_id, run_scope, run_documents FROM runs WHERE status='queued' AND claimed = FALSE ORDER BY created, id"):
+        if not r["provider_id"]:
+            db.execute("UPDATE runs SET status='failed', progress='', error='The server restarted while this run was waiting; start it again.' WHERE id=%s", (r["id"],))
+            continue
+        _run_pool().submit(_execute_run, r["id"], r["project_id"], r["stage"], r["provider_id"], r["run_scope"] or "all", r["run_documents"] or "all")
+        resumed += 1
+    return resumed
 
 
 @router.post("/api/projects/{pid}/runs/{rid}/cancel")
