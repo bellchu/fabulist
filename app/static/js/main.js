@@ -63,7 +63,7 @@ function shell(route) {
   const content = h("div", { class: "content", id: "content", tabindex: "-1" }, h("div", { class: "crumbs", id: "crumbs" }));
   const skip = h("a", { class: "skip-link", href: "#content", onclick: (e) => { e.preventDefault(); content.focus(); } }, "Skip to content");
   document.getElementById("app").replaceChildren(h("div", { class: "shell" }, skip, header, nav, h("main", { class: "main" }, content),
-    h("footer", { class: "app-footer" }, "Fabulist " + state.meta.version)));  // support tickets quote this
+    h("footer", { class: "app-footer" }, "Fabulist " + state.meta.version + (state.meta.support_contact ? " · Support: " + state.meta.support_contact : ""))));  // support tickets quote the version
   return content;
 }
 

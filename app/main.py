@@ -346,7 +346,7 @@ async def unexpected_error(request: Request, exc: Exception):
     """Anything not handled above: no internals in the answer, but an id the person can quote and the log can be searched for."""
     rid = getattr(request.state, "request_id", "") or uuid.uuid4().hex[:12]
     log.error("unhandled error", exc_info=exc, extra={"fields": {"request_id": rid, "method": request.method, "path": request.url.path}})
-    return JSONResponse({"detail": "Something went wrong on our side. If it keeps happening, tell your administrator this reference: " + rid, "request_id": rid},
+    return JSONResponse({"detail": "Something went wrong on our side. If it keeps happening, tell " + (config.SUPPORT_CONTACT or "your administrator") + " this reference: " + rid, "request_id": rid},
                         status_code=500, headers={"X-Request-ID": rid})
 
 
@@ -372,6 +372,7 @@ def livez() -> Dict[str, str]:
 def meta() -> Dict[str, Any]:
     return {
         "version": config.VERSION,
+        "support_contact": config.SUPPORT_CONTACT,
         "platforms": {k: v["label"] for k, v in PLATFORMS.items()},
         "formats": [{"id": k, "ext": v[1], "label": v[2], "description": v[3]} for k, v in exporters.EXPORTERS.items()],
         "requirement_types": pipeline.REQ_TYPES,

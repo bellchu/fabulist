@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Optional `SUPPORT_CONTACT` (a helpdesk address, a chat channel): shown in the page footer ("Fabulist <version> · Support: ...") and in the reference people are asked to quote when something unexpected goes wrong ("tell <contact> this reference"), instead of the generic "your administrator". Exposed as `support_contact` in `GET /api/meta`. Tests: `tests/test_support_contact.py`, `tests/ui/support_contact.py`.
 - A browser with JavaScript turned off now sees "Fabulist needs JavaScript ..." instead of a blank page (styled with a class, since the Content Security Policy blocks inline style attributes). Test in `tests/test_security_headers.py`.
 (New entries go here; they move under a dated heading when a release is marked.)
 
