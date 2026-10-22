@@ -172,7 +172,7 @@ Check dependencies for known vulnerabilities before releases:
 docker run --rm -v "$PWD:/src" -w /src python:3.12-slim sh -c "pip install -q pip-audit && pip-audit -r requirements.txt"
 ```
 
-`samples/order-to-cash-brd.md` is a small BRD for trying the workflow.
+The same small BRD ships inside the app (`app/samples/order-to-cash-brd.md`): the **Try a sample project** button on an empty project list creates a project holding it (`POST /api/projects/sample`), and extraction works offline with no AI provider.
 
 ## API
 

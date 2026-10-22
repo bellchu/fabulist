@@ -150,7 +150,11 @@ function renderHome(content, keepView = false) {
       : empty({
         iconName: "folder", title: "No projects yet",
         text: "Create a project for a business application (e.g. CRM order capture), then upload its BRDs.",
-        action: h("button", { class: "btn btn-primary", onclick: guard(newProjectDialog) }, icon("plus"), "Create project") })));
+        action: h("span", { class: "row" }, h("button", { class: "btn btn-primary", onclick: guard(newProjectDialog) }, icon("plus"), "Create project"),
+          state.me.role === "viewer" ? null : h("button", { class: "btn", title: "A small BRD to try the workflow with: no AI provider is needed", onclick: guard(async () => {
+            const p = await api.post("/api/projects/sample");
+            location.hash = "#/p/" + p.id + "/sources";
+          }) }, "Try a sample project")) })));
     return;
   }
   const card = (p) => {
