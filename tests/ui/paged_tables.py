@@ -67,5 +67,17 @@ with sync_playwright() as p:
     check(rows() == 600, f"stories: Show more draws 300 more ({rows()})")
     page.get_by_role("checkbox", name="Select all 700 matching").check()
     check("700 selected" in page.locator(".bulkbar").inner_text(), "stories: select all selects every matching story")
+
+    # the documents of a large intake
+    docs = api.post(BASE + "/api/projects", data={"name": "Many BRDs", "platform": "generic"}, headers=H).json()["id"]
+    for i in range(350):
+        api.post(f"{BASE}/api/projects/{docs}/documents/text", data={"name": "brd-%03d.md" % i, "text": "# Area\nThe system shall do thing %d for the buyer." % i}, headers=H)
+    page.goto(f"{BASE}/#/p/{docs}/sources")
+    page.reload()
+    page.wait_for_selector("text=brd-000.md")
+    doc_rows = lambda: page.locator("tr", has_text="words").count()  # noqa: E731
+    check(doc_rows() == 300 and "Showing 300 of 350" in page.locator("tr.pager").inner_text(), f"sources: 300 of 350 documents are listed first ({doc_rows()})")
+    page.get_by_role("button", name="Show 50 more").click()
+    check(doc_rows() == 350 and page.locator("tr.pager").count() == 0, f"sources: Show more lists the rest ({doc_rows()})")
     browser.close()
 sys.exit(1 if failures else 0)
