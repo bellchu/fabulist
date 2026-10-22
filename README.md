@@ -110,6 +110,7 @@ def verify(secret: str, body: bytes, headers, tolerance=300) -> bool:
 | `REPO_CLONE_TIMEOUT`, `MAX_REPO_MB` | seconds a Git sync may spend cloning (keep under the proxy timeout), and the size a clone may grow to before it is stopped | `60`, `500` |
 | `MAX_ARCHIVE_MB` | size of a project archive that may be imported | `50` |
 | `MAX_INTERACTIVE_AI_CALLS` | AI calls made inside a request (Refine, Estimate, Ask the BRDs, provider test) in flight at once; beyond that the request is refused immediately with `429` instead of holding a web thread | `8` |
+| `MALLOC_ARENA_MAX` | set to `2` in the image (not a Fabulist setting): without it glibc kept every thread's freed memory and 20 large uploads ran the pod out of memory | `2` |
 | `MAX_CONCURRENT_RUNS` | AI runs in progress at once on this server; they run in their own pool so they can never starve the web requests. A run started beyond the limit is queued (see `MAX_QUEUED_RUNS`) | `4` |
 | `MAX_QUEUED_RUNS` | Runs allowed to wait for a free slot, oldest first; a start beyond this gets `429` with `Retry-After`. Runs still waiting when the server restarts (for example during a deploy) are started again by the new server, in order; a run that was already executing is failed with a clear message | `50` |
 | `STALE_RUN_MINUTES` | an AI run with no progress for this long is marked stuck and stops blocking its project (starting a new run recovers it) | `15` |
@@ -119,6 +120,8 @@ def verify(secret: str, body: bytes, headers, tolerance=300) -> bool:
 | `OIDC_USERNAME_CLAIM`, `OIDC_SCOPES` | claim used as username; requested scopes | `email`; `openid email profile` |
 | `OIDC_AUTO_PROVISION_ROLE` | role for first-time SSO users (empty = only pre-registered users) | empty |
 | `DB_POOL_MAX`, `DB_POOL_TIMEOUT` | database connections per process, and seconds a request waits for one before getting a retryable 503 | `20`, `10` |
+| `MAX_CONCURRENT_PARSES`, `PARSE_WAIT_SECONDS` | documents read and indexed at once (a large Word or PDF file takes tens of MB and seconds of CPU); the rest wait, and get `503` with `Retry-After` after this many seconds | `2`, `60` |
+| `LLM_TIMEOUT_SECONDS` | default timeout for one AI provider request (the Generation settings page overrides it) | `120` |
 | `MAX_RUN_AI_CALLS` | background AI calls in flight at once across all runs (each run asks `ai_concurrency` sections at a time, a generation setting, default 4) | `8` |
 | `PUSH_BUDGET_SECONDS` | a tracker push stops after this long and reports how many stories remain (push again to continue; nothing is duplicated). Keep it under the proxy timeout | `60` |
 | `SESSION_IDLE_MINUTES` | sign SSO users out after this much inactivity (activity extends the session, up to its 8 h cap); `0` disables | `30` |
@@ -208,6 +211,21 @@ in-cluster on first deploy. They are never stored in the repository.
   covers request rate, status and latency per route, AI runs by stage and outcome, LLM tokens,
   tracker pushes, and inventory gauges. It also reports `fabulist_database_up` (the scrape keeps working during a database outage), failed sign-ins and token attempts by kind, edit conflicts, 503s from an unreachable database, and stories left unpushed by the time limit. `deploy/k8s/monitoring.yaml` adds a ServiceMonitor,
   alert rules and a Grafana dashboard for kube-prometheus-stack.
+
+### Capacity and sizing
+
+Measured on the cluster with `scripts/load-test-k8s.sh` (offline AI provider, one app pod with 1 GiB of memory and the default settings above). Re-run it after changing limits or the pod's resources.
+
+| Scenario | Result |
+|---|---|
+| 20 requesters each submitting 20 BRDs (~30 KB) at the same moment | all 400 stored in about 25 s; the health probe never waits more than 0.25 s; memory peak about 530 MiB |
+| 20 runs started at the same instant against an AI provider that takes 0.25 s per request | 4 run, 16 queue, none refused; all finish in about 31 s; never more than 4 running |
+| 20 requesters uploading a 6 MB Word file at the same moment | all stored in about 40 s (two are read at a time); memory peak about 460 MiB |
+| one project with 1,100 BRDs (up to 165 MB of text) | storing 85 BRDs/s; listing documents 0.04 s; passage search 10 ms; project export streams in 0.3 s with a 210 MiB peak; read into requirements in 44 batched runs |
+| 300 projects | home list, project summary, metrics scrape and admin overview about 10 ms each |
+| one project with 50,600 requirements | no crash (it ran the pod out of memory before near-duplicate detection was bounded); 3-5 s per heavy call, 372 MiB peak |
+
+What to turn when it is not enough: more concurrent AI runs (`MAX_CONCURRENT_RUNS`, bounded by what the AI provider allows) and more background calls (`MAX_RUN_AI_CALLS`, with the *AI requests in parallel per run* generation setting); more documents read at once (`MAX_CONCURRENT_PARSES`, about 100 MB each for a very large file) only together with a larger memory limit in `deploy/k8s/app.yaml`. With a real AI provider a run is as long as the provider is slow: 46 sections at 30 s each is about 23 minutes sequentially; the default of 4 sections in parallel, under the cap of 8 calls across all runs, cuts that to a few minutes per run and about an hour for a burst of 20. A run is limited to *Max sections per run* (default 200); larger intakes are read in batches ("New BRDs only") and large backlogs get their stories in batches ("Requirements without stories").
 
 ### Runbook
 
