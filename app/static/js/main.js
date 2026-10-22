@@ -1,5 +1,5 @@
 // App shell, routing and the projects home view.
-import { h, mount, icon, api, guard, toast, modal, field, requireValue, select, empty, badge, timeAgo, meter, setUnauthorizedHandler, markScrollRegions } from "./core.js";
+import { h, mount, icon, api, guard, toast, modal, field, requireValue, select, empty, badge, timeAgo, meter, setUnauthorizedHandler, markScrollRegions, accessPicker } from "./core.js";
 import { renderProject } from "./project.js";
 import { renderAdmin } from "./admin.js";
 import { renderAccount } from "./account.js";
@@ -131,20 +131,20 @@ function renderHome(content, keepView = false) {
     h("div", { class: "grow" }, h("div", { class: "object-label" }, archivedList ? "Archived projects" : "Projects"), h("h1", {}, archivedList ? "Archived" : "All projects"),
       h("p", { class: "sub" }, list.length + (list.length === 1 ? " item" : " items") + (archivedList
         ? " · Read-only. Open a project to restore it." : " · Each project turns BRDs into reviewed requirements and a traceable backlog."))),
-    h("div", { class: "row" }, toggle, state.me.role === "viewer" ? null : importButton(), state.me.role === "viewer" ? null : h("button", { class: "btn btn-primary", onclick: newProjectDialog }, "New")));
+    h("div", { class: "row" }, toggle, state.me.role === "viewer" ? null : importButton(), state.me.role === "viewer" ? null : h("button", { class: "btn btn-primary", onclick: guard(newProjectDialog) }, "New")));
   if (!list.length) {
     mount(content, head, h("div", { class: "card" }, archivedList
       ? empty({ iconName: "folder", title: "No archived projects", text: "Archived projects are kept read-only, with their audit trail, until an administrator deletes them." })
       : empty({
         iconName: "folder", title: "No projects yet",
         text: "Create a project for a business application (e.g. CRM order capture), then upload its BRDs.",
-        action: h("button", { class: "btn btn-primary", onclick: newProjectDialog }, icon("plus"), "Create project") })));
+        action: h("button", { class: "btn btn-primary", onclick: guard(newProjectDialog) }, icon("plus"), "Create project") })));
     return;
   }
   const card = (p) => {
     const pct = p.requirements ? Math.round((100 * p.requirements_approved) / p.requirements) : 0;
     return h("a", { class: "card project-card", href: "#/p/" + p.id },
-      h("div", { class: "row" }, h("h3", { class: "grow" }, p.name), badge(state.meta.platforms[p.platform] || p.platform, "accent")),
+      h("div", { class: "row" }, h("h3", { class: "grow" }, p.name), p.visibility === "members" ? badge("Private", "amber") : null, badge(state.meta.platforms[p.platform] || p.platform, "accent")),
       p.description ? h("p", { class: "muted small" }, p.description) : null,
       h("div", { class: "kv" },
         h("div", {}, h("b", {}, p.documents), h("span", {}, "BRDs")),
@@ -195,16 +195,21 @@ function importButton() {
   return h("span", {}, file, h("button", { class: "btn", title: "Create a project from a full archive", onclick: () => file.click() }, icon("upload"), "Import"));
 }
 
-export function newProjectDialog() {
+export async function newProjectDialog() {
   const name = h("input", { type: "text", maxlength: "120", placeholder: "e.g. CRM order capture" });
   const platform = select(Object.entries(state.meta.platforms), "salesforce");
   const desc = h("textarea", { rows: 3, placeholder: "Scope, business unit, release (optional)" });
+  const people = state.me.username === "anonymous" ? [] : await api.get("/api/people");  // choosing people needs named accounts
+  const access = people.length ? accessPicker(people) : null;
   modal({
     title: "New project", description: "The target platform shapes story vocabulary (objects, modules, integrations).",
-    body: h("div", { class: "stack" }, field("Project name", name), field("Target platform", platform), field("Description", desc)),
+    body: h("div", { class: "stack" }, field("Project name", name), field("Target platform", platform), field("Description", desc),
+      access ? field("Who can see it", access.el) : null),
     actions: [{ label: "Create project", kind: "btn-primary", onClick: async () => {
       requireValue(name, "Project name is required");
-      const p = await api.post("/api/projects", { name: name.value, platform: platform.value, description: desc.value });
+      const chosen = access ? access.value() : { visibility: "everyone", members: [] };
+      const p = await api.post("/api/projects", { name: name.value, platform: platform.value, description: desc.value, visibility: chosen.visibility });
+      if (chosen.visibility === "members") await api.put("/api/projects/" + p.id + "/access", chosen);
       location.hash = "#/p/" + p.id + "/sources";
     } }],
   });

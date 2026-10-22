@@ -326,6 +326,20 @@ export function segmented(options, value, onChange) {
   return wrap;
 }
 
+// "Who can see this project": everyone, or only people chosen from the named accounts (administrators always can).
+// `people` is [{username, role}]; returns {el, value()} with value() = {visibility, members}.
+export function accessPicker(people, visibility = "everyone", members = []) {
+  let mode = visibility;
+  const tags = tagsInput(members, people.map((p) => p.username));
+  const detail = h("div", { class: "stack", style: { gap: "6px" } }, tags.el,
+    h("div", { class: "muted small" }, "People keep their own role: a viewer stays read-only. Administrators can always see every project, and you stay in."));
+  const show = () => { detail.hidden = mode !== "members"; };
+  const el = h("div", { class: "stack", style: { gap: "8px" } },
+    segmented([["everyone", "Everyone"], ["members", "Only people I choose"]], mode, (v) => { mode = v; show(); }), detail);
+  show();
+  return { el, value: () => ({ visibility: mode, members: tags.get() }) };
+}
+
 export function download(url) {
   const a = h("a", { href: url, download: "" });
   document.body.append(a); a.click(); a.remove();

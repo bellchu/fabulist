@@ -149,6 +149,10 @@ docker run --rm -v "$PWD:/src" -w /src python:3.12-slim sh -c "pip install -q pi
 
 `samples/order-to-cash-brd.md` is a small BRD for trying the workflow.
 
+## Who can see a project
+
+By default every signed-in person sees every project. With named accounts, a project can instead be **private**: choose "Only people I choose" when creating it, or under Edit > Who can see this project. Only the people chosen, and administrators, can then see it, list it, open anything inside it, export it or search it; everyone else gets "not found" (the project does not announce that it exists). People keep their own role, so a chosen viewer is still read-only, and the person making the change always stays in. The check is one guard on every route that names a project, so routes added later are covered too. Changes to who can see a project appear in its audit trail. `GET/PUT /api/projects/{id}/access` and `GET /api/people` expose it to scripts.
+
 ## Deploy to Kubernetes
 
 `deploy/k8s` contains the namespace, a pgvector Postgres StatefulSet, the app and its network policy.

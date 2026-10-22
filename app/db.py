@@ -53,6 +53,10 @@ SCHEMA = [
          action TEXT NOT NULL, actor TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
          changes JSONB NOT NULL DEFAULT '{}', created TEXT NOT NULL)""",
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS archived TEXT",
+    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'everyone'",  # 'everyone', or 'members' (see project_members)
+    """CREATE TABLE IF NOT EXISTS project_members (
+         project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, username TEXT NOT NULL,
+         added_by TEXT NOT NULL DEFAULT '', created TEXT NOT NULL, PRIMARY KEY (project_id, username))""",
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS updated TEXT",
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS requests INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE requirements ADD COLUMN IF NOT EXISTS rev INTEGER NOT NULL DEFAULT 1",

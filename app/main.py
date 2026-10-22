@@ -51,18 +51,27 @@ async def lifespan(_app: FastAPI):
 _ARCHIVE_EXEMPT = ("/search", "/ask", "/archive", "/restore")
 
 
-def archived_is_read_only(request: Request) -> None:
+def project_guards(request: Request) -> None:
+    """One guard on every route that names a project (so a route added later cannot forget it): who may see it, then whether it may change."""
     pid = request.path_params.get("pid")
-    if not pid or request.method in ("GET", "HEAD", "OPTIONS") or request.url.path.endswith(_ARCHIVE_EXEMPT):
+    if not pid:
+        return
+    row = db.one("SELECT archived, visibility FROM projects WHERE id=%s", (pid,))
+    if not row:
+        return  # the route answers 404 itself
+    if row["visibility"] == "members" and getattr(request.state, "role", "admin") != "admin":
+        user = getattr(request.state, "user", "")
+        if not db.one("SELECT 1 AS x FROM project_members WHERE project_id=%s AND username=%s", (pid, user)):
+            raise HTTPException(404, "Project not found")  # not 403: a project one may not see does not announce that it exists
+    if request.method in ("GET", "HEAD", "OPTIONS") or request.url.path.endswith(_ARCHIVE_EXEMPT):
         return
     if request.method == "DELETE" and request.url.path == "/api/projects/" + pid:
         return  # permanent deletion has its own rules
-    row = db.one("SELECT archived FROM projects WHERE id=%s", (pid,))
-    if row and row["archived"]:
+    if row["archived"]:
         raise HTTPException(409, "This project is archived and read-only. Restore it to make changes.")
 
 
-app = FastAPI(title="Fabulist", lifespan=lifespan, dependencies=[Depends(archived_is_read_only)])
+app = FastAPI(title="Fabulist", lifespan=lifespan, dependencies=[Depends(project_guards)])
 app.include_router(admin.router)
 app.include_router(repos.router)
 app.include_router(integrations.router)
