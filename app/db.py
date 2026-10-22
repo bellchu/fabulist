@@ -106,6 +106,7 @@ SCHEMA = [
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS provider_id TEXT",  # how a run is started, so a waiting run can be resumed after a restart
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS run_scope TEXT",
+    "ALTER TABLE runs ADD COLUMN IF NOT EXISTS started TEXT",  # when a worker began executing it (created is when it was queued)
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS run_documents TEXT",
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS claimed BOOLEAN NOT NULL DEFAULT FALSE",  # set by the one server that executes it
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS extracted TEXT",  # when an extraction run read it; NULL = not yet read

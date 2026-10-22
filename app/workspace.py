@@ -365,8 +365,8 @@ class RunCancelled(Exception):
 def _execute_run(run_id: str, pid: str, stage: str, provider_id: str, scope: str, mode: str = "all") -> None:
     # A queued run waits for a pool worker; claim it now. Exactly one server can: if it was cancelled, failed, or already taken by another
     # server (a rolling deploy briefly runs two), there is nothing to do.
-    if not db.one("UPDATE runs SET status='running', claimed=TRUE, updated=%s WHERE id=%s AND claimed = FALSE AND status IN ('queued', 'running') RETURNING id",
-                  (db.now(), run_id)):
+    if not db.one("UPDATE runs SET status='running', claimed=TRUE, updated=%s, started=%s WHERE id=%s AND claimed = FALSE AND status IN ('queued', 'running') RETURNING id",
+                  (db.now(), db.now(), run_id)):
         return
     started = time.monotonic()
     usage = {"in": 0, "out": 0}

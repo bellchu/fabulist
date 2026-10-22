@@ -92,6 +92,7 @@ with sync_playwright() as p:
     page.get_by_role("button", name="Open REQ-001").focus()
     page.keyboard.press("Enter")
     page.wait_for_selector(".drawer")
+    page.wait_for_function("document.activeElement.closest('.drawer')")  # the drawer moves focus into itself shortly after opening: do not race it
     page.get_by_role("button", name="Delete", exact=True).focus()
     page.keyboard.press("Enter")
     page.wait_for_selector(".modal")
