@@ -25,16 +25,21 @@ STAGES = {"requirements", "stories"}
 
 # ---- models --------------------------------------------------------------
 
+def _choice(default: str, values: List[str], description: str) -> Any:
+    """A string field validated in the route (so the answer stays a readable 400), but documented in the OpenAPI schema with its allowed values."""
+    return Field(default=default, description=description, json_schema_extra={"enum": values})
+
+
 class ProjectIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     platform: str = "generic"
     description: str = Field(default="", max_length=2000)
-    visibility: str = "everyone"  # "members": only the people chosen under the project's access (and administrators) can see it
+    visibility: str = _choice("everyone", ["everyone", "members"], "`members`: only the people chosen under the project's access, and administrators, can see it.")
 
 
 class AccessIn(BaseModel):
-    visibility: str
-    members: List[str] = Field(default_factory=list, max_length=500)
+    visibility: str = Field(description="Who can see the project.", json_schema_extra={"enum": ["everyone", "members"]})
+    members: List[str] = Field(default_factory=list, max_length=500, description="Usernames (named accounts) chosen when visibility is `members`; the caller always stays in.")
 
 
 class ProjectPatch(BaseModel):
@@ -49,16 +54,14 @@ class TextDocIn(BaseModel):
 
 
 class RunIn(BaseModel):
-    stage: str
-    provider_id: Optional[str] = None
-    scope: str = "all"  # stories stage: "approved" or "all" (non-excluded)
-    # requirements stage: "all" starts over from every BRD in one run; "new" reads only BRDs not yet read and adds to what exists;
-    # "reset" starts over in batches: the first batch replaces everything (when it is saved), the rest then show as new
-    documents: str = "all"
-    # stories stage: "all" starts over from every requirement in scope; "uncovered" writes stories only for requirements no story covers,
-    # in batches that fit the limit, and adds them to the stories that exist
-    # "reset" starts over in batches, as for requirements: the first batch replaces every story when it is saved, the rest then have none
-    stories_for: str = "all"
+    stage: str = Field(description="What to run.", json_schema_extra={"enum": ["requirements", "stories"]})
+    provider_id: Optional[str] = Field(default=None, description="AI provider to use; the default provider when omitted.")
+    scope: str = _choice("all", ["all", "approved"], "Stories stage: which requirements are in scope: approved only, or approved and draft.")
+    documents: str = _choice("all", ["all", "new", "reset"], "Requirements stage. `all` reads every BRD in one run and replaces the requirements; `new` reads only the BRDs not read yet "
+                             "(as many as fit 'Max sections per run') and adds to what exists; `reset` starts over in batches: the first batch replaces everything when it is "
+                             "saved, the rest then show as new.")
+    stories_for: str = _choice("all", ["all", "uncovered", "reset"], "Stories stage. `all` writes stories for every requirement in scope and replaces the stories; `uncovered` writes "
+                               "stories only for requirements no story covers and adds them; `reset` starts over in batches, as for requirements.")
 
 
 class SearchIn(BaseModel):
