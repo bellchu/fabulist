@@ -50,5 +50,18 @@ with sync_playwright() as p:
     box.fill("qwertyuiop-nothing"); box.press("Enter")
     page.wait_for_selector("text=Nothing found")
     check(True, "a search with no hits says so")
+
+    # the header is rebuilt on every route (a refresh, a poll that re-renders): half-typed text and the cursor must survive it
+    page.goto(BASE + "/#/")
+    page.wait_for_selector(".project-card")
+    box = page.get_by_label("Search projects, requirements and stories")
+    box.fill(""); box.type("zebra")
+    page.evaluate("window.dispatchEvent(new HashChangeEvent('hashchange'))")
+    page.wait_for_timeout(800)
+    box = page.get_by_label("Search projects, requirements and stories")
+    check(box.input_value() == "zebra", "typed text survives the page being redrawn (%r)" % box.input_value())
+    check(page.evaluate("document.activeElement === document.querySelector('.global-search input')"), "and so does the focus")
+    box.type("fish")
+    check(box.input_value() == "zebrafish", "typing carries on where it was")
     browser.close()
 sys.exit(1 if failures else 0)

@@ -11,16 +11,25 @@ function navItem(href, label, active, iconName) {
   return h("a", { class: "nav-item" + (active ? " active" : ""), href, "aria-current": active ? "page" : null }, iconName ? icon(iconName) : null, label);
 }
 
-function globalSearch() {
+// One input for the life of the page: the header is rebuilt on every route, and a new input would lose half-typed text and the cursor.
+let searchInput = null;
+
+function globalSearch(route) {
   const listId = "project-search";
-  const input = h("input", { type: "search", list: listId, placeholder: "Search projects, requirements, stories…", "aria-label": "Search projects, requirements and stories" });
-  input.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter") return;
-    const q = input.value.trim().toLowerCase();
-    const hit = state.projects.find((p) => p.name.toLowerCase() === q);
-    location.hash = hit ? "#/p/" + hit.id : "#/search/" + encodeURIComponent(input.value.trim());  // an exact project name opens it; anything else is a search
-  });
-  return h("div", { class: "global-search" }, icon("search"), input, h("datalist", { id: listId }, state.projects.map((p) => h("option", { value: p.name }))));
+  if (!searchInput) {
+    searchInput = h("input", { type: "search", list: listId, placeholder: "Search projects, requirements, stories…", "aria-label": "Search projects, requirements and stories" });
+    searchInput.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      const text = searchInput.value.trim();
+      const hit = state.projects.find((p) => p.name.toLowerCase() === text.toLowerCase());
+      if (hit) { searchInput.value = ""; searchInput.blur(); }
+      location.hash = hit ? "#/p/" + hit.id : "#/search/" + encodeURIComponent(text);  // an exact project name opens it; anything else is a search
+    });
+  }
+  const typing = document.activeElement === searchInput;
+  if (typing) setTimeout(() => { searchInput.focus(); searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length); }, 0);  // re-attaching drops the focus
+  else if (route[0] !== "search") searchInput.value = "";  // the words of a finished search do not follow you around
+  return h("div", { class: "global-search" }, icon("search"), searchInput, h("datalist", { id: listId }, state.projects.map((p) => h("option", { value: p.name }))));
 }
 
 function shell(route) {
@@ -28,7 +37,7 @@ function shell(route) {
   const current = route[0] === "p" ? state.projects.find((p) => p.id === route[1]) : null;
   const header = h("header", { class: "global-header" },
     h("a", { class: "app-logo", href: "#/" }, h("span", { class: "brand-mark" }, "F"), "Fabulist"),
-    globalSearch(),
+    globalSearch(route),
     h("div", { class: "user-chip" },
       state.me.role === "viewer" ? badge("Read-only", "amber") : null,
       isAdmin ? h("a", { class: "btn btn-ghost icon-btn", href: "#/admin/overview", title: "Setup", "aria-label": "Setup" }, icon("settings")) : null,
