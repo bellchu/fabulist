@@ -15,6 +15,13 @@ spec:
       labels:
         app: fabulist
     spec:
+      automountServiceAccountToken: false   # the app never talks to the Kubernetes API
+      terminationGracePeriodSeconds: 60     # lets in-flight generation runs stop cleanly (see shutdown_runs)
+      securityContext:
+        seccompProfile: {type: RuntimeDefault}
+      volumes:
+        - name: tmp
+          emptyDir: {}                      # the only writable path: repository clones and upload scratch space
       containers:
         - name: fabulist
           image: IMAGE
@@ -24,7 +31,11 @@ spec:
           envFrom:
             - secretRef:
                 name: fabulist-app
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
           env:
+            - name: HOME
+              value: /tmp                   # git writes its config under $HOME
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -43,6 +54,8 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
 ---
 apiVersion: v1
 kind: Service
