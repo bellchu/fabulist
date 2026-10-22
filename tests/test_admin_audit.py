@@ -133,3 +133,20 @@ def test_token_lifecycle_is_recorded_without_the_token(secured):
 
 
 ADMIN_TOKENS = "/api/admin/tokens"
+
+
+def test_permanently_deleting_a_project_outlives_the_project(client):
+    pid = client.post("/api/projects", json={"name": "Doomed", "platform": "generic"}).json()["id"]
+    client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall export invoices to CSV."})
+    client.post("/api/projects/%s/archive" % pid, json={})
+    assert client.delete("/api/projects/%s" % pid).status_code == 204
+    gone = [r for r in trail(client) if r["action"] == "project deleted"]
+    assert len(gone) == 1 and gone[0]["target"] == "Doomed" and gone[0]["summary"] == "0 BRDs, 1 requirements, 0 stories"
+    assert gone[0]["changes"] == {"project_id": pid}
+    assert client.delete("/api/projects/%s" % pid).status_code == 404 and len(trail(client, action="project deleted")) == 1
+
+
+def test_a_refused_delete_leaves_no_entry(client):
+    pid = client.post("/api/projects", json={"name": "Alive", "platform": "generic"}).json()["id"]
+    assert client.delete("/api/projects/%s" % pid).status_code == 409  # not archived
+    assert trail(client, action="project deleted") == []

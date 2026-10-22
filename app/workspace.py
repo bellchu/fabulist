@@ -13,7 +13,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
-from . import config, db, embeddings, exporters, history, integrations, llm, metrics, parsing, pipeline, quality, settings
+from . import audit, config, db, embeddings, exporters, history, integrations, llm, metrics, parsing, pipeline, quality, settings
 from .fairuse import ai_fair_use
 from .profiles import PLATFORMS
 
@@ -223,7 +223,12 @@ def delete_project(pid: str, request: Request):
         raise HTTPException(403, "Only administrators can permanently delete a project")
     if not project["archived"]:
         raise HTTPException(409, "Archive the project before deleting it permanently")
+    held = db.one("SELECT (SELECT count(*) FROM documents WHERE project_id=%s) AS documents, (SELECT count(*) FROM requirements WHERE project_id=%s) AS requirements, "
+                  "(SELECT count(*) FROM stories WHERE project_id=%s) AS stories", (pid, pid, pid))
     db.execute("DELETE FROM projects WHERE id = %s", (pid,))
+    # The project's own trail goes with it, so the deletion is the one thing that must outlive it.
+    audit.record(request, "project deleted", project["name"], "%d BRDs, %d requirements, %d stories" % (held["documents"], held["requirements"], held["stories"]),
+                 {"project_id": pid})
 
 
 # ---- documents -----------------------------------------------------------
