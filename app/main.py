@@ -38,11 +38,24 @@ SECURITY_HEADERS = {
 def recover_runs_after_restart() -> None:
     """A restart kills the runs this server was executing, which cannot be resumed (they would start over and spend the AI cost again), and
     empties its in-memory queue, which can: runs that were only waiting for a slot are started again, in order."""
-    db.execute("UPDATE runs SET status='failed', error='Interrupted by server restart' WHERE status='running'")
+    workspace.heartbeat()
+    # Only runs nobody owns (rows from before owners were recorded): those of another live server are left alone, and those of one that stopped
+    # are found by the sweeper within about a minute.
+    db.execute("UPDATE runs SET status='failed', error='Interrupted by server restart' WHERE status='running' AND owner IS NULL")
     workspace.resume_waiting_runs()
 
 
 SWEEP_SECONDS = 60
+
+
+async def beat_forever() -> None:
+    """Tell the other instances this one is alive, every few seconds (see run ownership in the architecture notes)."""
+    while True:
+        await asyncio.sleep(10)
+        try:
+            await run_in_threadpool(workspace.heartbeat)
+        except Exception:  # noqa: BLE001 - a database blip must not end the heartbeat
+            log.warning("heartbeat failed", exc_info=True)
 
 
 async def sweep_stuck_runs() -> None:
@@ -62,9 +75,10 @@ async def lifespan(_app: FastAPI):
     settings.seed()
     taxonomy.seed()
     recover_runs_after_restart()
-    sweeper = asyncio.create_task(sweep_stuck_runs())
+    sweeper, beat = asyncio.create_task(sweep_stuck_runs()), asyncio.create_task(beat_forever())
     yield
     sweeper.cancel()
+    beat.cancel()
     workspace.shutdown_runs()
     db.close()
 
