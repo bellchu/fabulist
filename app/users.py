@@ -305,15 +305,18 @@ def create_token(request: Request, body: Dict[str, Any] = Body(...)):
     expires = (now + timedelta(days=days)).isoformat(timespec="milliseconds")
     db.execute("INSERT INTO api_tokens (id, user_id, name, prefix, token_hash, created, expires) VALUES (%s,%s,%s,%s,%s,%s,%s)",
                (tid, me["id"], name, token[:8], hash_token(token), db.now(), expires))
+    audit.record(request, "token created", name, "%s, expires in %d days" % (current(request)["username"], days))
     return dict(_token_public(db.one("SELECT * FROM api_tokens WHERE id=%s", (tid,))), token=token)
 
 
 @me_router.delete("/{tid}", status_code=204)
 def revoke_my_token(tid: str, request: Request):
     me = _named_user(request)
-    if not db.one("SELECT 1 AS x FROM api_tokens WHERE id=%s AND user_id=%s", (tid, me["id"])):
+    row = db.one("SELECT name FROM api_tokens WHERE id=%s AND user_id=%s", (tid, me["id"]))
+    if not row:
         raise HTTPException(404, "Token not found")
     db.execute("DELETE FROM api_tokens WHERE id=%s", (tid,))
+    audit.record(request, "token revoked", row["name"], current(request)["username"])
 
 
 @admin_tokens_router.get("")
@@ -323,10 +326,12 @@ def list_all_tokens():
 
 
 @admin_tokens_router.delete("/{tid}", status_code=204)
-def revoke_any_token(tid: str):
-    if not db.one("SELECT 1 AS x FROM api_tokens WHERE id=%s", (tid,)):
+def revoke_any_token(tid: str, request: Request):
+    row = db.one("SELECT t.name, u.username AS owner FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.id=%s", (tid,))
+    if not row:
         raise HTTPException(404, "Token not found")
     db.execute("DELETE FROM api_tokens WHERE id=%s", (tid,))
+    audit.record(request, "token revoked by an administrator", row["name"], "owner " + row["owner"])
 
 
 def _named_user(request: Request) -> Dict[str, Any]:

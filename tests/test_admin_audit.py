@@ -94,19 +94,40 @@ def test_only_administrators_can_read_it(secured):
     assert c.get("/api/admin/audit", auth=creds("adm")).status_code == 200
 
 
-def test_every_admin_write_route_records(client):
+def test_every_admin_and_token_write_route_records(client):
     """A route added later without a call to audit.record fails here."""
     from app.main import app
     import inspect
-    missing = []
-    for route in app.routes:
+    missing, checked = [], 0
+    routes = []
+    for r in app.routes:  # included routers are wrapped; their own routes are on original_router
+        routes += list(r.original_router.routes) if hasattr(r, "original_router") else [r]
+    for route in routes:
         path = getattr(route, "path", "")
         methods = getattr(route, "methods", set()) or set()
-        if path.startswith("/api/admin/") and methods & {"POST", "PUT", "PATCH", "DELETE"} and path not in EXEMPT:
+        if path.startswith(("/api/admin/", "/api/me/tokens")) and methods & {"POST", "PUT", "PATCH", "DELETE"} and path not in EXEMPT:
+            checked += 1
             if "audit.record" not in inspect.getsource(route.endpoint):
                 missing.append(path)
+    assert checked >= 15, checked  # the walk really found the routes (it once found none, and passed)
     assert not missing, missing
 
 
 # reads that use POST, and actions that change nothing
 EXEMPT = {"/api/admin/providers/models", "/api/admin/providers/{pid}/test", "/api/admin/integrations/{iid}/test", "/api/admin/reindex"}
+
+
+def test_token_lifecycle_is_recorded_without_the_token(secured):
+    c = secured
+    made = c.post("/api/me/tokens", json={"name": "ci-bot", "days": 30}, auth=creds("ana")).json()
+    c.delete("/api/me/tokens/%s" % made["id"], auth=creds("ana"))
+    other = c.post("/api/me/tokens", json={"name": "reports", "days": 10}, auth=creds("vic")).json()
+    c.delete("%s/%s" % (ADMIN_TOKENS, other["id"]), auth=ROOT)
+    rows = trail(c, ROOT)
+    assert [(r["action"], r["target"], r["actor"]) for r in rows[:4]] == [
+        ("token revoked by an administrator", "reports", "root"), ("token created", "reports", "vic"),
+        ("token revoked", "ci-bot", "ana"), ("token created", "ci-bot", "ana")]
+    assert made["token"] not in str(rows) and other["token"] not in str(rows)
+
+
+ADMIN_TOKENS = "/api/admin/tokens"
