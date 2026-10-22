@@ -2,7 +2,7 @@
 # Load test on the cluster, not on the developer's machine. Runs the app from the working tree with the production pod's limits
 # and probes (1 GiB memory, the same liveness probe) against a throwaway pgvector database and the offline AI provider (no AI spend),
 # then runs tests/load/brd_load.py scenarios from a separate load-generator container. Always deletes its namespace.
-# Usage: scripts/load-test-k8s.sh [burst] [slowai] [volume] [bigproject] [bigfiles] [manyprojects]     (default: the first three)   env: REQUESTERS BRDS_EACH VOLUME_BRDS BRD_KB VOLUME_KB LLM_LATENCY SLOW_BRDS_EACH BIG_BRDS MAX_BATCHES
+# Usage: scripts/load-test-k8s.sh [burst] [slowai] [volume] [bigproject] [bigfiles] [manyprojects] [flakyai]     (default: the first three)   env: REQUESTERS BRDS_EACH VOLUME_BRDS BRD_KB VOLUME_KB LLM_LATENCY SLOW_BRDS_EACH BIG_BRDS MAX_BATCHES
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PYTHON_IMAGE="${PYTHON_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim}"
@@ -35,7 +35,7 @@ spec:
     image: ${PYTHON_IMAGE}
     command: [sleep, "7200"]
     volumeMounts: [{name: src, mountPath: /src}]
-    env: [{name: BASE_URL, value: "http://127.0.0.1:8000"}, {name: METRICS_TOKEN, value: load-metrics}, {name: REQUESTERS, value: "${REQUESTERS:-20}"}, {name: BRDS_EACH, value: "${BRDS_EACH:-20}"}, {name: VOLUME_BRDS, value: "${VOLUME_BRDS:-1100}"}, {name: BRD_KB, value: "${BRD_KB:-30}"}, {name: VOLUME_KB, value: "${VOLUME_KB:-10}"}, {name: LLM_LATENCY, value: "${LLM_LATENCY:-0.25}"}, {name: SLOW_BRDS_EACH, value: "${SLOW_BRDS_EACH:-2}"}, {name: BIG_BRDS, value: "${BIG_BRDS:-300}"}, {name: MAX_BATCHES, value: "${MAX_BATCHES:-60}"}, {name: FILE_MB, value: "${FILE_MB:-6}"}, {name: MANY_PROJECTS, value: "${MANY_PROJECTS:-300}"}]
+    env: [{name: BASE_URL, value: "http://127.0.0.1:8000"}, {name: METRICS_TOKEN, value: load-metrics}, {name: REQUESTERS, value: "${REQUESTERS:-20}"}, {name: BRDS_EACH, value: "${BRDS_EACH:-20}"}, {name: VOLUME_BRDS, value: "${VOLUME_BRDS:-1100}"}, {name: BRD_KB, value: "${BRD_KB:-30}"}, {name: VOLUME_KB, value: "${VOLUME_KB:-10}"}, {name: LLM_LATENCY, value: "${LLM_LATENCY:-0.25}"}, {name: SLOW_BRDS_EACH, value: "${SLOW_BRDS_EACH:-2}"}, {name: BIG_BRDS, value: "${BIG_BRDS:-300}"}, {name: MAX_BATCHES, value: "${MAX_BATCHES:-60}"}, {name: FILE_MB, value: "${FILE_MB:-6}"}, {name: MANY_PROJECTS, value: "${MANY_PROJECTS:-300}"}, {name: FLAKY, value: "${FLAKY:-0.25}"}, {name: FLAKY_RUNS, value: "${FLAKY_RUNS:-6}"}, {name: FLAKY_BRDS_EACH, value: "${FLAKY_BRDS_EACH:-2}"}]
 YAML
 kubectl -n "$NS" wait --for=condition=Ready pod/load --timeout=300s >/dev/null || true
 until kubectl -n "$NS" exec load -c db -- pg_isready -q -h 127.0.0.1 -U f -d f 2>/dev/null; do sleep 1; done

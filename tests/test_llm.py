@@ -20,8 +20,9 @@ class Fake:
 
     def __call__(self, url, headers=None, json=None, timeout=None):
         self.calls.append({"url": url, "headers": headers, "json": json})
-        status, body = self.replies.pop(0)
-        return httpx.Response(status, json=body, request=httpx.Request("POST", url))
+        reply = self.replies.pop(0)
+        status, body = reply[:2]
+        return httpx.Response(status, json=body, headers=reply[2] if len(reply) > 2 else None, request=httpx.Request("POST", url))
 
 
 def chat(content, pin=10, pout=5):
@@ -31,6 +32,7 @@ def chat(content, pin=10, pout=5):
 @pytest.fixture(autouse=True)
 def no_sleep(monkeypatch):
     monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+    llm._cooldowns.clear()  # a rate limit noted by one test must not slow the next
 
 
 def test_openai_complete_parses_text_and_usage(monkeypatch):
@@ -59,6 +61,7 @@ def test_retries_transient_errors_but_not_client_errors(monkeypatch):
     with pytest.raises(llm.LLMError, match="401: invalid api key"):
         llm.complete(OPENAI, "s", "u", OPTS)
     assert len(fake.calls) == 1
+    monkeypatch.setattr(llm.config, "LLM_MAX_ATTEMPTS", 3)
     monkeypatch.setattr(llm.httpx, "post", Fake([(500, {})] * 3))
     with pytest.raises(llm.LLMError, match="HTTP 500"):
         llm.complete(OPENAI, "s", "u", OPTS)
@@ -103,7 +106,7 @@ def test_generate_stories_retries_invalid_json_and_filters_links(monkeypatch):
 
 
 def test_generate_stories_fails_cleanly_on_persistent_garbage(monkeypatch):
-    monkeypatch.setattr(llm.httpx, "post", Fake([chat("nope"), chat("still nope")]))
+    monkeypatch.setattr(llm.httpx, "post", Fake([chat("nope"), chat("still nope"), chat("never")]))  # three tries in all
     reqs = [{"key": "REQ-001", "type": "functional", "statement": "The system shall x things.", "epic": "E", "section": "S"}]
     with pytest.raises(ValueError, match="did not return valid JSON"):
         pipeline.generate_stories(reqs, "p", "generic", OPENAI, OPTS, lambda m: None, {"in": 0, "out": 0})
@@ -172,6 +175,7 @@ def test_out_of_quota_is_not_retried_and_keeps_the_providers_explanation(monkeyp
 
 def test_a_failure_after_retries_still_says_what_the_provider_said(monkeypatch):
     monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+    monkeypatch.setattr(llm.config, "LLM_MAX_ATTEMPTS", 3)
     monkeypatch.setattr(llm.httpx, "post", Fake([(503, {"error": {"message": "The server is overloaded"}})] * 3))
     with pytest.raises(llm.LLMError, match="HTTP 503: The server is overloaded"):
         llm.complete(OPENAI, "s", "u", OPTS)
@@ -257,3 +261,67 @@ def test_interactive_ai_calls_are_limited_and_refused_fast_when_the_limit_is_rea
         release.set()
         first.join(10)
     assert llm.complete(OPENAI, "s", "u", OPTS)[0] == "ok", "the slot is released when a call finishes"
+
+
+# ---- patient retries ------------------------------------------------------------------------------------------------------
+# A large run makes hundreds of requests, so even a modest failure rate (rate limits, overloaded servers) means some request fails
+# several times in a row. Three quick attempts failed whole runs; the provider's own Retry-After is the right wait.
+
+def test_a_rate_limit_is_waited_out_for_as_long_as_the_provider_asks(monkeypatch):
+    waits = []
+    monkeypatch.setattr(llm, "_sleep", lambda s: waits.append(s))
+    fake = Fake([(429, {"error": {"message": "Rate limit reached"}}, {"Retry-After": "7"}), chat("ok")])
+    monkeypatch.setattr(llm.httpx, "post", fake)
+    assert llm.complete(OPENAI, "s", "u", OPTS)[0] == "ok"
+    assert 7 <= waits[0] <= 8.5, "waited what Retry-After said (plus a little jitter): %s" % waits
+
+
+def test_many_quick_failures_in_a_row_are_survived(monkeypatch):
+    waits = []
+    monkeypatch.setattr(llm, "_sleep", lambda s: waits.append(s))
+    fake = Fake([(500, {})] * 5 + [chat("finally")])
+    monkeypatch.setattr(llm.httpx, "post", fake)
+    assert llm.complete(OPENAI, "s", "u", OPTS)[0] == "finally" and len(fake.calls) == 6
+    assert waits == sorted(waits) and waits[-1] > waits[0] * 4, "the waits grow: %s" % waits
+
+
+def test_the_waits_are_bounded_and_the_last_failure_is_reported(monkeypatch):
+    waits = []
+    monkeypatch.setattr(llm, "_sleep", lambda s: waits.append(s))
+    monkeypatch.setattr(llm.httpx, "post", Fake([(503, {"error": {"message": "overloaded"}}, {"Retry-After": "3600"})] * 6))
+    with pytest.raises(llm.LLMError, match="HTTP 503: overloaded"):
+        llm.complete(OPENAI, "s", "u", OPTS)
+    assert max(waits) <= llm.MAX_WAIT_SECONDS + 1.5, "an absurd Retry-After is capped (%s)" % waits
+
+
+def test_a_rate_limit_makes_every_call_to_that_provider_wait_not_just_the_one_that_hit_it(monkeypatch):
+    events = []
+    monkeypatch.setattr(llm, "_sleep", lambda s: events.append(("sleep", round(s))))
+    post = Fake([chat("ok")])
+
+    def logged(*a, **k):
+        events.append(("post",))
+        return post(*a, **k)
+    monkeypatch.setattr(llm.httpx, "post", logged)
+    llm._note_rate_limit("llm.test", 5)  # another section in the same run, or another run, was just told to slow down
+    assert llm.complete(OPENAI, "s", "u", OPTS)[0] == "ok"
+    assert events[0][0] == "sleep" and 4 <= events[0][1] <= 5 and events[1] == ("post",), "this call waited out the cooldown before sending anything: %s" % events
+    events.clear()
+    llm._cooldowns.clear()  # the cooldown is over
+    post.replies.append(chat("ok"))
+    assert llm.complete(OPENAI, "s", "u", OPTS)[0] == "ok"
+    assert events == [("post",)], "and once the cooldown is over, calls go straight out"
+
+
+def test_a_reply_that_is_not_json_is_asked_again_twice_before_the_run_gives_up(monkeypatch):
+    junk = chat("I am sorry, I cannot help with that.")
+    ok = chat('[{"title": "A story", "narrative": "As a buyer, I want x, so that y.", "acceptance_criteria": ["Given a, when b, then c."], "requirement_ids": ["REQ-001"]}]')
+    usage = {"in": 0, "out": 0}
+    fake = Fake([junk, junk, ok])
+    monkeypatch.setattr(llm.httpx, "post", fake)
+    out = pipeline._ask(OPENAI, OPTS, "sys", "prompt", usage)
+    assert len(out) == 1 and len(fake.calls) == 3 and usage["requests"] == 3, "the third reply was usable: %s calls" % len(fake.calls)
+    assert "not valid JSON" in fake.calls[1]["json"]["messages"][-1]["content"], "and the model was told what was wrong"
+    monkeypatch.setattr(llm.httpx, "post", Fake([junk, junk, junk]))
+    with pytest.raises(ValueError, match="did not return valid JSON"):
+        pipeline._ask(OPENAI, OPTS, "sys", "prompt", {"in": 0, "out": 0})

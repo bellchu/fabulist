@@ -24,6 +24,7 @@ PARSE_WAIT_SECONDS = float(os.environ.get("PARSE_WAIT_SECONDS", "60"))  # how lo
 MAX_UNZIPPED_MB = _int("MAX_UNZIPPED_MB", 200)  # DOCX/XLSX are ZIPs: cap what they may expand to (decompression bombs)
 MAX_PDF_PAGES = _int("MAX_PDF_PAGES", 500)
 MAX_INTERACTIVE_AI_CALLS = _int("MAX_INTERACTIVE_AI_CALLS", 8)  # AI calls made inside a request (refine, estimate, Ask) in flight at once
+LLM_MAX_ATTEMPTS = _int("LLM_MAX_ATTEMPTS", 6)  # tries per AI request on rate limits, server errors and network failures (waits grow, up to a minute)
 MAX_RUN_AI_CALLS = _int("MAX_RUN_AI_CALLS", 8)  # background AI calls in flight at once across all runs (each run asks several sections at a time)
 MAX_QUEUED_RUNS = _int("MAX_QUEUED_RUNS", 50)  # runs allowed to wait for a free slot; beyond this the server says it is full (429)
 MAX_CONCURRENT_RUNS = _int("MAX_CONCURRENT_RUNS", 4)  # AI runs in progress at once (they run in their own pool, never in the request threads)
