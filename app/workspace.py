@@ -173,9 +173,11 @@ def _add_document(pid: str, filename: str, text: str) -> Dict[str, Any]:
 
 
 @router.post("/api/projects/{pid}/documents", status_code=201)
-async def upload_document(pid: str, file: UploadFile = File(...)):
+def upload_document(pid: str, file: UploadFile = File(...)):
+    # A plain `def`, not `async def`: parsing, embedding and the inserts are blocking work, and FastAPI runs a plain def in its thread
+    # pool. As an async handler this held the whole event loop (health probes included) for the length of every upload.
     _project(pid)
-    data = await file.read(config.MAX_UPLOAD_BYTES + 1)
+    data = file.file.read(config.MAX_UPLOAD_BYTES + 1)
     if len(data) > config.MAX_UPLOAD_BYTES:
         raise HTTPException(413, "File too large")
     name = re.sub(r"[^\w.\- ]", "_", file.filename or "document.txt")[:200]
@@ -195,9 +197,10 @@ def add_text_document(pid: str, body: TextDocIn):
 @router.get("/api/projects/{pid}/documents")
 def list_documents(pid: str):
     _project(pid)
-    return db.rows("SELECT d.id, d.filename, length(d.text) AS chars, d.created, d.source, d.path, d.repo_id, "
-                   "(SELECT count(*) FROM chunks c WHERE c.document_id = d.id) AS chunks "
-                   "FROM documents d WHERE d.project_id = %s ORDER BY d.created", (pid,))
+    # One pass over the project's chunks, not a count per document: the correlated subquery was quadratic (5 s for 1,100 BRDs).
+    return db.rows("SELECT d.id, d.filename, length(d.text) AS chars, d.created, d.source, d.path, d.repo_id, coalesce(c.n, 0) AS chunks "
+                   "FROM documents d LEFT JOIN (SELECT document_id, count(*) AS n FROM chunks WHERE project_id = %s GROUP BY document_id) c "
+                   "ON c.document_id = d.id WHERE d.project_id = %s ORDER BY d.created", (pid, pid))
 
 
 @router.get("/api/projects/{pid}/documents/{did}")
@@ -354,6 +357,20 @@ def _stale_cutoff() -> str:
     return (datetime.now(timezone.utc) - timedelta(minutes=config.STALE_RUN_MINUTES)).isoformat(timespec="milliseconds")
 
 
+def _requests_needed(pid: str, stage: str, scope: str, opts: Dict[str, Any]) -> Tuple[int, int]:
+    """(AI requests a run would make, items it reads), from the same batching the run uses. Documents are read a few at a time:
+    a project with a thousand BRDs must not be held in memory just to count its sections."""
+    if stage == "requirements":
+        ids = [r["id"] for r in db.rows("SELECT id FROM documents WHERE project_id=%s ORDER BY created", (pid,))]
+        sections = 0
+        for i in range(0, len(ids), 25):
+            for d in db.rows("SELECT text FROM documents WHERE id = ANY(%s)", (ids[i:i + 25],)):
+                sections += len(pipeline.chunk_sections(d["text"], int(opts["chunk_chars"])))
+        return sections, len(ids)
+    reqs = [r for r in _requirements(pid) if r["status"] == "approved" or (scope == "all" and r["status"] == "draft")]
+    return len(pipeline.story_batches(reqs)), len(reqs)
+
+
 @router.get("/api/projects/{pid}/runs/estimate")
 def estimate_run(pid: str, stage: str, scope: str = "all"):
     """What a run would ask of the AI provider, before anyone clicks: the number of requests (exact, from the same batching the
@@ -362,12 +379,7 @@ def estimate_run(pid: str, stage: str, scope: str = "all"):
     if stage not in STAGES or scope not in ("approved", "all"):
         raise HTTPException(400, "Unknown stage or scope")
     opts = settings.get_settings()
-    if stage == "requirements":
-        docs = db.rows("SELECT text FROM documents WHERE project_id=%s", (pid,))
-        requests, items = sum(len(pipeline.chunk_sections(d["text"], int(opts["chunk_chars"]))) for d in docs), len(docs)
-    else:
-        reqs = [r for r in _requirements(pid) if r["status"] == "approved" or (scope == "all" and r["status"] == "draft")]
-        requests, items = len(pipeline.story_batches(reqs)), len(reqs)
+    requests, items = _requests_needed(pid, stage, scope, opts)
     past = db.rows("SELECT requests, duration_ms, tokens_in + tokens_out AS tokens FROM runs WHERE stage=%s AND status='done' AND requests > 0 "
                    "ORDER BY created DESC LIMIT 10", (stage,))
     seconds = tokens = None
@@ -404,6 +416,14 @@ def start_run(pid: str, body: RunIn, request: Request):
         raise HTTPException(400, "The provider %s has no API key. Add one in Admin > AI providers." % profile["name"])
     if body.stage == "requirements" and not db.one("SELECT 1 AS x FROM documents WHERE project_id=%s LIMIT 1", (pid,)):
         raise HTTPException(400, "Add at least one BRD document first")
+    # Refuse what can never succeed before creating a run (it used to start, then fail seconds later with the same message).
+    limit = int(settings.get_settings()["max_chunks_per_run"])
+    needed, _ = _requests_needed(pid, body.stage, body.scope, settings.get_settings())
+    if needed > limit and (body.stage == "requirements" or profile["kind"] != "mock"):
+        raise HTTPException(400, ("Documents produce %d sections, above the limit of %d. Raise 'Max sections per run' in Admin > Generation settings "
+                                  "or split the documents." % (needed, limit)) if body.stage == "requirements" else
+                            ("Too many requirement groups (%d) for one run (limit %d). Raise 'Max sections per run' in Admin > Generation settings, "
+                             "or generate from approved requirements only." % (needed, limit)))
     _recover_stuck_runs(pid)
     if db.one("SELECT 1 AS x FROM runs WHERE project_id=%s AND status='running'", (pid,)):
         raise HTTPException(409, "A run is already in progress for this project")

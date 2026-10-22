@@ -134,6 +134,7 @@ scripts/dev-server.sh            # app on :8765 against a separate fabulist_test
 scripts/test.sh                  # lint + tests in a Python 3.12 container
 scripts/ci-k8s.sh                # the same gate (minus image build) in a temporary cluster namespace; needs only kubectl
 scripts/ui-check-k8s.sh             # browser regression checks (tests/ui) in a temporary cluster namespace
+scripts/load-test-k8s.sh            # load scenarios (tests/load): 20 requesters x 20 BRDs at once; a project with 1,000+ BRDs (cluster, offline AI provider)
 scripts/scan-image-k8s.sh           # Trivy scan of the deployed image for fixable HIGH/CRITICAL vulnerabilities (cluster)
 scripts/ci.sh                    # full local gate: lint, tests, JS check, dependency audit, image build (Docker only)
 ```

@@ -137,3 +137,15 @@ def test_the_import_route_has_its_own_larger_size_limit(client, monkeypatch):
     assert r.status_code == 400 and "not a Fabulist project archive" in r.json()["detail"]
     monkeypatch.setattr(config, "MAX_ARCHIVE_MB", 1)
     assert client.post("/api/projects/import", content=junk, headers=headers).status_code == 413
+
+
+def test_the_archive_is_streamed_in_document_order_not_built_in_memory(client):
+    pid = client.post("/api/projects", json={"name": "Many BRDs", "platform": "generic"}).json()["id"]
+    for i in range(45):  # more than one read batch, in a known order
+        client.post("/api/projects/%s/documents/text" % pid, json={"name": "brd-%02d.md" % i, "text": "# Area %d\nThe system shall do thing %d for the buyer." % (i, i)})
+    r = client.get("/api/projects/%s/archive.json" % pid)
+    assert r.status_code == 200 and "content-length" not in r.headers, "streamed: the size is not known up front"
+    doc = r.json()
+    assert [d["filename"] for d in doc["documents"]] == ["brd-%02d.md" % i for i in range(45)]
+    assert list(doc)[:5] == ["format", "version", "exported_at", "project", "documents"], list(doc)
+    assert client.get("/api/projects/nope/archive.json").status_code == 404, "a missing project is a 404, not a broken stream"

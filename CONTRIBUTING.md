@@ -10,6 +10,7 @@
    scripts/ci-k8s.sh   # runs on the cluster (kubectl only): lint, tests on a throwaway pgvector DB, JS check, pip-audit
    scripts/ci.sh       # same plus the image build, on a local Docker daemon
    scripts/ui-check-k8s.sh   # browser checks (tests/ui/*.py, Playwright) against the app, on the cluster
+   scripts/load-test-k8s.sh  # 20 requesters x 20 BRDs at once, and a project with 1,000+ BRDs; checks latency, correctness and memory
    scripts/scan-image-k8s.sh # known HIGH/CRITICAL vulnerabilities in the deployed image (OS and Python packages), on the cluster
    ```
 

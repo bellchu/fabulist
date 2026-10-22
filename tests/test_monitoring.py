@@ -30,3 +30,14 @@ def test_every_metric_in_the_alerts_and_dashboard_exists(client, monkeypatch):
 def test_the_new_signals_have_alerts_and_panels():
     for name in ("fabulist_database_up", "fabulist_auth_failures_total", "fabulist_edit_conflicts_total", "fabulist_database_unavailable_total"):
         assert name in MONITORING, name + " is exposed but neither alerted on nor graphed"
+
+
+def test_memory_is_exposed_and_alerted_on(client, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "METRICS_TOKEN", "t")
+    text = client.get("/metrics", headers={"Authorization": "Bearer t"}).text
+    values = dict(re.findall(r"^(fabulist_(?:process_resident_memory|process_peak_resident_memory|memory_limit)_bytes) (\d+)$", text, flags=re.M))
+    assert int(values["fabulist_process_resident_memory_bytes"]) > 10_000_000, "a running Python process holds more than 10 MB"
+    assert int(values["fabulist_process_peak_resident_memory_bytes"]) >= int(values["fabulist_process_resident_memory_bytes"]) * 0.9
+    assert "fabulist_memory_limit_bytes" in values
+    assert "FabulistMemoryNearLimit" in MONITORING

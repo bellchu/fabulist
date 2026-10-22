@@ -107,6 +107,7 @@ SCHEMA = [
     "CREATE INDEX IF NOT EXISTS idx_docs_project ON documents(project_id)",
     "CREATE INDEX IF NOT EXISTS idx_stories_project ON stories(project_id, seq)",
     "CREATE INDEX IF NOT EXISTS idx_chunks_project ON chunks(project_id)",
+    "CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks(document_id)",  # per-document counts and the ON DELETE CASCADE from documents
     """CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON chunks
          USING hnsw (embedding vector_cosine_ops)""",
 ]

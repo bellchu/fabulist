@@ -45,6 +45,31 @@ def _labels(pairs: Tuple[Tuple[str, str], ...], extra: str = "") -> str:
     return "{%s}" % ",".join(parts) if parts else ""
 
 
+def _memory() -> List[Tuple[str, str, int]]:
+    """Resident memory of this process (now and at its peak) and the container's memory limit, from procfs and the cgroup. Zero where the
+    platform does not say (not Linux, or no limit): a process near its limit is killed without warning, so it has to be visible."""
+    rss = peak = limit = 0
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    rss = int(line.split()[1]) * 1024
+                elif line.startswith("VmHWM:"):
+                    peak = int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    for path in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            raw = open(path).read().strip()
+            limit = int(raw) if raw.isdigit() and int(raw) < 1 << 60 else 0
+            break
+        except OSError:
+            continue
+    return [("fabulist_process_resident_memory_bytes", "Resident memory of the app process.", rss),
+            ("fabulist_process_peak_resident_memory_bytes", "Highest resident memory of the app process since it started.", peak),
+            ("fabulist_memory_limit_bytes", "Container memory limit (0 when unlimited or unknown).", limit)]
+
+
 def render() -> str:
     lines: List[str] = []
     with _lock:
@@ -73,4 +98,6 @@ def render() -> str:
     for key, value in (totals or {}).items():
         name = "fabulist_%s" % key
         lines += ["# HELP %s Current number of %s." % (name, key.replace("_", " ")), "# TYPE %s gauge" % name, "%s %d" % (name, value)]
+    for name, text, value in _memory():
+        lines += ["# HELP %s %s" % (name, text), "# TYPE %s gauge" % name, "%s %d" % (name, value)]
     return "\n".join(lines) + "\n"

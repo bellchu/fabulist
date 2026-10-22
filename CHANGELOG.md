@@ -4,6 +4,13 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- **Load test and the fixes it drove** (`scripts/load-test-k8s.sh`, `tests/load/brd_load.py`; runs on the cluster with the offline AI provider, so no AI spend). Scenarios: 20 requesters each submitting 20 BRDs at the same moment, and one project holding 1,100 BRDs (up to 165 MB of text). Findings and fixes:
+  - Uploading a BRD blocked the whole server while it was parsed and stored (health probes waited up to 2.5 s; the pod's probe times out at 1 s). Uploads now run in the worker pool: the same burst leaves the probe at 0.2 s.
+  - Listing the documents of a project took 5 s at 1,100 BRDs (a per-document chunk count with no index, quadratic). Now 0.28 s, with an index on `chunks(document_id)`.
+  - Exporting a 167 MB project peaked at 796 MiB of the pod's 1 GiB (the archive was built as a dict, a string and a response body at once). It is now streamed: 210 MiB.
+  - Starting an extraction that was over the section limit returned 202 and then failed seconds later; it is now refused up front with the same message, and the estimate no longer loads every document into memory.
+  - New metrics `fabulist_process_resident_memory_bytes`, `fabulist_process_peak_resident_memory_bytes`, `fabulist_memory_limit_bytes` and an alert `FabulistMemoryNearLimit` (over 85% of the limit for 10 minutes).
+  - Known limits, from the measurements: at most 4 AI runs execute at once, and extra requests get HTTP 429 (53 of 73 start attempts in the burst); a single run is capped at 'Max sections per run' (default 200, maximum 2,000), so 20 BRDs of 30 KB need an administrator to raise it, and 1,100 BRDs cannot be extracted in one run at all.
 - `deploy.sh` now scans the freshly built image and refuses to roll it out when it has fixable HIGH/CRITICAL vulnerabilities (`SKIP_IMAGE_SCAN=1` is the emergency override).
 - `scripts/scan-image-k8s.sh` scans the deployed image (or any image) with Trivy on the cluster for fixable HIGH/CRITICAL vulnerabilities in OS and Python packages, complementing `pip-audit`. The image running now is clean (Debian 13.7, 0 findings); the script exits 1 on a vulnerable image (checked against an old Python 3.8 image: 61 findings).
 - Repository settings (owner-approved): `main` is protected against force-push and deletion with linear history required, merged branches are deleted automatically, and Dependabot vulnerability alerts are on. Documented in CONTRIBUTING.
