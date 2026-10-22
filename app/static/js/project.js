@@ -3,7 +3,7 @@ import {
   h, mount, icon, api, guard, toast, modal, confirmBox, drawer, badge, statusTone, typeTone, scorePill, meter, issueIcon,
   issueList, empty, timeAgo, fmt, duration, debounce, field, requireValue, select, linesInput, readLines, tagsInput, segmented, download, historyList, accessPicker,
 } from "./core.js";
-import { state, setCrumbs } from "./main.js";
+import { state, setCrumbs, setTitle } from "./main.js";
 
 const TABS = [["overview", "Overview"], ["sources", "Sources"], ["requirements", "Requirements"],
   ["stories", "Stories"], ["trace", "Traceability"], ["audit", "Audit"], ["export", "Export"]];
@@ -28,6 +28,7 @@ export async function renderProject(content, pid, tab) {
   if (!content.isConnected) return;  // the user already navigated away: don't touch the new page's breadcrumb
   ctx = { pid, project, tab };
   setCrumbs({ href: "#/", label: "Projects" }, project.name);
+  setTitle((TABS.find(([k]) => k === tab) || TABS[0])[1], project.name);
   const body = h("div");
   mount(content, header(project), archivedBanner(project), stepper(project), tabBar(project, tab), body);
   const view = { overview: viewOverview, sources: viewSources, requirements: viewRequirements, stories: viewStories, trace: viewTrace, audit: viewAudit, export: viewExport }[tab] || viewOverview;
