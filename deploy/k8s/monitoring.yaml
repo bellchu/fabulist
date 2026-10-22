@@ -553,6 +553,101 @@ data:
          "legendFormat": "database 503s"
         }
        ]
+      },
+      {
+       "type": "row",
+       "title": "Capacity",
+       "collapsed": false,
+       "gridPos": {
+        "x": 0,
+        "y": 37,
+        "w": 24,
+        "h": 1
+       },
+       "panels": []
+      },
+      {
+       "type": "timeseries",
+       "title": "AI runs: running and waiting in the queue",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 0,
+        "y": 38,
+        "w": 12,
+        "h": 8
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "fabulist_running_runs",
+         "refId": "A",
+         "legendFormat": "running"
+        },
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "fabulist_queued_runs",
+         "refId": "B",
+         "legendFormat": "waiting for a slot"
+        }
+       ]
+      },
+      {
+       "type": "timeseries",
+       "title": "Memory against the container limit",
+       "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+       },
+       "gridPos": {
+        "x": 12,
+        "y": 38,
+        "w": 12,
+        "h": 8
+       },
+       "fieldConfig": {
+        "defaults": {
+         "unit": "bytes"
+        },
+        "overrides": []
+       },
+       "targets": [
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "fabulist_process_resident_memory_bytes",
+         "refId": "A",
+         "legendFormat": "resident"
+        },
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "fabulist_process_peak_resident_memory_bytes",
+         "refId": "B",
+         "legendFormat": "peak since start"
+        },
+        {
+         "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+         },
+         "expr": "fabulist_memory_limit_bytes",
+         "refId": "C",
+         "legendFormat": "limit"
+        }
+       ]
       }
      ],
      "tags": [
