@@ -103,7 +103,8 @@ def render() -> str:
     try:
         totals = db.one("""SELECT (SELECT count(*) FROM projects) AS projects, (SELECT count(*) FROM documents) AS documents,
             (SELECT count(*) FROM requirements) AS requirements, (SELECT count(*) FROM stories) AS stories,
-            (SELECT count(*) FROM runs WHERE status = 'running') AS running_runs, (SELECT count(*) FROM runs WHERE status = 'queued') AS queued_runs""")
+            (SELECT count(*) FROM runs WHERE status = 'running') AS running_runs, (SELECT count(*) FROM runs WHERE status = 'queued') AS queued_runs,
+            pg_database_size(current_database()) AS database_size_bytes""")
     except Exception:
         totals = None
     lines += ["# HELP fabulist_database_up 1 when the database answered this scrape.", "# TYPE fabulist_database_up gauge",

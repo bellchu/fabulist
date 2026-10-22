@@ -93,6 +93,13 @@ spec:
           annotations:
             summary: The weekly dependency audit found vulnerable Python packages (or could not run)
             runbook: "README.md#runbook: read the fabulist-dep-audit job log, upgrade pins, run scripts/test.sh, redeploy"
+        - alert: FabulistDatabaseLarge
+          expr: fabulist_database_size_bytes > 3.5e9
+          for: 1h
+          labels: {severity: warning, team: fabulist}
+          annotations:
+            summary: The Fabulist database is over 3.5 GB (the data volume is 5 GiB)
+            runbook: "README.md#runbook: expand the postgres volume or remove projects nobody needs (archive, export, delete); the backups volume fills first"
         - alert: FabulistRateLimiting
           expr: increase(fabulist_rate_limited_total[10m]) > 100
           for: 10m
