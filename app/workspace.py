@@ -486,6 +486,8 @@ def _run_stage(run_id: str, pid: str, stage: str, provider_id: str, scope: str, 
         msg = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else "Internal error (%s)" % type(exc).__name__
         db.execute("UPDATE runs SET status='failed', error=%s, progress='', tokens_in=%s, tokens_out=%s, duration_ms=%s "
                    "WHERE id=%s AND status='running'", (msg[:500], usage["in"], usage["out"], int((time.monotonic() - started) * 1000), run_id))
+    finally:
+        integrations.announce_run(run_id)
 
 
 _ADMISSION_LOCK = 7_240_001  # arbitrary application key for pg_advisory_xact_lock: serialises run admission across requests

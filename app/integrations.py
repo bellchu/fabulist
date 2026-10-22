@@ -2,6 +2,8 @@
 import base64
 import hashlib
 import hmac
+import logging
+import threading
 import html
 import json
 import re
@@ -328,6 +330,27 @@ def client_for(conn: Dict[str, Any]) -> Any:
     return TRACKERS[conn["kind"]](conn, token)
 
 
+def announce_run(run_id: str) -> None:
+    """Tell the webhooks that opted in that a run finished. Runs on its own thread: a slow or broken receiver must never hold a run slot or fail a run."""
+    hooks = db.rows("SELECT * FROM integrations WHERE kind='webhook' AND events='runs'")
+    if not hooks:
+        return
+
+    def deliver() -> None:
+        run = db.one("SELECT r.*, p.name AS project_name FROM runs r JOIN projects p ON p.id = r.project_id WHERE r.id=%s", (run_id,))
+        if not run:
+            return
+        payload = {"event": "run.finished", "sent_at": db.now(), "project": {"id": run["project_id"], "name": run["project_name"]},
+                   "run": {"id": run["id"], "stage": run["stage"], "status": run["status"], "items": run["item_count"], "error": run["error"] or "",
+                           "started_by": run["actor"] or "", "tokens_in": run["tokens_in"], "tokens_out": run["tokens_out"], "duration_ms": run["duration_ms"]}}
+        for hook in hooks:
+            try:
+                client_for(hook)._post(payload)
+            except Exception as exc:  # noqa: BLE001 - a receiver's trouble is logged, never raised
+                logging.getLogger("fabulist").warning("run notification to %s failed: %s", hook["name"], exc)
+    threading.Thread(target=deliver, name="run-notify", daemon=True).start()
+
+
 def push(project_id: str, conn: Dict[str, Any], target: str, stories: List[Dict[str, Any]],
          progress: Callable[[str], None] = lambda m: None, out_of_time: Callable[[], bool] = lambda: False) -> Dict[str, Any]:
     tracker = client_for(conn)
@@ -380,7 +403,7 @@ def push(project_id: str, conn: Dict[str, Any], target: str, stories: List[Dict[
 
 def _public(r: Dict[str, Any]) -> Dict[str, Any]:
     out = {k: r[k] for k in ("id", "kind", "name", "base_url", "username", "target", "key_hint", "created")}
-    out.update(kind_label=KINDS.get(r["kind"], r["kind"]), has_token=bool(r["token_enc"]))
+    out.update(kind_label=KINDS.get(r["kind"], r["kind"]), has_token=bool(r["token_enc"]), notify_runs=r["kind"] == "webhook" and r.get("events") == "runs")
     return out
 
 
@@ -414,13 +437,14 @@ def _save(body: Dict[str, Any], iid: Optional[str]) -> Dict[str, Any]:
     hint = current["key_hint"] if current else ""
     if token:
         enc, hint = settings.encrypt_secret(token), "…" + token[-4:]
+    events = "runs" if kind == "webhook" and body.get("notify_runs") else ""
     if iid:
-        db.execute("UPDATE integrations SET kind=%s, name=%s, base_url=%s, username=%s, target=%s, token_enc=%s, key_hint=%s WHERE id=%s",
-                   (kind, name, base_url, username, target, enc, hint, iid))
+        db.execute("UPDATE integrations SET kind=%s, name=%s, base_url=%s, username=%s, target=%s, token_enc=%s, key_hint=%s, events=%s WHERE id=%s",
+                   (kind, name, base_url, username, target, enc, hint, events, iid))
     else:
         iid = db.new_id()
-        db.execute("INSERT INTO integrations (id, kind, name, base_url, username, target, token_enc, key_hint, created) "
-                   "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)", (iid, kind, name, base_url, username, target, enc, hint, db.now()))
+        db.execute("INSERT INTO integrations (id, kind, name, base_url, username, target, token_enc, key_hint, events, created) "
+                   "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (iid, kind, name, base_url, username, target, enc, hint, events, db.now()))
     return _public(get(iid))
 
 

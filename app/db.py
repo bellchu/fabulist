@@ -103,6 +103,7 @@ SCHEMA = [
          integration_id TEXT NOT NULL REFERENCES integrations(id) ON DELETE CASCADE, target TEXT NOT NULL,
          item_type TEXT NOT NULL, item_ref TEXT NOT NULL, external_key TEXT NOT NULL, external_url TEXT NOT NULL,
          updated TEXT NOT NULL, UNIQUE (integration_id, target, item_type, item_ref))""",
+    "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS events TEXT NOT NULL DEFAULT ''",  # 'runs': a webhook that also hears when an AI run finishes
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'upload'",
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS repo_id TEXT",
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS path TEXT NOT NULL DEFAULT ''",
