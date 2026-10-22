@@ -51,7 +51,7 @@ async function viewOverview(content) {
     h("div", { class: "stats", style: { marginBottom: "16px" }, "aria-label": "System" },
       stat("Version", o.system.version, "up " + uptime(o.system.uptime_seconds)),
       stat("Database", bytes(o.system.database_bytes), "all projects, documents and trails"),
-      stat("AI runs now", o.system.runs_running + " running · " + o.system.runs_queued + " waiting", "up to " + o.system.max_concurrent_runs + " at once, " + o.system.max_queued_runs + " in the queue"),
+      stat("AI runs running", String(o.system.runs_running), o.system.runs_queued + " waiting · up to " + o.system.max_concurrent_runs + " at once, " + o.system.max_queued_runs + " in the queue"),
       stat("Memory", bytes(o.system.memory_bytes), o.system.memory_limit_bytes ? "of " + bytes(o.system.memory_limit_bytes) + " (" + Math.round((100 * o.system.memory_bytes) / o.system.memory_limit_bytes) + "%)" : "no limit set")),
     h("div", { class: "grid grid-2" },
       h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", { class: "grow" }, "Default AI provider"), h("a", { class: "btn btn-sm", href: "#/admin/providers" }, "Manage")),
