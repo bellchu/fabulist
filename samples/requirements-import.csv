@@ -1,0 +1,4 @@
+Requirement,Type,Epic,Section,Source ID,Actors,Status
+The system shall let a buyer place an order for vaccines stored in cold chain.,functional,Ordering,Vaccines,BR-1,Buyer,approved
+The system shall confirm every order within 3 seconds.,non-functional,Ordering,Performance,BR-2,,draft
+Orders over 10000 must be approved by a manager before they are released.,rule,Ordering,Approvals,BR-3,Manager;Buyer,

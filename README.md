@@ -21,6 +21,10 @@ IDs → human review → epics, features and stories → requirements traceabili
    modals, non-singular or unverifiable statements, and near-duplicates across BRDs. Analysts
    approve, edit or exclude them; **Refine with AI** rewrites a flagged requirement or splits a
    compound one, and never invents thresholds (missing values become notes for the business).
+   Requirements that already exist in a spreadsheet are added with **Import file** (CSV or Excel, up to
+   2,000 rows; see `samples/requirements-import.csv`): a column called Requirement or Statement is needed, and
+   Type, Epic, Section, Source ID, Actors and Status are used when present. Everything is checked first, repeats
+   are skipped, and Fabulist's own Requirements export imports back.
 3. **Stories**: approved requirements become epics → features → user stories with Gherkin
    acceptance criteria, product-class variants and compliance tags. Each story is scored
    against INVEST and a Definition of Ready, and is shown on a story map or a list.
