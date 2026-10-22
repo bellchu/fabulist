@@ -102,7 +102,8 @@ async function route() {
     }
   } catch (e) {
     if (ticket !== rendering) return;
-    const error = h("div", { class: "callout error", role: "alert" }, h("span", { class: "grow" }, e.message), h("a", { href: "#/" }, "Back to projects"));
+    const error = h("div", { class: "callout error", role: "alert" }, h("span", { class: "grow" }, e.message),
+      h("button", { class: "btn btn-sm", onclick: route }, "Retry"), h("a", { href: "#/" }, "Back to projects"));
     // Keep the header and navigation when we can, so a stale link isn't a dead end.
     if (state.me) mount(shell(parts), error);
     else document.getElementById("app").replaceChildren(h("div", { class: "content" }, error));
