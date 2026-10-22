@@ -30,6 +30,11 @@ def set_cancel_check(fn: Any) -> None:
     _cancel.fn = fn
 
 
+def get_cancel_check() -> Any:
+    """The current thread's cancel hook, so a run can hand it to the worker threads it starts."""
+    return getattr(_cancel, "fn", None)
+
+
 def _check_cancelled() -> None:
     fn = getattr(_cancel, "fn", None)
     if fn:
@@ -113,12 +118,39 @@ def _reset_interactive_slots() -> None:
         _slots = None
 
 
+_run_slots_lock = threading.Lock()
+_run_slots_state: Optional[Tuple[int, threading.BoundedSemaphore]] = None
+
+
+def _run_slots() -> threading.BoundedSemaphore:
+    global _run_slots_state
+    size = max(1, config.MAX_RUN_AI_CALLS)
+    with _run_slots_lock:
+        if _run_slots_state is None or _run_slots_state[0] != size:
+            _run_slots_state = (size, threading.BoundedSemaphore(size))
+        return _run_slots_state[1]
+
+
+def _reset_run_slots() -> None:
+    global _run_slots_state
+    with _run_slots_lock:
+        _run_slots_state = None
+
+
 def complete(profile: Dict[str, Any], system: str, user: str, opts: Dict[str, Any]) -> Tuple[str, Usage]:
     """One provider call. Calls made inside a web request hold a request thread for as long as the provider takes (40 of them
     froze the whole app when the provider hung), so only a few may be in flight: the rest are refused at once instead of
     waiting. Background runs are bounded by their own pool and are never refused here."""
     if getattr(_cancel, "fn", None):
-        return _complete(profile, system, user, opts)
+        # A background run. Each run asks several sections at once, so across runs the provider could see runs x sections calls: wait for
+        # one of MAX_RUN_AI_CALLS slots (still noticing a cancel while waiting).
+        sem = _run_slots()
+        while not sem.acquire(timeout=0.25):
+            _check_cancelled()
+        try:
+            return _complete(profile, system, user, opts)
+        finally:
+            sem.release()
     slots = _interactive_slots()
     if not slots.acquire(blocking=False):
         raise AIBusy("The AI service is busy with other requests")

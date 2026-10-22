@@ -44,6 +44,7 @@ with sync_playwright() as p:
     api, page = ctx.request, ctx.new_page()
     prov = api.post(BASE + "/api/admin/providers", data={"name": "Slow fake", "kind": "openai", "base_url": "http://127.0.0.1:9100/v1", "model": "m", "api_key": "k"}, headers=H).json()["id"]
     api.post(f"{BASE}/api/admin/providers/{prov}/default", data={}, headers=H)
+    api.put(f"{BASE}/api/admin/settings", data={"ai_concurrency": 1}, headers=H)  # one section at a time: the timing below is about the queue, not the speed
 
     def project(name, sections):
         pid = api.post(BASE + "/api/projects", data={"name": name, "platform": "generic"}, headers=H).json()["id"]
