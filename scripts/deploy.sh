@@ -53,6 +53,8 @@ kubectl apply -f deploy/k8s/postgres.yaml
 kubectl apply -f deploy/k8s/networkpolicy.yaml
 kubectl -n "$NS" rollout status statefulset/postgres --timeout=240s
 kubectl apply -f deploy/k8s/backup.yaml
+kubectl -n "$NS" create configmap fabulist-restore-check --from-file=restore-check-job.sh=scripts/restore-check-job.sh --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl apply -f deploy/k8s/restore-check.yaml
 
 # Build on the cluster (Kaniko in a throwaway namespace, pushing to the node's registry): nothing runs on the developer's machine.
 BUILD_NS="fabulist-build-${TAG}"

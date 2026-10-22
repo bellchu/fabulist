@@ -151,3 +151,13 @@ def test_the_app_pod_has_more_memory_than_the_load_test_proved_enough():
     load = open(os.path.join(os.path.dirname(APP_PATH), "..", "..", "scripts", "load-test-k8s.sh")).read()
     assert "limits: {memory: 1Gi}" in load, "the load test measures at 1 GiB"
     assert prod >= 1536, prod
+
+
+def test_the_weekly_restore_check_cannot_touch_the_real_data():
+    check = open(os.path.join(os.path.dirname(APP_PATH), "restore-check.yaml")).read()
+    assert "readOnly: true" in check and "automountServiceAccountToken: false" in check and "backoffLimit: 0" in check
+    assert "postgres.fabulist" not in check and "DATABASE_URL" not in check and "POSTGRES_PASSWORD" not in check, "it never connects to, or knows the password of, the real database"
+    deploy = open(os.path.join(os.path.dirname(APP_PATH), "..", "..", "scripts", "deploy.sh")).read()
+    assert "restore-check.yaml" in deploy and "restore-check-job.sh" in deploy
+    monitoring = open(os.path.join(os.path.dirname(APP_PATH), "monitoring.yaml")).read()
+    assert "FabulistRestoreCheckFailed" in monitoring and "fabulist-restore-check" in monitoring
