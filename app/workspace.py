@@ -5,9 +5,10 @@ import re
 import threading
 import time
 from collections import OrderedDict
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from fastapi import APIRouter, Body, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
@@ -169,6 +170,49 @@ def delete_project(pid: str, request: Request):
 
 # ---- documents -----------------------------------------------------------
 
+_parse_lock = threading.Lock()
+_parse_state: Optional[Tuple[int, threading.BoundedSemaphore]] = None
+
+
+def _parse_slots() -> threading.BoundedSemaphore:
+    global _parse_state
+    size = max(1, config.MAX_CONCURRENT_PARSES)
+    with _parse_lock:
+        if _parse_state is None or _parse_state[0] != size:
+            _parse_state = (size, threading.BoundedSemaphore(size))
+        return _parse_state[1]
+
+
+def _reset_parse_slots() -> None:
+    global _parse_state
+    with _parse_lock:
+        _parse_state = None
+
+
+@contextmanager
+def _document_slot() -> Iterator[None]:
+    """Reading and indexing a large document takes tens of MB and seconds of CPU; twenty at once exhausted the pod's memory. A few at a
+    time, the rest wait their turn, and are told to retry if the wait is long instead of tying up a worker thread indefinitely."""
+    slots = _parse_slots()
+    if not slots.acquire(timeout=config.PARSE_WAIT_SECONDS):
+        raise HTTPException(503, "The server is busy reading other documents. Try this upload again in a moment.", headers={"Retry-After": "15"})
+    try:
+        yield
+    finally:
+        slots.release()
+        _give_memory_back()
+
+
+def _give_memory_back() -> None:
+    """Ask glibc to return the memory a large parse freed to the operating system (it otherwise keeps it for reuse, and a run of big
+    documents ends with a process that is mostly cached garbage). Harmless where there is no glibc."""
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):
+        pass
+
+
 def _add_document(pid: str, filename: str, text: str) -> Dict[str, Any]:
     did = db.new_id()
     db.execute("INSERT INTO documents (id, project_id, filename, text, created) VALUES (%s,%s,%s,%s,%s)",
@@ -190,17 +234,19 @@ def upload_document(pid: str, file: UploadFile = File(...)):
     if len(data) > config.MAX_UPLOAD_BYTES:
         raise HTTPException(413, "File too large")
     name = re.sub(r"[^\w.\- ]", "_", file.filename or "document.txt")[:200]
-    try:
-        text = parsing.extract_text(name, data)
-    except parsing.ParseError as exc:
-        raise HTTPException(400, str(exc))
-    return _add_document(pid, name, text)
+    with _document_slot():
+        try:
+            text = parsing.extract_text(name, data)
+        except parsing.ParseError as exc:
+            raise HTTPException(400, str(exc))
+        return _add_document(pid, name, text)
 
 
 @router.post("/api/projects/{pid}/documents/text", status_code=201)
 def add_text_document(pid: str, body: TextDocIn):
     _project(pid)
-    return _add_document(pid, body.name.strip(), parsing.clip(body.text))
+    with _document_slot():
+        return _add_document(pid, body.name.strip(), parsing.clip(body.text))
 
 
 @router.get("/api/projects/{pid}/documents")

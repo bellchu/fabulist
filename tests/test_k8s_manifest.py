@@ -33,3 +33,13 @@ def test_deploy_scans_the_image_before_rolling_it_out_and_has_an_override():
     scan, apply = deploy.index("scan-image-k8s.sh"), deploy.index("deploy/k8s/app.yaml | kubectl apply")
     assert scan < apply, "the scan must run before the new image is applied"
     assert "SKIP_IMAGE_SCAN" in deploy
+
+
+def test_the_image_limits_malloc_arenas_so_big_uploads_do_not_fragment_the_heap_into_the_memory_limit():
+    dockerfile = open(os.path.join(os.path.dirname(APP_PATH), "..", "..", "Dockerfile")).read()
+    assert "MALLOC_ARENA_MAX=2" in dockerfile
+
+
+def test_giving_memory_back_never_raises():
+    from app import workspace
+    workspace._give_memory_back()

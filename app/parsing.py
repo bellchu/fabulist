@@ -49,21 +49,27 @@ def _docx(data: bytes) -> str:
 
     _check_zip(data)
     doc = Document(io.BytesIO(data))
-    out = []
+    # Style names by id, built once. `paragraph.style` looks the style up from scratch for every paragraph (it scans the style table):
+    # 0.8 ms each, so a 6 MB document of 33,000 paragraphs spent 26 of its 27 seconds there, holding the interpreter for all other requests.
+    names = {s.style_id: (s.name or "").lower() for s in doc.styles}
+    out, size = [], 0
     for p in doc.paragraphs:
         text = p.text.strip()
         if not text:
             continue
-        style = (p.style.name or "").lower() if p.style is not None else ""
-        if style.startswith("heading") or style == "title":
-            out.append("\n# " + text)
-        else:
-            out.append(text)
+        style = names.get(p._p.style, "")  # a paragraph with no style is Normal: not a heading
+        out.append("\n# " + text if style.startswith("heading") or style == "title" else text)
+        size += len(text)
+        if size > config.MAX_DOC_CHARS:  # the rest would be cut anyway; don't spend minutes extracting it
+            return "\n".join(out)
     for table in doc.tables:
-        for row in table.rows:
+        for row in table.rows[: MAX_ROWS + 1]:
             cells = [c.text.strip() for c in row.cells]
             if any(cells):
                 out.append(" | ".join(cells))
+                size += sum(len(c) for c in cells)
+        if size > config.MAX_DOC_CHARS:
+            break
     return "\n".join(out)
 
 
