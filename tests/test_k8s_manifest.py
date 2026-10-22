@@ -45,9 +45,47 @@ def test_giving_memory_back_never_raises():
     workspace._give_memory_back()
 
 
-def test_deploy_waits_for_running_ai_runs_before_replacing_the_server_and_can_be_told_not_to():
+def test_deploy_waits_for_running_ai_runs_before_replacing_the_server():
     deploy = open(os.path.join(os.path.dirname(APP_PATH), "..", "..", "scripts", "deploy.sh")).read()
-    wait, apply = deploy.index("DEPLOY_WAIT_FOR_RUNS"), deploy.index("deploy/k8s/app.yaml | kubectl apply")
-    assert wait < apply, "the wait must come before the new image is applied (a restart fails the runs that are executing)"
-    assert "status = 'running'" in deploy or "status='running'" in deploy
-    assert "DEPLOY_WAIT_FOR_RUNS=0" in deploy, "and the wait is documented as skippable"
+    assert deploy.index("scripts/wait-for-runs.sh") < deploy.index("deploy/k8s/app.yaml | kubectl apply"), "the wait must come before the new image is applied"
+
+
+def _wait_for_runs(tmp_path, counts, minutes, env_minutes=None, name="run"):
+    """Run scripts/wait-for-runs.sh with a stub kubectl that reports the given sequence of running-run counts, and a sleep that does not sleep."""
+    import subprocess
+    stubs = tmp_path / name / "bin"
+    stubs.mkdir(parents=True)
+    state = tmp_path / name / "calls"
+    state.write_text("0")
+    (stubs / "kubectl").write_text(
+        "#!/bin/bash\n"
+        '[ "$3" = "get" ] && exit 0\n'  # `kubectl -n NS get deploy/fabulist`: the app exists
+        "n=$(cat %s); echo $((n+1)) > %s\n"
+        "counts=(%s)\n"
+        'i=$n; [ "$i" -ge "${#counts[@]}" ] && i=$((${#counts[@]}-1))\n'
+        'echo "${counts[$i]}"\n' % (state, state, " ".join(str(c) for c in counts)))
+    (stubs / "sleep").write_text("#!/bin/bash\nexit 0\n")
+    for f in stubs.iterdir():
+        f.chmod(0o755)
+    script = os.path.join(os.path.dirname(APP_PATH), "..", "..", "scripts", "wait-for-runs.sh")
+    env = {"PATH": "%s:/usr/bin:/bin" % stubs}
+    if env_minutes is not None:
+        env["DEPLOY_WAIT_FOR_RUNS"] = str(env_minutes)
+    return subprocess.run(["bash", script, "fabulist"] + ([str(minutes)] if minutes is not None else []), capture_output=True, text=True, env=env, timeout=30)
+
+
+def test_the_wait_for_runs_returns_as_soon_as_the_runs_finish(tmp_path):
+    r = _wait_for_runs(tmp_path, [2, 1, 0, 0], 15)
+    assert r.returncode == 0 and "waiting up to 15 minutes" in r.stdout and "No AI runs are executing any more" in r.stdout and not r.stderr, (r.stdout, r.stderr)
+
+
+def test_the_wait_for_runs_gives_up_after_the_time_and_warns_without_failing_the_deploy(tmp_path):
+    r = _wait_for_runs(tmp_path, [3], 1)  # always 3 running; one minute = three 20 s waits in the stub
+    assert r.returncode == 0 and "WARNING: 3 AI run(s) still executing after 1 minutes" in r.stderr, (r.stdout, r.stderr)
+
+
+def test_the_wait_for_runs_can_be_skipped_and_does_nothing_when_idle(tmp_path):
+    skipped = _wait_for_runs(tmp_path, [5], None, env_minutes=0)
+    assert skipped.returncode == 0 and skipped.stdout == "" and skipped.stderr == "", "DEPLOY_WAIT_FOR_RUNS=0 does not even look"
+    idle = _wait_for_runs(tmp_path, [0], 15, name="idle")
+    assert idle.returncode == 0 and idle.stdout == "" and idle.stderr == "", "nothing running: no message, no wait"
