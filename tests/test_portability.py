@@ -170,3 +170,18 @@ def test_an_archive_of_a_project_with_ai_runs_and_documents_in_its_trail_imports
     assert {"project", "document", "run", "requirement"} <= kinds, kinds
     r = client.post("/api/projects/import", json=archive)
     assert r.status_code == 201, r.text
+
+
+def test_every_kind_of_trail_entry_the_app_writes_is_accepted_by_the_importer():
+    """Adding a new kind of audit entry without teaching the archive importer about it makes archives unimportable: this finds the kinds in the source."""
+    import glob
+    import os
+    import re
+    from app import portability
+    app_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app")
+    written = set()
+    for path in glob.glob(os.path.join(app_dir, "*.py")):
+        for m in re.finditer(r"history\.record\(\s*\w+,\s*[\w\[\]\"']+,\s*\"(\w+)\"", open(path).read()):
+            written.add(m.group(1))
+    assert {"project", "document", "run", "baseline", "push", "repository"} <= written, written  # the scan found the calls
+    assert written - portability.HISTORY_TYPES == set(), written - portability.HISTORY_TYPES
