@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- README introduction says what is configurable for other industries (the business domain and the product taxonomy), instead of reading as medical-only.
 - **The business domain is a setting.** The instructions to the AI said "enterprise application delivery in medical product distribution" in the code, which is wrong for a bank or a housing agency. Admin > Generation settings has a **Business domain** field (default unchanged: medical product distribution; one line, up to 120 characters; empty goes back to the default) and both the extraction and the story instructions use it. Product taxonomy and platform profiles are separate and unchanged. Tests: `tests/test_business_domain.py`, `tests/ui/business_domain.py`.
 - `docs/ACCEPTANCE.md`: nineteen acceptance scenarios a business owner or security reviewer can walk through before rollout, each with the automated test that proves it on every change, and an honest list of what the checks do not cover (real AI quality, more than one replica, real devices). A test fails if a named test or script does not exist.
 - Importing stories no longer refuses a file because of its Status column: a Jira export always has one ("To Do", "In Progress", "Done"), and those are not Fabulist's review states (approved means a person reviewed it here). Statuses other than `draft`, `approved` and `rejected` come in as drafts, counted as `statuses_not_recognised` in the answer and mentioned in the notice. (Requirement import stays strict.)
