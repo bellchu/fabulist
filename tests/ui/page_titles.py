@@ -40,6 +40,7 @@ with sync_playwright() as p:
         check(title.endswith("Fabulist") and title != "Fabulist", "%s has a title of its own: %r" % (name, title))
     check("Title check" in seen["project requirements"] and "Requirements" in seen["project requirements"], "a project tab names the tab and the project")
     check(seen["project requirements"] != seen["project audit"], "two tabs of one project differ")
+    check("title" in seen["search"] and "Search" in seen["search"], "a search names what was searched for (%r)" % seen["search"])
     check("Generation settings" in seen["admin settings"], "an admin screen names itself")
     check(len(set(seen.values())) == len(seen), "no two of these screens share a title")
 
