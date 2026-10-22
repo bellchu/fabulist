@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- **AI runs are in the project's audit trail.** The README said the trail records "every ... AI run", but a project that had extracted requirements and generated stories showed "0 entries" in its Audit tab (the runs were only on the Overview's run list), so the CSV that is exported as evidence did not say who ran the AI or how it ended. Every run that finishes now adds an entry (`ai run done`, `failed` or `cancelled`) with who started it, the stage, the number of items or the reason it failed, the provider and the duration, including runs marked stuck. Tests: `tests/test_audit_runs.py`.
 - The app pod's memory limit is 1.5 GiB (was 1 GiB). The full release check's worst case (20 simultaneous 6 MB uploads on top of the other scenarios) peaked at 856 MiB, 84% of 1 GiB and right at the alert line, with nothing wrong; production should not live there. The load tests keep running at 1 GiB on purpose, so what passes them has headroom (a test pins both). The node has the room (36% of its memory requested, the pod's request is unchanged).
 - The search results screen's page title names the query ("“invoices” · Search · Fabulist"), so tab lists and history tell two searches apart.
 - The Documents card on the Sources tab had its table touching the heading (the earlier spacing rule only covered a table that is a direct sibling of the heading; this one sits in a wrapper). Found in a visual pass; browser test `tests/ui/card_spacing.py` measures the gap.
