@@ -93,6 +93,12 @@ spec:
           annotations:
             summary: The weekly dependency audit found vulnerable Python packages (or could not run)
             runbook: "README.md#runbook: read the fabulist-dep-audit job log, upgrade pins, run scripts/test.sh, redeploy"
+        - alert: FabulistRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="fabulist", container="fabulist"}[1h]) >= 2
+          labels: {severity: warning, team: fabulist}
+          annotations:
+            summary: The Fabulist app restarted twice or more in an hour (a restart ends the AI runs in progress)
+            runbook: "README.md#runbook: kubectl describe the pod for the last state (OOMKilled?) and read the previous logs"
         - alert: FabulistBackupMissing
           expr: time() - kube_cronjob_status_last_successful_time{namespace="fabulist", cronjob="fabulist-backup"} > 26 * 3600
           for: 30m
