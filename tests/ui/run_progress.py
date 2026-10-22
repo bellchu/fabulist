@@ -43,6 +43,7 @@ with sync_playwright() as p:
     browser = p.chromium.launch()
     ctx = browser.new_context(viewport={"width": 1280, "height": 900}, bypass_csp=True)
     api, page = ctx.request, ctx.new_page()
+    was_default = next((x["id"] for x in api.get(BASE + "/api/admin/providers", headers=H).json()["providers"] if x["is_default"]), None)  # put back at the end: later tests share this database
     prov = api.post(BASE + "/api/admin/providers", data={"name": "Slow fake", "kind": "openai", "base_url": "http://127.0.0.1:9101/v1", "model": "m", "api_key": "k"}, headers=H).json()["id"]
     api.post(f"{BASE}/api/admin/providers/{prov}/default", data={}, headers=H)
     api.put(f"{BASE}/api/admin/settings", data={"ai_concurrency": 1, "max_chunks_per_run": 200}, headers=H)  # one section at a time: a steady, watchable pace
@@ -73,5 +74,8 @@ with sync_playwright() as p:
     page.wait_for_selector("text=Last run", timeout=60000)
     check(True, "and the panel goes back to the finished summary when the run ends")
     server.shutdown()
+    if was_default:
+        api.post(f"{BASE}/api/admin/providers/{was_default}/default", data={}, headers=H)
+    api.put(f"{BASE}/api/admin/settings", data={"ai_concurrency": 4, "max_chunks_per_run": 200}, headers=H)
     browser.close()
 sys.exit(1 if failures else 0)
