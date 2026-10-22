@@ -301,6 +301,7 @@ def prometheus_metrics() -> Response:
 def me(request: Request) -> Dict[str, Any]:
     out: Dict[str, Any] = dict(users.current(request))
     out["sso"] = bool(sso.enabled() and request.cookies.get(sso.SESSION_COOKIE))
+    out["named"] = bool(db.one("SELECT 1 AS x FROM users WHERE username=%s", (out["username"],)))  # has an account row: can own API tokens
     return out
 
 

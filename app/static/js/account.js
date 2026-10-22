@@ -55,7 +55,7 @@ function appearanceCard() {
 export async function renderAccount(content) {
   setCrumbs("Account");
   let tokens = null;
-  if (state.me.username !== "anonymous") {
+  if (state.me.named) {  // only an account with a row can own tokens: the bootstrap administrator and anonymous cannot, and asking would only log a 400
     try { tokens = await api.get("/api/me/tokens"); } catch (e) {
       if (!/named account/.test(e.message)) throw e;  // the bootstrap admin has no account row: show the explanation below
     }

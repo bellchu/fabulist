@@ -71,7 +71,7 @@ def test_sign_in_with_auto_provisioning_and_roles(client, idp, monkeypatch):
     assert "httponly" in r.headers["set-cookie"].lower() and "samesite=lax" in r.headers["set-cookie"].lower()
     token_req = idp["token_requests"][-1]
     assert token_req["code_verifier"] and token_req["client_secret"] == "s3cret" and token_req["grant_type"] == "authorization_code"
-    assert client.get("/api/me").json() == {"username": "ana@example.com", "role": "viewer", "sso": True}
+    assert client.get("/api/me").json() == {"username": "ana@example.com", "role": "viewer", "sso": True, "named": True}
     assert client.post("/api/projects", json={"name": "x", "platform": "generic"}).status_code == 403
     # an admin promotes the user; the change applies to the live session
     from app import db
