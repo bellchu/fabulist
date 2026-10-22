@@ -11,6 +11,7 @@
    scripts/ci.sh       # same plus the image build, on a local Docker daemon
    scripts/ui-check-k8s.sh   # browser checks (tests/ui/*.py, Playwright) against the app, on the cluster
    scripts/load-test-k8s.sh  # 20 requesters x 20 BRDs at once, and a project with 1,000+ BRDs; checks latency, correctness and memory
+   scripts/release-check-k8s.sh # all of the above in one go (gate, browser suite, load scenarios, image scan) with a one-screen summary
    scripts/scan-image-k8s.sh # known HIGH/CRITICAL vulnerabilities in the deployed image (OS and Python packages), on the cluster
    ```
 
