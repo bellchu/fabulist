@@ -186,6 +186,7 @@ async function viewSettings(content) {
     temperature: num("temperature", "0.05"), max_output_tokens: num("max_output_tokens"), timeout_seconds: num("timeout_seconds"),
     chunk_chars: num("chunk_chars", "500"), max_chunks_per_run: num("max_chunks_per_run"), ai_concurrency: num("ai_concurrency"), rag_top_k: num("rag_top_k"),
     embed_model: h("input", { type: "text", value: v.embed_model, placeholder: "e.g. text-embedding-3-small" }),
+    domain: h("input", { type: "text", value: v.domain, maxlength: "120", placeholder: s.defaults.domain, "aria-label": "Business domain" }),
   };
   let redact = v.redact_pii, edited = false;
   guardLeaving(() => edited);
@@ -217,6 +218,8 @@ async function viewSettings(content) {
   content.addEventListener("change", () => { edited = true; });
   mount(content, 
     head("Generation settings", "Parameters applied to every extraction and story-generation run.", h("button", { class: "btn btn-primary", onclick: save }, "Save settings")),
+    card("Business context", "Told to the AI at the start of every extraction and story run.",
+      field("Business domain", inputs.domain, "The kind of business the requirements and stories are for, in a few words (for example \"retail banking\" or \"public-sector housing\"). Default: " + s.defaults.domain + ".")),
     card("Model parameters", "Sent with each AI request.",
       h("div", { class: "form-grid" },
         field("Temperature", inputs.temperature, "Lower is more deterministic. " + limit("temperature")),

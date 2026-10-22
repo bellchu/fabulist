@@ -94,7 +94,7 @@ A webhook that ticks "Also tell this webhook when an AI run finishes" also recei
   the provider's model list into a dropdown (custom IDs are still allowed). You can also test the
   connection and pick a default. API keys are encrypted at rest and never returned to the
   browser.
-- **Generation settings**: temperature, output tokens, timeout, section size, run limits,
+- **Generation settings**: the business domain the AI is told it is writing for (default: medical product distribution; change it for any other industry), temperature, output tokens, timeout, section size, run limits,
   retrieval depth, the embeddings provider and model, and personal-data masking.
 - **Product taxonomy**: product classes with behaviour attributes (cold chain, controlled,
   serialized, ...) and detection keywords, plus attribute rules that become product-variant

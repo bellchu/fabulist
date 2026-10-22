@@ -36,7 +36,7 @@ Usage = Dict[str, int]
 
 REQ_SYSTEM = (
     "You are a senior business analyst. Extract atomic requirements from a business requirements document "
-    "(BRD) section for enterprise application delivery in medical product distribution. Reply with ONLY a JSON "
+    "(BRD) section for enterprise application delivery in {domain}. Reply with ONLY a JSON "
     "array. Each element: {\"statement\": str, \"type\": \"business|functional|non-functional|constraint|rule\", "
     "\"actors\": [str], \"source_id\": str (requirement ID used in the BRD, or empty), \"rationale\": str}. "
     "Rules: one verifiable requirement per element (split compound statements); keep the BRD's meaning and "
@@ -45,7 +45,7 @@ REQ_SYSTEM = (
     "'to be confirmed' verbatim in the statement; never resolve or drop them."
 )
 STORY_SYSTEM = (
-    "You are a senior business analyst writing an agile backlog from approved requirements. Reply with ONLY a "
+    "You are a senior business analyst writing an agile backlog from approved requirements for enterprise application delivery in {domain}. Reply with ONLY a "
     "JSON array of user stories. Each element: {\"epic\": str, \"feature\": str, \"title\": str (short, verb-first), "
     "\"persona\": str (specific role), \"narrative\": \"As a <persona>, I want <goal>, so that <benefit>\", "
     "\"acceptance_criteria\": [Gherkin strings starting with Given/When/Then], \"priority\": \"High|Medium|Low\", "
@@ -60,6 +60,11 @@ STORY_SYSTEM = (
 
 
 # ---- helpers -------------------------------------------------------------
+
+def _system(text: str, opts: Dict[str, Any]) -> str:
+    """The instructions with the configured business domain filled in (Admin > Generation settings)."""
+    return text.replace("{domain}", str(opts.get("domain") or "medical product distribution"))
+
 
 def _clean_list(v: Any) -> List[str]:
     if isinstance(v, str):
@@ -321,7 +326,7 @@ def extract_requirements(documents: List[Dict[str, Any]], platform: str, profile
         if profile["kind"] == "mock":
             return mock_requirements(sec)
         prompt = "%s\n\nDocument: %s\nSection: %s > %s\n\nBRD text:\n%s" % (context, doc["filename"], sec["epic"], sec["heading"], sec["text"])
-        return _ask_at("Section %d of %d (%s)" % (i + 1, len(work), sec["heading"][:60]), profile, opts, REQ_SYSTEM, prompt, usage)
+        return _ask_at("Section %d of %d (%s)" % (i + 1, len(work), sec["heading"][:60]), profile, opts, _system(REQ_SYSTEM, opts), prompt, usage)
     workers = 1 if profile["kind"] == "mock" else int(opts.get("ai_concurrency", 1))
     answers = _in_order(len(work), read, workers, progress, lambda i: "Reading section %d of %d: %s" % (i + 1, len(work), work[i][1]["heading"][:60]))
     for (doc, sec), raw in zip(work, answers):
@@ -442,7 +447,7 @@ def generate_stories(reqs: List[Dict[str, Any]], project_id: str, platform: str,
             related = embeddings.search(project_id, " ".join(r["statement"] for r in items)[:1500], int(opts["rag_top_k"]))
         context = ("\n\nRelated BRD context (for consistency only):\n" + "\n---\n".join(h["text"][:600] for h in related)) if related else ""
         prompt = "%s%s\n\nEpic: %s\nFeature area: %s\n\nRequirements:\n%s" % (platform_context, context, epic, section, lines)
-        return _ask_at("Story group %d of %d (%s)" % (i + 1, len(batches), section[:60]), profile, opts, STORY_SYSTEM, prompt, usage)
+        return _ask_at("Story group %d of %d (%s)" % (i + 1, len(batches), section[:60]), profile, opts, _system(STORY_SYSTEM, opts), prompt, usage)
     answers = _in_order(len(batches), write, int(opts.get("ai_concurrency", 1)), progress,
                         lambda i: "Writing stories %d of %d: %s" % (i + 1, len(batches), batches[i][1][:60]))
     for (epic, section, _items), stories in zip(batches, answers):
