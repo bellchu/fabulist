@@ -273,6 +273,8 @@ def get_project(pid: str):
     p["stories_ready"] = sum(1 for s in live if s["ready"])
     p["requirements_flagged"] = sum(1 for r in active if any(i["severity"] != "info" for i in r["issues"]))
     p["requirement_types"] = {t: sum(1 for r in active if r["type"] == t) for t in pipeline.REQ_TYPES}
+    p["compliance"] = {t: {"requirements": sum(1 for r in active if t in r["compliance_tags"]), "covered": sum(1 for r in active if t in r["compliance_tags"] and r["key"] in covered)}
+                       for t in sorted({t for r in active for t in r["compliance_tags"]})}
     p["runs"] = {st: db.one("SELECT * FROM runs WHERE project_id=%s AND stage=%s ORDER BY created DESC LIMIT 1", (pid, st))
                  for st in STAGES}
     for run in p["runs"].values():
