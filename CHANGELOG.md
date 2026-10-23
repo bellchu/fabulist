@@ -6,7 +6,7 @@ Notable user-visible and operational changes, newest first.
 
 - The Traceability page has a **Compliance matrix** download beside the traceability matrix, shown once compliance tags are in use.
 - **Press ? for the keyboard shortcuts.** The review drawers' shortcuts were only hinted at once a drawer was open. `?` (outside text fields and dialogs) now lists every shortcut: search, save, approve and next, previous and next, close.
-- Saving a single requirement or story also reuses the project's spelling of a compliance tag (`sox` becomes `SOX`), and tags that differ only in case collapse. A spreadsheet import of requirements does the same. AI extraction is not changed.
+- Saving a single requirement or story also reuses the project's spelling of a compliance tag (`sox` becomes `SOX`), and tags that differ only in case collapse. A spreadsheet import of requirements does the same, and so do AI runs that add to what is already there (a run that replaces everything starts fresh).
 - Bulk Tag… ignores case: typing `sox` when the project already says `SOX` adds `SOX` (and removing `sox` removes `SOX`), so a tag is never split in two by spelling.
 - The Tag… dialog suggests the compliance tags already in use in the project, so one spelling is used for each (the filter, the overview and the compliance matrix group by exact text).
 - **Compliance matrix export.** A new export format, *Compliance matrix (CSV)*: one row per compliance tag and requirement, with the stories that cover it and gaps flagged, sorted by tag. It is what an auditor asks for tag by tag, and it follows the export scope (all or approved).

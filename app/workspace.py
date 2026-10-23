@@ -575,6 +575,12 @@ def _run_stage(run_id: str, pid: str, stage: str, provider_id: str, scope: str, 
                 raise ValueError("No requirements in scope. Extract and review requirements first.")
             items = pipeline.generate_stories(reqs, pid, project["platform"], profile, opts, progress, usage)
         progress("Saving results")
+        replacing = (not incremental and not adding_stories) or reset or reset_stories
+        if not replacing:  # added to what is there: spell tags the way the project already does
+            with db.conn() as c:
+                known = _project_tags(c, pid)
+            for x in items:
+                x["compliance_tags"] = _respell(known, x.get("compliance_tags"))
         if stage == "requirements":
             sql = "INSERT INTO requirements (id, project_id, seq, data) VALUES (%s,%s,%s,%s)"
             first_seq = db.one("SELECT coalesce(max(seq) + 1, 0) AS n FROM requirements WHERE project_id=%s", (pid,))["n"] if incremental and not reset else 0
@@ -588,7 +594,7 @@ def _run_stage(run_id: str, pid: str, stage: str, provider_id: str, scope: str, 
             current = c.execute("SELECT status FROM runs WHERE id=%s FOR UPDATE", (run_id,)).fetchone()
             if not current or current["status"] != "running":
                 raise RunCancelled()
-            if (not incremental and not adding_stories) or reset or reset_stories:
+            if replacing:
                 # Stories link to requirement keys, so re-extracting requirements resets the backlog too.
                 c.execute("DELETE FROM stories WHERE project_id = %s", (pid,))
                 if stage == "requirements":
