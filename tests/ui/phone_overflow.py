@@ -15,8 +15,11 @@ def check(ok, what):
         failures.append(what)
 
 
-WIDE = """[...document.querySelectorAll('body *')].filter((e) => e.getBoundingClientRect().right > window.innerWidth + 1 && !e.closest('.table-wrap, .context-bar, .scroll-x, [data-scroll]'))
-  .slice(0, 4).map((e) => e.tagName + '.' + e.className + ' ' + (e.textContent || '').slice(0, 40))"""
+WIDE = """[...document.querySelectorAll('body *')].filter((e) => {
+  if (e.getBoundingClientRect().right <= window.innerWidth + 1) return false;
+  for (let p = e.parentElement; p && p !== document.body; p = p.parentElement) if (getComputedStyle(p).overflowX !== 'visible') return false;  // inside something that scrolls or clips by itself
+  return true;
+}).slice(0, 4).map((e) => e.tagName + '.' + e.className + ' ' + (e.textContent || '').slice(0, 40))"""
 
 
 def fits(page, what):
@@ -27,7 +30,7 @@ def fits(page, what):
 
 with sync_playwright() as p:
     browser = p.chromium.launch()
-    ctx = browser.new_context(viewport={"width": 375, "height": 800}, bypass_csp=True)
+    ctx = browser.new_context(viewport={"width": 320, "height": 800}, bypass_csp=True)
     pid = ctx.request.post(BASE + "/api/projects", data={"name": "Phone sweep" + "w" * 90, "platform": "generic"}, headers=H).json()["id"]
     for text in ("The system shall export invoices to CSV on request, see https://example.com/" + "p" * 150, "The system shall email order confirmations to buyers."):
         ctx.request.post(f"{BASE}/api/projects/{pid}/requirements", data={"statement": text, "compliance_tags": ["SOX"]}, headers=H)
@@ -57,7 +60,7 @@ with sync_playwright() as p:
         page.wait_for_selector(".modal")
         fits(page, button + " dialog")
         box = page.locator(".modal").bounding_box()
-        check(box["x"] >= 0 and box["x"] + box["width"] <= 376, f"{button} dialog fits the screen")
+        check(box["x"] >= 0 and box["x"] + box["width"] <= 321, f"{button} dialog fits the screen")
         page.locator(".modal-foot").get_by_role("button", name="Cancel").click()
         page.wait_for_function("!document.querySelector('.modal')")
     page.get_by_role("button", name="Open REQ-001").click()
@@ -67,6 +70,6 @@ with sync_playwright() as p:
     page.wait_for_selector(".modal")
     fits(page, "Split… dialog")
     box = page.locator(".modal").bounding_box()
-    check(box["x"] >= 0 and box["x"] + box["width"] <= 376, "Split… dialog fits the screen")
+    check(box["x"] >= 0 and box["x"] + box["width"] <= 321, "Split… dialog fits the screen")
     browser.close()
 sys.exit(1 if failures else 0)

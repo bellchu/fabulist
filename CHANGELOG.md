@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- **Fix: the project overview scrolled sideways at 320 px** (the width WCAG reflow requires) once the Compliance coverage card was showing: a card's wide table stretched its grid column. Cards now shrink to fit and the table scrolls inside. The phone sweep now runs at 320 px.
 - **Fix: long unbroken text no longer widens the page on a phone.** A project name with no spaces (or a long URL in a requirement) pushed the home page 867 px and the project header and "Recent changes" about 500 px off a 375 px screen. They now wrap. `tests/ui/phone_overflow.py` visits every project tab and the bulk dialogs at phone width with such text.
 - **Fix: the bulk bar pushed the page sideways on a phone.** With Assign…, Set…, Tag… and Merge… added, the row of buttons was wider than the screen (268 px over at 375 px). It now wraps. A phone-width browser test guards it.
 - The Traceability page has a **Compliance matrix** download beside the traceability matrix, shown once compliance tags are in use.
