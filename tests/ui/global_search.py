@@ -64,7 +64,7 @@ with sync_playwright() as p:
     box.type("fish")
     check(box.input_value() == "zebrafish", "typing carries on where it was")
     page.goto(BASE + "/#/search/sox")
-    page.wait_for_selector(".page-head")
+    page.wait_for_selector("text=Results for")  # the previous page's header is also a .page-head: wait for the search page itself
     check("compliance tag" in page.locator(".page-head").inner_text(), "the search page says compliance tags are searched too")
     browser.close()
 sys.exit(1 if failures else 0)
