@@ -96,6 +96,14 @@ def rtm_csv(stories: List[Item], reqs: List[Item]) -> Output:
     return _csv(RTM_HEADER, _rtm_rows(stories, reqs))
 
 
+def compliance_csv(stories: List[Item], reqs: List[Item]) -> Output:
+    """One row per (compliance tag, requirement) so an auditor can see, tag by tag, what is required and which stories cover it."""
+    rows = []
+    for r, rtm in zip(reqs, _rtm_rows(stories, reqs)):
+        rows += [[tag, rtm[0], rtm[1], rtm[2], rtm[3], rtm[4], rtm[5], rtm[6]] for tag in r.get("compliance_tags") or []]
+    return _csv(["compliance_tag"] + RTM_HEADER, sorted(rows, key=lambda x: (x[0].lower(), x[1])))
+
+
 def jira_csv(stories: List[Item], reqs: List[Item]) -> Output:
     rows = []
     for s in stories:
@@ -339,5 +347,6 @@ EXPORTERS: Dict[str, Tuple[Callable[[List[Item], List[Item]], Output], str, str,
     "stories-csv": (stories_csv, "csv", "Stories (CSV)", "Every story field, one row per story."),
     "requirements-csv": (requirements_csv, "csv", "Requirements (CSV)", "Extracted requirements with quality scores."),
     "rtm-csv": (rtm_csv, "csv", "Traceability matrix (CSV)", "Requirement-to-story coverage, with gaps flagged."),
+    "compliance-csv": (compliance_csv, "csv", "Compliance matrix (CSV)", "Each compliance tag with its requirements, the stories that cover them, and gaps flagged."),
     "json": (as_json, "json", "JSON", "Requirements and stories for integrations and APIs."),
 }

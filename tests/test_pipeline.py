@@ -384,3 +384,16 @@ def test_small_sets_are_still_exact():
              {"key": "B", "statement": "The system shall export invoices to CSV on request!", "status": "draft"},
              {"key": "C", "statement": "Customer service agents may place orders on behalf of clinics.", "status": "draft"}]
     assert quality.duplicate_pairs(items) == {"A": ["B"], "B": ["A"]}
+
+
+def test_the_compliance_matrix_lists_each_requirement_under_each_tag_with_its_stories():
+    import csv
+    import io
+    tagged = dict(REQ, key="REQ-001", compliance_tags=["SOX", "GDPR"])
+    other = dict(REQ, key="REQ-002", compliance_tags=["GDPR"])
+    plain = dict(REQ, key="REQ-003", compliance_tags=[])
+    story = dict(_story(), requirement_ids=["REQ-001"])
+    data, mime = exporters.compliance_csv([story], [tagged, other, plain])
+    rows = list(csv.reader(io.StringIO(data.decode("utf-8-sig"))))
+    assert rows[0][:3] == ["compliance_tag", "requirement", "type"] and mime.startswith("text/csv")
+    assert [(r[0], r[1], r[-1]) for r in rows[1:]] == [("GDPR", "REQ-001", "covered"), ("GDPR", "REQ-002", "GAP"), ("SOX", "REQ-001", "covered")], "REQ-003 has no tag so it is not listed"

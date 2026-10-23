@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- **Compliance matrix export.** A new export format, *Compliance matrix (CSV)*: one row per compliance tag and requirement, with the stories that cover it and gaps flagged, sorted by tag. It is what an auditor asks for tag by tag, and it follows the export scope (all or approved).
 - **Compliance coverage on the project overview.** A table of each compliance tag with how many active requirements carry it and how many of those a story covers (`compliance` in `GET /api/projects/{id}`); shown only when tags are in use. Each tag links to the requirements list filtered to it.
 - **Filter requirements by compliance tag.** With tags applied in bulk, the requirements list gains an "All compliance" filter (shown once any requirement has a tag) next to type and status; the stories list has the same filter.
 - **Tag… for stories too.** The bulk Tag… that landed for requirements now exists in the stories bulk bar (`POST /api/projects/{id}/stories/tag`), same behaviour and audit trail.
