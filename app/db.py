@@ -119,6 +119,10 @@ SCHEMA = [
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS owner TEXT",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change BOOLEAN NOT NULL DEFAULT FALSE",  # set when an administrator chose the password
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TEXT",  # when the account last used the API (about once per quarter hour): access reviews
+    "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS last_event TEXT",  # the last webhook delivery: event, when, ok or not, and why not
+    "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS last_event_at TEXT",
+    "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS last_event_ok BOOLEAN",
+    "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS last_event_note TEXT",
     "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS events TEXT NOT NULL DEFAULT ''",  # 'runs': a webhook that also hears when an AI run finishes
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'upload'",
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS repo_id TEXT",

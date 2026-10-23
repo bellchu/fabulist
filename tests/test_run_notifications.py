@@ -119,3 +119,41 @@ def test_stuck_runs_are_found_without_anyone_starting_another_run(client, monkey
     assert db.one("SELECT status FROM runs WHERE id=%s", (live,))["status"] == "running", "a run that is making progress is left alone"
     assert workspace.recover_all_stuck_runs() == 0
     db.execute("UPDATE runs SET status='failed' WHERE id=%s", (live,))  # the fixture waits for 'running' rows at teardown (30 s if one never ends)
+
+
+def _hook(client):
+    return next(h for h in client.get("/api/integrations").json()["integrations"] if h["name"] == HOOK["name"])
+
+
+def test_the_last_delivery_is_visible_on_the_integration(client, monkeypatch):
+    sent = _capture(monkeypatch)
+    client.post("/api/admin/integrations", json=dict(HOOK, notify_runs=True))
+    assert _hook(client)["last_delivery"] is None, "nothing sent yet"
+    _run(client)
+    _wait_for(sent, 1)
+    time.sleep(0.3)
+    last = _hook(client)["last_delivery"]
+    assert last["ok"] is True and last["event"] == "run.finished" and last["at"]
+
+
+def test_a_failed_delivery_says_why(client, monkeypatch):
+    def boom(*a, **k):
+        raise integrations.httpx.ConnectError("receiver is down")
+    monkeypatch.setattr(integrations.httpx, "post", boom)
+    monkeypatch.setattr(integrations.time, "sleep", lambda s: None)
+    client.post("/api/admin/integrations", json=dict(HOOK, notify_runs=True))
+    _run(client)
+    for _ in range(50):
+        last = _hook(client)["last_delivery"]
+        if last:
+            break
+        time.sleep(0.1)
+    assert last["ok"] is False and "ConnectError" in last["note"] and last["event"] == "run.finished"
+
+
+def test_a_test_ping_counts_as_a_delivery_too(client, monkeypatch):
+    _capture(monkeypatch)
+    made = client.post("/api/admin/integrations", json=HOOK).json()
+    assert client.post("/api/admin/integrations/%s/test" % made["id"]).json()["ok"] is True
+    last = _hook(client)["last_delivery"]
+    assert last["ok"] is True and last["event"] == "ping"

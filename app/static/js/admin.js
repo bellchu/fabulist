@@ -360,7 +360,9 @@ async function viewIntegrations(content) {
         h("div", { class: "row" }, h("b", {}, it.name), badge(it.kind_label, "accent")),
         h("div", { class: "small muted mono" }, it.base_url + (it.target ? " · default " + it.target : "")),
         h("div", { class: "small" }, it.has_token ? h("span", { class: "muted" }, (it.username ? it.username + " · " : "") + "token " + it.key_hint)
-          : h("span", { style: { color: "var(--amber)" } }, "No API token"))),
+          : h("span", { style: { color: "var(--amber)" } }, "No API token")),
+        it.last_delivery ? h("div", { class: "small", style: it.last_delivery.ok ? {} : { color: "var(--red)" } },
+          "Last delivery (" + it.last_delivery.event + "): " + (it.last_delivery.ok ? "ok" : "failed: " + it.last_delivery.note) + " · " + timeAgo(it.last_delivery.at)) : null),
       h("button", { class: "btn btn-sm", onclick: guard(async () => {
         result.replaceChildren(h("span", { class: "muted" }, "Testing…"));
         const r = await api.post("/api/admin/integrations/" + it.id + "/test");

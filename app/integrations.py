@@ -330,6 +330,15 @@ def client_for(conn: Dict[str, Any]) -> Any:
     return TRACKERS[conn["kind"]](conn, token)
 
 
+def note_delivery(iid: str, event: str, ok: bool, note: str = "") -> None:
+    """Remember how the latest delivery to a webhook went, so an administrator can see it without reading logs."""
+    try:
+        db.execute("UPDATE integrations SET last_event=%s, last_event_at=%s, last_event_ok=%s, last_event_note=%s WHERE id=%s",
+                   (event, db.now(), ok, note[:300], iid))
+    except Exception:  # noqa: BLE001 - bookkeeping must never break a delivery
+        logging.getLogger("fabulist").warning("could not record the delivery to %s", iid, exc_info=True)
+
+
 def announce_run(run_id: str) -> None:
     """Tell the webhooks that opted in that a run finished. Runs on its own thread: a slow or broken receiver must never hold a run slot or fail a run."""
     hooks = db.rows("SELECT * FROM integrations WHERE kind='webhook' AND events='runs'")
@@ -346,8 +355,10 @@ def announce_run(run_id: str) -> None:
         for hook in hooks:
             try:
                 client_for(hook)._post(payload)
-            except Exception as exc:  # noqa: BLE001 - a receiver's trouble is logged, never raised
+                note_delivery(hook["id"], "run.finished", True)
+            except Exception as exc:  # noqa: BLE001 - a receiver's trouble is logged and remembered, never raised
                 logging.getLogger("fabulist").warning("run notification to %s failed: %s", hook["name"], exc)
+                note_delivery(hook["id"], "run.finished", False, "%s: %s" % (type(exc).__name__, exc))
     threading.Thread(target=deliver, name="run-notify", daemon=True).start()
 
 
@@ -355,7 +366,13 @@ def push(project_id: str, conn: Dict[str, Any], target: str, stories: List[Dict[
          progress: Callable[[str], None] = lambda m: None, out_of_time: Callable[[], bool] = lambda: False) -> Dict[str, Any]:
     tracker = client_for(conn)
     if hasattr(tracker, "deliver"):
-        return tracker.deliver(project_id, target, stories)
+        try:
+            result = tracker.deliver(project_id, target, stories)
+        except Exception as exc:  # noqa: BLE001 - remembered, then raised as before
+            note_delivery(conn["id"], "backlog.pushed", False, "%s: %s" % (type(exc).__name__, exc))
+            raise
+        note_delivery(conn["id"], "backlog.pushed", True)
+        return result
     links = {(r["item_type"], r["item_ref"]): r["external_key"] for r in db.rows(
         "SELECT item_type, item_ref, external_key FROM external_links WHERE integration_id=%s AND target=%s AND project_id=%s",
         (conn["id"], target, project_id))}
@@ -404,6 +421,8 @@ def push(project_id: str, conn: Dict[str, Any], target: str, stories: List[Dict[
 def _public(r: Dict[str, Any]) -> Dict[str, Any]:
     out = {k: r[k] for k in ("id", "kind", "name", "base_url", "username", "target", "key_hint", "created")}
     out.update(kind_label=KINDS.get(r["kind"], r["kind"]), has_token=bool(r["token_enc"]), notify_runs=r["kind"] == "webhook" and r.get("events") == "runs")
+    out["last_delivery"] = ({"event": r["last_event"], "at": r["last_event_at"], "ok": bool(r["last_event_ok"]), "note": r.get("last_event_note") or ""}
+                            if r["kind"] == "webhook" and r.get("last_event_at") else None)
     return out
 
 
@@ -471,7 +490,13 @@ def delete_integration(iid: str, request: Request):
 
 @router.post("/api/admin/integrations/{iid}/test")
 def test_integration(iid: str):
+    row = get(iid)
     try:
-        return {"ok": True, "message": client_for(get(iid)).test()}
+        message = client_for(row).test()
     except (TrackerError, settings.SettingsError) as exc:
+        if row["kind"] == "webhook":
+            note_delivery(iid, "ping", False, str(exc))
         return {"ok": False, "error": str(exc)}
+    if row["kind"] == "webhook":
+        note_delivery(iid, "ping", True)
+    return {"ok": True, "message": message}
