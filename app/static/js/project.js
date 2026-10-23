@@ -768,6 +768,8 @@ function bulkSet(kind, selected, refresh) {
   }) }, "Set…");
 }
 
+const nounCount = (n, one, many) => n + " " + (n === 1 ? one : many);
+
 // Compliance tags to suggest: the built-in list plus whatever this project already uses, so one spelling is reused.
 const complianceChoices = () => [...new Set([...state.meta.compliance_tags, ...Object.keys(ctx.project.compliance || {})])].sort((a, b) => a.localeCompare(b));
 
@@ -1382,14 +1384,14 @@ async function viewExport(body) {
   const tagNames = Object.keys(p.compliance || {}).sort();
   if (filters.exportTag && !tagNames.includes(filters.exportTag)) filters.exportTag = "";
   const tagParam = () => (filters.exportTag ? "&tag=" + encodeURIComponent(filters.exportTag) : "");  // one regulation's evidence: its requirements and the stories that implement them
-  const tagSel = tagNames.length ? select([["", "All compliance"], ...tagNames.map((t) => [t, t])], filters.exportTag, { "aria-label": "Compliance tag" }) : null;
+  const tagSel = tagNames.length ? select([["", "All compliance"], ...tagNames.map((t) => [t, t])], filters.exportTag, { "aria-label": "Compliance tag", style: { width: "auto", minWidth: "180px" } }) : null;
   if (tagSel) tagSel.addEventListener("change", () => { filters.exportTag = tagSel.value; render(); });
   const render = () => {
     const approvedOnly = filters.exportScope === "approved";
     const n = approvedOnly ? p.stories_approved : p.stories;
     note.textContent = approvedOnly
-      ? p.stories_approved + " approved stories and " + p.requirements_approved + " approved requirements will be exported."
-      : p.stories + " stories (excluding rejected) and " + p.requirements + " requirements (excluding excluded) will be exported.";
+      ? nounCount(p.stories_approved, "approved story", "approved stories") + " and " + nounCount(p.requirements_approved, "approved requirement", "approved requirements") + " will be exported."
+      : nounCount(p.stories, "story", "stories") + " (excluding rejected) and " + nounCount(p.requirements, "requirement", "requirements") + " (excluding excluded) will be exported.";
     if (filters.exportTag) note.textContent += " Narrowed to the requirements tagged " + filters.exportTag + " and the stories that implement them or carry the tag.";
     grid.replaceChildren(...state.meta.formats.map((f) => h("div", { class: "card card-body stack", style: { gap: "8px" } },
       h("div", { class: "row" }, icon(f.ext === "xlsx" ? "chart" : "file"), h("h3", { class: "grow" }, f.label), badge("." + f.ext)),

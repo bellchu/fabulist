@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- **Fix: the Export tab said "1 stories" and "1 requirements", and its compliance choice stretched across the whole card.** Counts now read "1 story" / "1 requirement", and the dropdown is a normal size (`tests/ui/export_tab.py`).
 - **Fix: Delete sat alone on a second line of the requirement drawer's footer** once Split… was added. The footer's buttons are a little tighter and fit one row in the 640 px drawer (`tests/ui/drawer_footer.py`).
 - The page footer has a **Keyboard shortcuts** link that opens the same list as pressing `?`, so the list can be found without knowing the key.
 - **Cluster scripts sweep up after dropped runs.** When the SSH tunnel drops mid-run the script cannot delete its temporary namespace, and its pods sat there for hours (three were found, the oldest 26 h). Every cluster script now first deletes its predecessors' run namespaces (`fabulist-ci|ui|load|drill|sbom|scan|py|smoke-<epoch>-<pid>`) older than three hours (`STALE_NAMESPACE_SECONDS`); production and the image-build namespaces are never touched.
