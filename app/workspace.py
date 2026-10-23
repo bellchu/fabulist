@@ -1744,6 +1744,19 @@ def push_to_tracker(pid: str, body: PushIn, request: Request):
     return result
 
 
+def _narrow_to_tag(stories: List[Dict[str, Any]], reqs: List[Dict[str, Any]], tag: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """One regulation's evidence: the requirements that carry the tag, the stories that implement them, and stories tagged themselves."""
+    wanted = tag.strip().lower()
+    if not wanted:
+        return stories, reqs
+    reqs = [r for r in reqs if wanted in (t.lower() for t in r.get("compliance_tags") or [])]
+    keys = {r["key"] for r in reqs}
+    stories = [s for s in stories if keys & set(s.get("requirement_ids") or []) or wanted in (t.lower() for t in s.get("compliance_tags") or [])]
+    if not stories and not reqs:
+        raise HTTPException(404, "Nothing carries the compliance tag %s" % tag.strip())
+    return stories, reqs
+
+
 @router.get("/api/projects/{pid}/export")
 def export(pid: str, format: str = "xlsx", scope: str = "approved-or-all", inline: bool = False, tag: str = ""):
     project = _project(pid)
@@ -1755,13 +1768,7 @@ def export(pid: str, format: str = "xlsx", scope: str = "approved-or-all", inlin
     if scope == "approved":
         stories = [s for s in stories if s["status"] == "approved"]
         reqs = [r for r in reqs if r["status"] == "approved"]
-    if tag.strip():  # one regulation's evidence: the requirements that carry the tag, the stories that implement them, and stories tagged themselves
-        wanted = tag.strip().lower()
-        reqs = [r for r in reqs if wanted in (t.lower() for t in r.get("compliance_tags") or [])]
-        keys = {r["key"] for r in reqs}
-        stories = [s for s in stories if keys & set(s.get("requirement_ids") or []) or wanted in (t.lower() for t in s.get("compliance_tags") or [])]
-        if not stories and not reqs:
-            raise HTTPException(404, "Nothing carries the compliance tag %s" % tag.strip())
+    stories, reqs = _narrow_to_tag(stories, reqs, tag)
     if not stories and not reqs:
         raise HTTPException(404, "Nothing to export yet")
     for item in stories + reqs:
@@ -1872,19 +1879,22 @@ def compare_baseline(pid: str, bid: str, to: str = "current"):
 
 
 @router.get("/api/projects/{pid}/baselines/{bid}/export")
-def export_baseline(pid: str, bid: str, format: str = "xlsx"):
+def export_baseline(pid: str, bid: str, format: str = "xlsx", tag: str = ""):
     project = _project(pid)
     b = _baseline(pid, bid)
     entry = exporters.EXPORTERS.get(format)
     if not entry:
         raise HTTPException(400, "Unknown format")
     snap = b["snapshot"]
+    stories, reqs = _narrow_to_tag(snap["stories"], snap["requirements"], tag)
     title = "%s backlog v%d (%s)" % (project["name"], b["version"], b["name"])
     details = ["Baseline v%d (%s), frozen %s UTC by %s" % (b["version"], b["name"], _utc_minutes(b["created"]), b.get("actor") or "unknown"),
                "Scope: " + ("approved only" if b["scope"] == "approved" else "approved and draft"),
                "Exported %s UTC" % _utc_minutes(db.now())]
-    payload, mime = (exporters.html_report(snap["stories"], snap["requirements"], title, details) if format == "html"
-                     else entry[0](snap["stories"], snap["requirements"]))
+    if tag.strip():
+        details.append("Compliance tag: " + tag.strip())
+    payload, mime = (exporters.html_report(stories, reqs, title, details) if format == "html"
+                     else entry[0](stories, reqs))
     slug = re.sub(r"[^a-z0-9]+", "-", project["name"].lower()).strip("-") or "backlog"
     headers = {"Content-Disposition": 'attachment; filename="%s-v%d-%s.%s"' % (slug, b["version"], format, entry[1])}
     if format == "html":

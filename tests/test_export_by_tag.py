@@ -29,3 +29,13 @@ def test_a_tag_nothing_carries_is_a_clear_not_found_and_no_tag_changes_nothing(c
     assert r.status_code == 404
     full = json.loads(client.get("/api/projects/%s/export" % pid, params={"format": "json", "scope": "all"}).content)
     assert len(full["requirements"]) == 3 and len(full["stories"]) == 3
+
+
+def test_a_frozen_baseline_can_be_narrowed_to_a_tag_too(client):
+    pid = _setup(client)
+    made = client.post("/api/projects/%s/baselines" % pid, json={"name": "Audit freeze", "scope": "all"})
+    assert made.status_code in (200, 201), made.text
+    bid = made.json()["id"]
+    got = json.loads(client.get("/api/projects/%s/baselines/%s/export" % (pid, bid), params={"format": "json", "tag": "PCI-DSS"}).content)
+    assert [x["key"] for x in got["requirements"]] == ["REQ-002"] and [s["title"] for s in got["stories"]] == ["Mask cards"]
+    assert client.get("/api/projects/%s/baselines/%s/export" % (pid, bid), params={"format": "json", "tag": "HIPAA"}).status_code == 404

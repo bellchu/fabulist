@@ -4,7 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
-- **Export one regulation's evidence.** The Export tab has a compliance tag choice (shown when tags are in use) and `GET /api/projects/{id}/export` takes `tag=`: every format is narrowed to the requirements carrying the tag, the stories that implement them and stories tagged themselves, and the report says which tag it covers. A tag nothing carries is a clear 404.
+- **Export one regulation's evidence.** The Export tab has a compliance tag choice (shown when tags are in use) and `GET /api/projects/{id}/export` takes `tag=`: every format is narrowed to the requirements carrying the tag, the stories that implement them and stories tagged themselves, and the report says which tag it covers. A tag nothing carries is a clear 404. Frozen baselines take `tag=` as well, and the Export tab's choice applies to their Export buttons too.
 - The Confluence page published from a project also gets the **Compliance coverage** table the stakeholder report has, when tags are in use.
 - The stakeholder HTML report gets a **Compliance coverage** table (each tag, its requirements, how many stories cover them, gaps marked) between the traceability table and the sign-off block, when any requirement carries a tag.
 - The Excel workbook export gains a **Compliance** sheet (the same rows as the compliance matrix CSV) when any requirement carries a tag; projects without tags get the same three sheets as before.
