@@ -96,12 +96,19 @@ def rtm_csv(stories: List[Item], reqs: List[Item]) -> Output:
     return _csv(RTM_HEADER, _rtm_rows(stories, reqs))
 
 
-def compliance_csv(stories: List[Item], reqs: List[Item]) -> Output:
+COMPLIANCE_HEADER = ["compliance_tag"] + RTM_HEADER
+
+
+def _compliance_rows(stories: List[Item], reqs: List[Item]) -> List[List[str]]:
     """One row per (compliance tag, requirement) so an auditor can see, tag by tag, what is required and which stories cover it."""
     rows = []
     for r, rtm in zip(reqs, _rtm_rows(stories, reqs)):
-        rows += [[tag, rtm[0], rtm[1], rtm[2], rtm[3], rtm[4], rtm[5], rtm[6]] for tag in r.get("compliance_tags") or []]
-    return _csv(["compliance_tag"] + RTM_HEADER, sorted(rows, key=lambda x: (x[0].lower(), x[1])))
+        rows += [[tag] + rtm for tag in r.get("compliance_tags") or []]
+    return sorted(rows, key=lambda x: (x[0].lower(), x[1]))
+
+
+def compliance_csv(stories: List[Item], reqs: List[Item]) -> Output:
+    return _csv(COMPLIANCE_HEADER, _compliance_rows(stories, reqs))
 
 
 def jira_csv(stories: List[Item], reqs: List[Item]) -> Output:
@@ -183,6 +190,9 @@ def xlsx(stories: List[Item], reqs: List[Item]) -> Output:
     sheet(ws, STORY_COLUMNS, [[_cell(s, c) for c in STORY_COLUMNS] for s in stories], {4: 40, 6: 60, 7: 70})
     sheet(wb.create_sheet("Requirements"), REQ_COLUMNS, [[_cell(r, c) for c in REQ_COLUMNS] for r in reqs], {3: 80})
     sheet(wb.create_sheet("Traceability"), RTM_HEADER, _rtm_rows(stories, reqs), {3: 70, 6: 50})
+    compliance = _compliance_rows(stories, reqs)
+    if compliance:
+        sheet(wb.create_sheet("Compliance"), COMPLIANCE_HEADER, compliance, {4: 70, 7: 50})
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -339,7 +349,7 @@ def gherkin_zip(stories: List[Item], reqs: List[Item]) -> Output:
 # key -> (function, file extension, label, description)
 EXPORTERS: Dict[str, Tuple[Callable[[List[Item], List[Item]], Output], str, str, str]] = {
     "html": (html_report, "html", "Stakeholder report (HTML)", "Readable backlog with coverage summary; open in a browser and print to PDF."),
-    "xlsx": (xlsx, "xlsx", "Excel workbook", "Stories, requirements and traceability matrix on separate sheets."),
+    "xlsx": (xlsx, "xlsx", "Excel workbook", "Stories, requirements and traceability matrix on separate sheets, plus a compliance sheet when tags are in use."),
     "jira-csv": (jira_csv, "csv", "Jira import (CSV)", "For Jira's external system CSV import, with an Epic Link column."),
     "azure-csv": (azure_csv, "csv", "Azure DevOps import (CSV)", "Work items for Azure Boards CSV import."),
     "md": (markdown, "md", "Markdown", "Readable backlog for Confluence, wikis or pull requests."),
