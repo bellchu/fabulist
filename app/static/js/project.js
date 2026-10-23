@@ -625,6 +625,7 @@ async function viewRequirements(body) {
         await api.post(base() + "/requirements/bulk", { ids: [...selected], status: s }); toast(l + ": " + selected.size, "ok"); selected.clear(); await refresh();
       }) }, l)),
     bulkAssign("requirement", selected, refresh),
+    bulkSet("requirement", selected, refresh),
     h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); renderTable(); renderBulk(); } }, "Clear"))] : []));
 
   let limit = PAGE;
@@ -724,6 +725,32 @@ function bulkAssign(kind, selected, refresh) {
       toast(r.updated + " " + (r.updated === 1 ? kind : plural) + " updated", "ok"); selected.clear(); await refresh();
     } }],
   }) }, "Assign…");
+}
+
+// "Set…" in a bulk bar: one value of a grouping or classification field for everything selected.
+function bulkSet(kind, selected, refresh) {
+  const plural = kind === "story" ? "stories" : "requirements";
+  const fields = kind === "story" ? [["epic", "Epic"], ["feature", "Feature"], ["priority", "Priority"]] : [["epic", "Epic"], ["section", "Section / feature"], ["type", "Type"]];
+  const which = select(fields, fields[0][0], { "aria-label": "Field" });
+  const holder = h("div");
+  let value = h("input", { type: "text", maxlength: "200", "aria-label": "Value", placeholder: "New value" });
+  const draw = () => {
+    const f = which.value;
+    value = f === "type" ? select(state.meta.requirement_types.map((t) => [t, t]), "functional", { "aria-label": "Value" })
+      : f === "priority" ? select(state.meta.priorities.map((t) => [t, t]), "Medium", { "aria-label": "Value" })
+      : h("input", { type: "text", maxlength: "200", "aria-label": "Value", placeholder: "New value" });
+    holder.replaceChildren(value);
+  };
+  which.addEventListener("change", draw);
+  draw();
+  return h("button", { class: "btn btn-sm", onclick: () => modal({
+    title: "Change " + selected.size + " " + (selected.size === 1 ? kind : plural), description: "Everything selected gets the same value; each change is recorded in the audit trail.",
+    body: h("div", { class: "stack" }, field("Field", which), field("Value", holder)),
+    actions: [{ label: "Apply", kind: "btn-primary", onClick: async () => {
+      const r = await api.post(base() + "/" + plural + "/set", { ids: [...selected], field: which.value, value: value.value });
+      toast(r.updated + " " + (r.updated === 1 ? kind : plural) + " updated", "ok"); selected.clear(); await refresh();
+    } }],
+  }) }, "Set…");
 }
 
 const matchesAssignee = (item, want) => !want || (want === "none" ? !item.assignee : (want === "me" ? state.me.username : want) === item.assignee);
@@ -882,6 +909,7 @@ async function viewStories(body) {
         await api.post(base() + "/stories/bulk", { ids: [...selected], status: st }); toast(l + ": " + selected.size, "ok"); selected.clear(); await refresh();
       }) }, l)),
     bulkAssign("story", selected, refresh),
+    bulkSet("story", selected, refresh),
     h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); render(); } }, "Clear"))] : []));
   const paging = { limit: PAGE };  // rows of the list view drawn so far
   const render = () => {
