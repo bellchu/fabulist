@@ -83,6 +83,11 @@ class AssignIn(BaseModel):
     assignee: str = Field(default="", max_length=64)
 
 
+class MergeIn(BaseModel):
+    keep: str = Field(max_length=40)
+    merge: List[str] = Field(min_length=1, max_length=200)
+
+
 class SetFieldIn(BaseModel):
     ids: List[str] = Field(min_length=1, max_length=2000)
     field: str = Field(max_length=40)
@@ -1319,6 +1324,50 @@ def _import_rows(pid: str, rows: List[Dict[str, Any]], who: str, origin: str) ->
         if fresh:
             history.record(c, pid, "project", pid, "", "imported", who, "%d requirements from %s" % (len(fresh), origin))
     return {"created": len(fresh), "duplicates_skipped": skipped}
+
+
+@router.post("/api/projects/{pid}/requirements/merge")
+def merge_requirements(pid: str, body: MergeIn, request: Request):
+    """Merge duplicates: `keep` gains everything the others say (where each was stated, actors, product scope, compliance tags) and a note; the others are
+    excluded with a pointer to it (not deleted: the trail and old links keep making sense); stories that pointed at them point at `keep`."""
+    _project(pid)
+    who = history.actor(request)
+    if body.keep in body.merge:
+        raise HTTPException(400, "A requirement cannot be merged into itself")
+    with db.conn() as c:
+        rows = {r["id"]: r for r in c.execute("SELECT id, seq, status, data FROM requirements WHERE project_id=%s AND id = ANY(%s) FOR UPDATE",
+                                              (pid, [body.keep] + body.merge)).fetchall()}
+        if body.keep not in rows or any(m not in rows for m in body.merge):
+            raise HTTPException(404, "Requirement not found")
+        keep = rows[body.keep]
+        if "Merged into " in (keep["data"].get("notes") or "")[:13]:
+            raise HTTPException(400, "%s was itself merged into another requirement; keep that one instead" % history.item_key("requirement", keep["seq"]))
+        data = dict(keep["data"])
+        keys = {m: history.item_key("requirement", rows[m]["seq"]) for m in body.merge}
+        kept_key = history.item_key("requirement", keep["seq"])
+        for m in body.merge:
+            other = rows[m]["data"]
+            for field_name in ("actors", "product_scope", "compliance_tags"):
+                data[field_name] = list(dict.fromkeys((data.get(field_name) or []) + (other.get(field_name) or [])))
+            if other.get("source_ref") and other["source_ref"] not in (data.get("source_ref") or ""):
+                data["source_ref"] = ("%s; %s" % (data.get("source_ref") or "", other["source_ref"])).strip("; ")[:300]
+        data["notes"] = ((data.get("notes") or "") + ("\n" if data.get("notes") else "") + "Merged %s into this requirement." % ", ".join(keys.values()))[:1000]
+        c.execute("UPDATE requirements SET data=%s, rev=rev+1 WHERE id=%s", (json.dumps(data), keep["id"]))
+        history.record(c, pid, "requirement", keep["id"], kept_key, "merged", who, "absorbed " + ", ".join(keys.values()), {"merged": {"from": "", "to": ", ".join(keys.values())}})
+        for m in body.merge:
+            other = dict(rows[m]["data"])
+            other["notes"] = ("Merged into %s.\n" % kept_key + (other.get("notes") or ""))[:1000]
+            c.execute("UPDATE requirements SET data=%s, status='excluded', rev=rev+1 WHERE id=%s", (json.dumps(other), m))
+            history.record(c, pid, "requirement", m, keys[m], "merged into", who, "into " + kept_key,
+                           {"status": {"from": rows[m]["status"], "to": "excluded"}})
+        relinked = 0
+        for s in c.execute("SELECT id, data FROM stories WHERE project_id=%s", (pid,)).fetchall():
+            ids_ = s["data"].get("requirement_ids") or []
+            if any(k in ids_ for k in keys.values()):
+                new = list(dict.fromkeys(kept_key if k in keys.values() else k for k in ids_))
+                c.execute("UPDATE stories SET data = jsonb_set(data, '{requirement_ids}', %s::jsonb), rev = rev + 1 WHERE id=%s", (json.dumps(new), s["id"]))
+                relinked += 1
+    return {"kept": kept_key, "merged": list(keys.values()), "stories_relinked": relinked}
 
 
 @router.post("/api/projects/{pid}/requirements/set")
