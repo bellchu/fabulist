@@ -19,3 +19,20 @@ def test_an_import_reuses_the_spelling_the_project_already_has(client):
     tags = {r["key"]: r["compliance_tags"] for r in client.get("/api/projects/%s/requirements" % pid).json()}
     assert tags["REQ-002"] == ["SOX", "gdpr"] or tags["REQ-002"] == ["gdpr", "SOX"]
     assert tags["REQ-003"] == ["gdpr"], "the first spelling met in the file wins for a new tag"
+
+
+def test_requirements_added_by_a_run_use_the_projects_spelling_of_a_tag(client):
+    import time
+    pid = client.post("/api/projects", json={"name": "Run spelling", "platform": "generic"}).json()["id"]
+    client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall log every payment attempt.", "compliance_tags": ["Sarbanes"]})
+    mine = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall keep an audit trail.", "compliance_tags": ["sox"]}).json()
+    assert "sox" in mine["compliance_tags"]
+    client.post("/api/projects/%s/documents/text" % pid, json={"name": "BRD", "text": "# Finance\nThe system shall retain SOX audit evidence for seven years."})
+    assert client.post("/api/projects/%s/runs" % pid, json={"stage": "requirements", "documents": "new"}).status_code == 202
+    for _ in range(100):
+        if client.get("/api/projects/%s/runs?limit=1" % pid).json()[0]["status"] not in ("running", "queued"):
+            break
+        time.sleep(0.1)
+    tags = sum((r["compliance_tags"] for r in client.get("/api/projects/%s/requirements" % pid).json()), [])
+    assert "SOX" not in tags, "the run's SOX was spelled the way the project already writes it (sox)"
+    assert tags.count("sox") >= 2
