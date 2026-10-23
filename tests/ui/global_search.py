@@ -63,5 +63,8 @@ with sync_playwright() as p:
     check(page.evaluate("document.activeElement === document.querySelector('.global-search input')"), "and so does the focus")
     box.type("fish")
     check(box.input_value() == "zebrafish", "typing carries on where it was")
+    page.goto(BASE + "/#/search/sox")
+    page.wait_for_selector(".page-head")
+    check("compliance tag" in page.locator(".page-head").inner_text(), "the search page says compliance tags are searched too")
     browser.close()
 sys.exit(1 if failures else 0)
