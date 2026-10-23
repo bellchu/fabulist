@@ -641,6 +641,7 @@ async function viewRequirements(body) {
 
   let limit = PAGE;
   const renderTable = () => {
+    ticks.requirement.anchor = null;  // positions mean something else once the rows are redrawn
     const rows = sorted();  // every row matching the filters: select-all, Next/Prev and the counts use these
     const drawn = rows.slice(0, limit);
     const all = h("input", { type: "checkbox", "aria-label": rows.length > drawn.length ? "Select all " + rows.length.toLocaleString() + " matching" : "Select all", checked: rows.length > 0 && rows.every((r) => selected.has(r.id)),
@@ -1126,6 +1127,7 @@ function rowOpener(key, onclick) {
 
 function storyTable(rows, redraw, pick) {
   const { selected, changed, paging, render } = pick;
+  ticks.story.anchor = null;  // positions mean something else once the rows are redrawn
   const drawn = rows.slice(0, paging.limit);  // `rows` is every story matching the filters: select-all and Next/Prev use these
   const all = h("input", { type: "checkbox", "aria-label": rows.length > drawn.length ? "Select all " + rows.length.toLocaleString() + " matching" : "Select all", checked: rows.length > 0 && rows.every((s) => selected.has(s.id)),
     onchange: (e) => {
