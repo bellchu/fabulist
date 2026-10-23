@@ -34,6 +34,7 @@ MAX_PDF_PAGES = _int("MAX_PDF_PAGES", 500)
 # Optional: a secret the proxy adds to every request as `X-Origin-Secret` (for Cloudflare: a transform rule that sets the header). When set, the app
 # answers 403 to anything without it, so a client that reaches the origin directly cannot forge CF-Connecting-IP and dodge the per-address limits.
 ORIGIN_SECRET = os.environ.get("ORIGIN_SECRET", "")
+ORIGIN_SECRET_REPORT_ONLY = _bool("ORIGIN_SECRET_REPORT_ONLY", False)  # count (and refuse nothing) what ORIGIN_SECRET would refuse: the safe way to switch it on
 SUPPORT_CONTACT = os.environ.get("SUPPORT_CONTACT", "").strip()[:200]  # shown in the footer and in the reference given for an unexpected error
 TRUSTED_PROXY_HOPS = _int("TRUSTED_PROXY_HOPS", 1)  # proxies in front that append to X-Forwarded-For; the client address is that far from the right
 TRUST_CF_CONNECTING_IP = _bool("TRUST_CF_CONNECTING_IP", True)  # behind Cloudflare, its CF-Connecting-IP header is the client; set 0 if the origin is reachable without it

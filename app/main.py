@@ -206,8 +206,11 @@ async def auth_and_guards(request: Request, call_next):
     request.state.user, request.state.role = "anonymous", "admin"
     path = request.url.path
     if config.ORIGIN_SECRET and path not in (*PROBES, "/metrics") and not secrets.compare_digest(request.headers.get("x-origin-secret", "").encode(), config.ORIGIN_SECRET.encode()):
-        metrics.inc("fabulist_origin_refused_total")
-        return JSONResponse({"detail": "Forbidden"}, status_code=403)  # no hint of why: the proxy knows
+        if config.ORIGIN_SECRET_REPORT_ONLY:
+            metrics.inc("fabulist_origin_refused_total", mode="report")  # would have been refused: see how much, then enforce
+        else:
+            metrics.inc("fabulist_origin_refused_total", mode="enforced")
+            return JSONResponse({"detail": "Forbidden"}, status_code=403)  # no hint of why: the proxy knows
     if path.startswith("/api/"):
         try:
             declared = int(request.headers.get("content-length") or 0)

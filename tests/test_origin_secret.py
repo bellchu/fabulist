@@ -35,3 +35,24 @@ def test_refusals_are_counted_and_do_not_reveal_why(client, monkeypatch):
     r = client.get("/api/meta")
     assert "secret" not in r.text.lower() and "proxy" not in r.text.lower()
     assert metrics.render() != before and "fabulist_origin_refused_total" in metrics.render()
+
+
+def _count(mode):
+    import re
+    from app import metrics
+    m = re.search(r'fabulist_origin_refused_total\{mode="%s"\} (\d+)' % mode, metrics.render())
+    return int(m.group(1)) if m else 0
+
+
+def test_report_only_mode_answers_everyone_but_counts_what_would_have_been_refused(client, monkeypatch):
+    """The safe way in: turn the secret on in report-only mode, add the proxy rule, watch the counter go quiet for the proxy's traffic, then enforce."""
+    monkeypatch.setattr(config, "ORIGIN_SECRET", "s3cret-shared-with-the-proxy")
+    monkeypatch.setattr(config, "ORIGIN_SECRET_REPORT_ONLY", True)
+    report, enforced = _count("report"), _count("enforced")
+    assert client.get("/api/meta").status_code == 200, "nobody is refused while reporting"
+    assert client.get("/api/meta", headers={"X-Origin-Secret": "s3cret-shared-with-the-proxy"}).status_code == 200
+    assert _count("report") == report + 1, "only the request without the secret was counted"
+    assert _count("enforced") == enforced
+    monkeypatch.setattr(config, "ORIGIN_SECRET_REPORT_ONLY", False)
+    assert client.get("/api/meta").status_code == 403
+    assert _count("enforced") == enforced + 1
