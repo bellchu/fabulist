@@ -621,6 +621,7 @@ async function viewRequirements(body) {
         if (selected.size >= BULK_CONFIRM_AT && !(await confirmBox(l + " " + selected.size + " requirements?", { okLabel: l, danger: s === "excluded" }))) return;
         await api.post(base() + "/requirements/bulk", { ids: [...selected], status: s }); toast(l + ": " + selected.size, "ok"); selected.clear(); await refresh();
       }) }, l)),
+    bulkAssign("requirement", selected, refresh),
     h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); renderTable(); renderBulk(); } }, "Clear"))] : []));
 
   let limit = PAGE;
@@ -706,6 +707,20 @@ function assigneeFilter(items, current, onChange) {
   const box = select(options, current, { "aria-label": "Assignee filter" });
   box.addEventListener("change", () => onChange(box.value));
   return box;
+}
+
+// "Assign…" in a bulk bar: one person (or nobody) for everything selected.
+function bulkAssign(kind, selected, refresh) {
+  const plural = kind === "story" ? "stories" : "requirements";
+  const who = assigneeControl("");
+  return h("button", { class: "btn btn-sm", onclick: () => modal({
+    title: "Assign " + selected.size + " " + (selected.size === 1 ? kind : plural), description: "Everything selected goes to the same person. Choose Unassigned to clear it.",
+    body: field("Assignee", who.el),
+    actions: [{ label: "Assign", kind: "btn-primary", onClick: async () => {
+      const r = await api.post(base() + "/" + plural + "/assign", { ids: [...selected], assignee: who.value() });
+      toast(r.updated + " " + (r.updated === 1 ? kind : plural) + " updated", "ok"); selected.clear(); await refresh();
+    } }],
+  }) }, "Assign…");
 }
 
 const matchesAssignee = (item, want) => !want || (want === "none" ? !item.assignee : (want === "me" ? state.me.username : want) === item.assignee);
@@ -863,6 +878,7 @@ async function viewStories(body) {
         if (selected.size >= BULK_CONFIRM_AT && !(await confirmBox(l + " " + selected.size + " stories?", { okLabel: l, danger: st === "rejected" }))) return;
         await api.post(base() + "/stories/bulk", { ids: [...selected], status: st }); toast(l + ": " + selected.size, "ok"); selected.clear(); await refresh();
       }) }, l)),
+    bulkAssign("story", selected, refresh),
     h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); render(); } }, "Clear"))] : []));
   const paging = { limit: PAGE };  // rows of the list view drawn so far
   const render = () => {
