@@ -173,9 +173,27 @@ def parse_basic(header: str) -> Optional[Tuple[str, str]]:
 
 # ---- admin API -----------------------------------------------------------
 
+_touched: Dict[str, float] = {}  # username -> when this instance last wrote its last_seen
+TOUCH_EVERY = 900.0  # seconds: "last active" to the quarter hour, without turning every request into a write
+
+
+def touch_due(username: str) -> bool:
+    with _cache_lock:
+        return time.monotonic() - _touched.get(username, -TOUCH_EVERY * 2) >= TOUCH_EVERY
+
+
+def touch(username: str) -> None:
+    """Record that this account just used the API (a named account only: the bootstrap login has no row)."""
+    with _cache_lock:
+        _touched[username] = time.monotonic()
+        if len(_touched) > 5000:
+            _touched.clear()
+    db.execute("UPDATE users SET last_seen=%s WHERE username=%s", (db.now(), username))
+
+
 def _public(r: Dict[str, Any]) -> Dict[str, Any]:
     return {"id": r["id"], "username": r["username"], "role": r["role"], "role_label": ROLES.get(r["role"], r["role"]),
-            "disabled": r["disabled"], "created": r["created"]}
+            "disabled": r["disabled"], "created": r["created"], "last_seen": r.get("last_seen")}
 
 
 def _validate_password(pw: str) -> None:
