@@ -6,7 +6,9 @@ import re
 
 BODIES = [None, {}, [], "text", 12345, {"x": 1}, {"statement": 5, "status": [], "title": {}, "name": None, "csv": 7, "ids": "no", "rev": "x"},
           {"ids": [None, 1, {}], "status": "approved"}, {"stage": "nope", "scope": 3, "documents": [], "stories_for": {}},
-          {"name": "x" * 5000, "text": "y" * 50, "platform": "?"}, {"query": 5, "question": [], "limit": "ten"}, {"username": 5, "role": [], "password": {}}]
+          {"name": "x" * 5000, "text": "y" * 50, "platform": "?"}, {"query": 5, "question": [], "limit": "ten"}, {"username": 5, "role": [], "password": {}},
+          {"from": 5, "to": []}, {"keep": 5, "merge": "no"}, {"keep": "a", "merge": ["a", None, 3]}, {"statements": ["a", 5, None]}, {"statements": []},
+          {"ids": ["x"], "tag": 5, "remove": "yes"}, {"ids": ["x"], "tag": "x" * 500}, {"ids": ["x"], "field": 5, "value": []}, {"ids": ["x"], "assignee": {}}]
 PARAMS = [{}, {"limit": "abc"}, {"limit": "-5"}, {"limit": "99999999999999999999"}, {"before": "x"}, {"format": "../../etc/passwd"}, {"scope": "?"},
           {"q": "%" * 50}, {"archived": "maybe"}, {"stage": "\x00"}, {"mode": 1}]
 SKIP = {("POST", "/api/projects/{pid}/documents")}  # multipart upload: covered by the upload tests
