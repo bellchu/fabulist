@@ -397,3 +397,17 @@ def test_the_compliance_matrix_lists_each_requirement_under_each_tag_with_its_st
     rows = list(csv.reader(io.StringIO(data.decode("utf-8-sig"))))
     assert rows[0][:3] == ["compliance_tag", "requirement", "type"] and mime.startswith("text/csv")
     assert [(r[0], r[1], r[-1]) for r in rows[1:]] == [("GDPR", "REQ-001", "covered"), ("GDPR", "REQ-002", "GAP"), ("SOX", "REQ-001", "covered")], "REQ-003 has no tag so it is not listed"
+
+
+def test_the_excel_workbook_gets_a_compliance_sheet_only_when_tags_are_in_use():
+    import io
+
+    from openpyxl import load_workbook
+    tagged = dict(REQ, key="REQ-001", compliance_tags=["SOX"])
+    data, _ = exporters.xlsx([dict(_story(), requirement_ids=["REQ-001"])], [tagged, dict(REQ, key="REQ-002", compliance_tags=[])])
+    wb = load_workbook(io.BytesIO(data))
+    assert wb.sheetnames == ["Stories", "Requirements", "Traceability", "Compliance"]
+    rows = list(wb["Compliance"].iter_rows(values_only=True))
+    assert rows[0][:2] == ("compliance_tag", "requirement") and [(r[0], r[1], r[-1]) for r in rows[1:]] == [("SOX", "REQ-001", "covered")]
+    plain, _ = exporters.xlsx([_story()], [dict(REQ, key="REQ-001", compliance_tags=[])])
+    assert load_workbook(io.BytesIO(plain)).sheetnames == ["Stories", "Requirements", "Traceability"]
