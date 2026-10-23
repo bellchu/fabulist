@@ -164,7 +164,7 @@ def _like(q: str) -> str:
 
 @router.get("/api/search")
 def search_everywhere(request: Request, q: str = "", limit: int = 30):
-    """Projects by name, requirements by statement and stories by title or narrative, across the projects this person may see (archived ones
+    """Projects by name, requirements by statement or compliance tag and stories by title, narrative or compliance tag, across the projects this person may see (archived ones
     are left out). The same visibility rule as the project list: private projects exist only for their members and administrators."""
     q = q.strip()
     if len(q) < 2:
@@ -177,9 +177,9 @@ def search_everywhere(request: Request, q: str = "", limit: int = 30):
         args.append(history.actor(request))
     projects = db.rows("SELECT p.id, p.name, p.platform FROM projects p WHERE %s AND p.name ILIKE %%s ORDER BY p.name LIMIT %%s" % visible, (*args, pattern, limit))
     reqs = db.rows("SELECT r.project_id, p.name AS project_name, r.seq, r.status, r.data->>'statement' AS statement FROM requirements r JOIN projects p ON p.id = r.project_id "
-                   "WHERE %s AND r.data->>'statement' ILIKE %%s ORDER BY p.name, r.seq LIMIT %%s" % visible, (*args, pattern, limit))
+                   "WHERE %s AND (r.data->>'statement' ILIKE %%s OR r.data->>'compliance_tags' ILIKE %%s) ORDER BY p.name, r.seq LIMIT %%s" % visible, (*args, pattern, pattern, limit))
     stories = db.rows("SELECT s.project_id, p.name AS project_name, s.seq, s.status, s.data->>'title' AS title FROM stories s JOIN projects p ON p.id = s.project_id "
-                      "WHERE %s AND (s.data->>'title' ILIKE %%s OR s.data->>'narrative' ILIKE %%s) ORDER BY p.name, s.seq LIMIT %%s" % visible, (*args, pattern, pattern, limit))
+                      "WHERE %s AND (s.data->>'title' ILIKE %%s OR s.data->>'narrative' ILIKE %%s OR s.data->>'compliance_tags' ILIKE %%s) ORDER BY p.name, s.seq LIMIT %%s" % visible, (*args, pattern, pattern, pattern, limit))
     return {"projects": projects,
             "requirements": [dict(r, key=history.item_key("requirement", r.pop("seq"))) for r in reqs],
             "stories": [dict(s, key=history.item_key("story", s.pop("seq"))) for s in stories]}

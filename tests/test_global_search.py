@@ -72,3 +72,14 @@ def test_private_projects_are_invisible_to_people_who_were_not_chosen(client, mo
     assert [p["name"] for p in _search(client, "Secret", auth=bob).json()["projects"]] == []
     client.put("/api/projects/%s/access" % secret, json={"visibility": "members", "members": ["bob"]}, auth=ana)
     assert seen(bob) == ["Open programme", "Secret programme"]
+
+
+def test_a_compliance_tag_finds_every_requirement_and_story_that_carries_it(client):
+    a = _project(client, "Billing")
+    b = _project(client, "Portal")
+    client.post("/api/projects/%s/requirements" % a, json={"statement": "The system shall log every payment attempt.", "compliance_tags": ["SOX"]})
+    client.post("/api/projects/%s/requirements" % a, json={"statement": "The system shall mask card numbers in reports."})
+    client.post("/api/projects/%s/stories" % b, json={"title": "Audit portal logins", "compliance_tags": ["SOX"]})
+    r = _search(client, "sox").json()
+    assert [(x["project_name"], x["key"]) for x in r["requirements"]] == [("Billing", "REQ-001")]
+    assert [(x["project_name"], x["key"]) for x in r["stories"]] == [("Portal", "US-001")]
