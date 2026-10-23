@@ -77,5 +77,8 @@ with sync_playwright() as p:
     page.get_by_role("link", name="SOX").click()
     page.wait_for_function("document.querySelectorAll('tr.clickable').length === 2")
     check(page.get_by_label("Compliance tag").input_value() == "SOX", "the tag on the overview opens the requirements already filtered to it")
+    page.goto(f"{BASE}/#/p/{pid}/trace")
+    page.wait_for_selector("text=Download matrix")
+    check(page.get_by_role("link", name="Compliance matrix").count() == 1, "the traceability page offers the compliance matrix once tags are in use")
     browser.close()
 sys.exit(1 if failures else 0)

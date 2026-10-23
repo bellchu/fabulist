@@ -1316,7 +1316,9 @@ async function viewTrace(body) {
       h("div", {}, h("b", {}, "Stories not linked to any requirement: "),
         h("span", { class: "row wrap", style: { display: "inline-flex" } }, t.orphans.map((o) => h("button", { class: "chip", style: { cursor: "pointer" }, onclick: () => storyDrawer(byId[o.id], null) }, o.key + " " + o.title))))) : null,
     h("div", { class: "toolbar" }, h("label", { class: "switch small" }, gapsOnly, "Show gaps only"),
-      h("a", { class: "btn btn-sm right", href: base() + "/export?format=rtm-csv&scope=all" }, icon("download"), "Download matrix")),
+      h("span", { class: "row right" },
+        Object.keys(ctx.project.compliance || {}).length ? h("a", { class: "btn btn-sm", href: base() + "/export?format=compliance-csv&scope=all", title: "One row per compliance tag and requirement, with covering stories" }, icon("download"), "Compliance matrix") : null,
+        h("a", { class: "btn btn-sm", href: base() + "/export?format=rtm-csv&scope=all" }, icon("download"), "Download matrix"))),
     box);
   render();
 }
