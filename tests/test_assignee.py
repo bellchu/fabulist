@@ -74,3 +74,45 @@ def test_an_import_naming_an_unknown_person_is_refused_whole(client, monkeypatch
     assert client.get("/api/projects/%s/requirements" % pid, auth=ana).json() == []
     ok = client.post("/api/projects/%s/requirements/import" % pid, json={"csv": bad.replace("ghost", "ana")}, auth=ana)
     assert ok.json()["created"] == 2
+
+
+def _three(client, auth=None):
+    pid = client.post("/api/projects", json={"name": "Bulk assign", "platform": "generic"}, auth=auth).json()["id"]
+    ids = [client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall support bulk capability %d." % i}, auth=auth).json()["id"] for i in range(3)]
+    sids = [client.post("/api/projects/%s/stories" % pid, json={"title": "Story %d" % i, "narrative": "As a user I want it."}, auth=auth).json()["id"] for i in range(2)]
+    return pid, ids, sids
+
+
+def test_many_requirements_and_stories_are_assigned_at_once(client, monkeypatch):
+    _auth(client, monkeypatch)
+    ana = ("ana", "ana-password-1")
+    pid, ids, sids = _three(client, ana)
+    r = client.post("/api/projects/%s/requirements/assign" % pid, json={"ids": ids[:2], "assignee": "ben"}, auth=ana)
+    assert r.status_code == 200 and r.json() == {"updated": 2}
+    got = {x["id"]: x["assignee"] for x in client.get("/api/projects/%s/requirements" % pid, auth=ana).json()}
+    assert [got[i] for i in ids] == ["ben", "ben", ""]
+    assert client.post("/api/projects/%s/stories/assign" % pid, json={"ids": sids, "assignee": "ana"}, auth=ana).json() == {"updated": 2}
+    assert {s["assignee"] for s in client.get("/api/projects/%s/stories" % pid, auth=ana).json()} == {"ana"}
+    again = client.post("/api/projects/%s/requirements/assign" % pid, json={"ids": ids[:2], "assignee": "ben"}, auth=ana)
+    assert again.json() == {"updated": 0}, "items that already have that assignee are not touched"
+
+
+def test_each_change_is_in_the_trail_and_unassigning_works(client, monkeypatch):
+    _auth(client, monkeypatch)
+    ana = ("ana", "ana-password-1")
+    pid, ids, _ = _three(client, ana)
+    client.post("/api/projects/%s/requirements/assign" % pid, json={"ids": ids, "assignee": "ben"}, auth=ana)
+    edits = [e for e in client.get("/api/projects/%s/history?limit=100" % pid, auth=ana).json() if e["action"] == "edited"]
+    assert len(edits) == 3 and all(e["changes"]["assignee"] == {"from": "", "to": "ben"} for e in edits)
+    client.post("/api/projects/%s/requirements/assign" % pid, json={"ids": ids, "assignee": ""}, auth=ana)
+    assert {x["assignee"] for x in client.get("/api/projects/%s/requirements" % pid, auth=ana).json()} == {""}
+
+
+def test_an_unknown_person_viewers_and_foreign_ids_are_handled(client, monkeypatch):
+    _auth(client, monkeypatch)
+    ana = ("ana", "ana-password-1")
+    pid, ids, _ = _three(client, ana)
+    assert client.post("/api/projects/%s/requirements/assign" % pid, json={"ids": ids, "assignee": "ghost"}, auth=ana).status_code == 400
+    assert client.post("/api/projects/%s/requirements/assign" % pid, json={"ids": ids, "assignee": "ben"}, auth=("vic", "vic-password-1")).status_code == 403
+    assert client.post("/api/projects/%s/requirements/assign" % pid, json={"ids": ["nope"], "assignee": "ben"}, auth=ana).json() == {"updated": 0}
+    assert client.post("/api/projects/%s/requirements/assign" % pid, json={"ids": [], "assignee": "ben"}, auth=ana).status_code == 422

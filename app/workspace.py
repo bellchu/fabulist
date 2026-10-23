@@ -78,6 +78,11 @@ class RefineIn(BaseModel):
     provider_id: Optional[str] = None
 
 
+class AssignIn(BaseModel):
+    ids: List[str] = Field(min_length=1, max_length=2000)
+    assignee: str = Field(default="", max_length=64)
+
+
 class BulkIn(BaseModel):
     ids: List[str] = Field(min_length=1, max_length=2000)
     status: str
@@ -999,6 +1004,21 @@ def _bulk(table: str, pid: str, body: BulkIn, who: str) -> Dict[str, int]:
     return {"updated": len(changed)}
 
 
+def _bulk_assign(table: str, pid: str, body: AssignIn, who: str) -> Dict[str, int]:
+    name = body.assignee.strip()
+    if name:
+        _check_assignee(name)
+    kind = _kind(table)
+    with db.conn() as c:
+        rows = c.execute("SELECT id, seq, data FROM %s WHERE project_id=%%s AND id = ANY(%%s) FOR UPDATE" % table, (pid, body.ids)).fetchall()
+        changed = [r for r in rows if (r["data"].get("assignee") or "") != name]
+        for r in changed:
+            c.execute("UPDATE %s SET data = jsonb_set(data, '{assignee}', to_jsonb(%%s::text)), rev = rev + 1 WHERE id=%%s" % table, (name, r["id"]))
+            history.record(c, pid, kind, r["id"], history.item_key(kind, r["seq"]), "edited", who, _label(r["data"]),
+                           {"assignee": {"from": r["data"].get("assignee") or "", "to": name}})
+    return {"updated": len(changed)}
+
+
 def _delete_item(table: str, pid: str, iid: str, who: str) -> None:
     kind = _kind(table)
     with db.conn() as c:
@@ -1245,6 +1265,18 @@ def _import_rows(pid: str, rows: List[Dict[str, Any]], who: str, origin: str) ->
         if fresh:
             history.record(c, pid, "project", pid, "", "imported", who, "%d requirements from %s" % (len(fresh), origin))
     return {"created": len(fresh), "duplicates_skipped": skipped}
+
+
+@router.post("/api/projects/{pid}/requirements/assign")
+def assign_requirements(pid: str, body: AssignIn, request: Request):
+    _project(pid)
+    return _bulk_assign("requirements", pid, body, history.actor(request))
+
+
+@router.post("/api/projects/{pid}/stories/assign")
+def assign_stories(pid: str, body: AssignIn, request: Request):
+    _project(pid)
+    return _bulk_assign("stories", pid, body, history.actor(request))
 
 
 @router.post("/api/projects/{pid}/requirements/bulk")
