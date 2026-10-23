@@ -357,7 +357,7 @@ async function viewIntegrations(content) {
     const result = h("div", { class: "small", style: { flexBasis: "100%" } });
     return h("div", { class: "provider-row" },
       h("div", { class: "grow", style: { minWidth: "240px" } },
-        h("div", { class: "row" }, h("b", {}, it.name), badge(it.kind_label, "accent"), it.notify_runs ? badge("Run notifications", "blue") : null),
+        h("div", { class: "row" }, h("b", {}, it.name), badge(it.kind_label, "accent"), it.notify_runs ? badge("Run notifications", "blue") : null, it.notify_assignments ? badge("Assignment notifications", "blue") : null),
         h("div", { class: "small muted mono" }, it.base_url + (it.target ? " · default " + it.target : "")),
         h("div", { class: "small" }, it.has_token ? h("span", { class: "muted" }, (it.username ? it.username + " · " : "") + "token " + it.key_hint)
           : h("span", { style: { color: "var(--amber)" } }, "No API token")),
@@ -388,6 +388,8 @@ function integrationDialog(data, it) {
   const token = h("input", { type: "password", autocomplete: "new-password", placeholder: it.has_token ? "Saved (" + it.key_hint + "). Leave blank to keep." : "" });
   const userField = field("Account email", username, "Jira Cloud: your Atlassian email (with an API token). Data Center: leave blank and use a personal access token.");
   const notify = h("input", { type: "checkbox", checked: !!it.notify_runs, id: "notify-runs" });
+  const notifyAssign = h("input", { type: "checkbox", checked: !!it.notify_assignments, id: "notify-assignments" });
+  const notifyAssignField = h("label", { class: "row small", for: "notify-assignments" }, notifyAssign, "Also tell this webhook when work is assigned to someone (event item.assigned: project, who assigned, to whom, which items).");
   const notifyField = h("label", { class: "row small", for: "notify-runs" }, notify, "Also tell this webhook when an AI run finishes (event run.finished: project, stage, status, items, error).");
   const hints = h("div", { class: "callout small" });
   const HINTS = {
@@ -401,6 +403,7 @@ function integrationDialog(data, it) {
     const [url, tgt, hint] = HINTS[kind.value] || HINTS.jira;
     userField.classList.toggle("hidden", kind.value !== "jira" && kind.value !== "confluence");
     notifyField.classList.toggle("hidden", kind.value !== "webhook");
+    notifyAssignField.classList.toggle("hidden", kind.value !== "webhook");
     baseUrl.placeholder = url; target.placeholder = tgt; hints.textContent = hint;
     if (kind.value === "github" && !baseUrl.value) baseUrl.value = "https://api.github.com";
   };
@@ -409,9 +412,9 @@ function integrationDialog(data, it) {
   modal({
     title: isNew ? "Add integration" : "Edit " + it.name, wide: true,
     body: h("div", { class: "stack" }, hints, h("div", { class: "form-grid" }, field("Type", kind), field("Display name", name)),
-      field("Base URL", baseUrl), userField, notifyField, h("div", { class: "form-grid" }, field("Default target project", target), field("API token / secret", token, "Stored encrypted; never shown again. Optional for webhooks (used as the signing secret)."))),
+      field("Base URL", baseUrl), userField, notifyField, notifyAssignField, h("div", { class: "form-grid" }, field("Default target project", target), field("API token / secret", token, "Stored encrypted; never shown again. Optional for webhooks (used as the signing secret)."))),
     actions: [{ label: isNew ? "Add integration" : "Save", kind: "btn-primary", onClick: async () => {
-      const body = { kind: kind.value, name: name.value, base_url: baseUrl.value, username: username.value, target: target.value, token: token.value, notify_runs: notify.checked };
+      const body = { kind: kind.value, name: name.value, base_url: baseUrl.value, username: username.value, target: target.value, token: token.value, notify_runs: notify.checked, notify_assignments: notifyAssign.checked };
       if (isNew) await api.post("/api/admin/integrations", body);
       else await api.put("/api/admin/integrations/" + it.id, body);
       toast("Integration saved", "ok"); rerender();

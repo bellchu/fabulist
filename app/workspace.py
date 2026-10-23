@@ -993,6 +993,8 @@ def _save_item(table: str, pid: str, iid: Optional[str], body: Dict[str, Any], w
             if changes:
                 action = "status changed" if set(changes) == {"status"} else "edited"
                 history.record(c, pid, kind, iid, history.item_key(kind, seq), action, who, _label(item), changes)
+            if item.get("assignee") and item.get("assignee") != current.get("assignee", ""):
+                integrations.announce_assignment(pid, kind, item["assignee"], [{"key": history.item_key(kind, seq), "title": _label(item), "previous": current.get("assignee", "")}], who)
             return iid
         new = db.new_id()
         seq = c.execute("SELECT coalesce(max(seq), -1) + 1 AS n FROM %s WHERE project_id=%%s" % table, (pid,)).fetchone()["n"]
@@ -1035,6 +1037,8 @@ def _bulk_assign(table: str, pid: str, body: AssignIn, who: str) -> Dict[str, in
             c.execute("UPDATE %s SET data = jsonb_set(data, '{assignee}', to_jsonb(%%s::text)), rev = rev + 1 WHERE id=%%s" % table, (name, r["id"]))
             history.record(c, pid, kind, r["id"], history.item_key(kind, r["seq"]), "edited", who, _label(r["data"]),
                            {"assignee": {"from": r["data"].get("assignee") or "", "to": name}})
+    if changed and name:
+        integrations.announce_assignment(pid, kind, name, [{"key": history.item_key(kind, r["seq"]), "title": _label(r["data"]), "previous": r["data"].get("assignee") or ""} for r in changed], who)
     return {"updated": len(changed)}
 
 
