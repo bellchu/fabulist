@@ -1745,7 +1745,7 @@ def push_to_tracker(pid: str, body: PushIn, request: Request):
 
 
 @router.get("/api/projects/{pid}/export")
-def export(pid: str, format: str = "xlsx", scope: str = "approved-or-all", inline: bool = False):
+def export(pid: str, format: str = "xlsx", scope: str = "approved-or-all", inline: bool = False, tag: str = ""):
     project = _project(pid)
     entry = exporters.EXPORTERS.get(format)
     if not entry:
@@ -1755,12 +1755,21 @@ def export(pid: str, format: str = "xlsx", scope: str = "approved-or-all", inlin
     if scope == "approved":
         stories = [s for s in stories if s["status"] == "approved"]
         reqs = [r for r in reqs if r["status"] == "approved"]
+    if tag.strip():  # one regulation's evidence: the requirements that carry the tag, the stories that implement them, and stories tagged themselves
+        wanted = tag.strip().lower()
+        reqs = [r for r in reqs if wanted in (t.lower() for t in r.get("compliance_tags") or [])]
+        keys = {r["key"] for r in reqs}
+        stories = [s for s in stories if keys & set(s.get("requirement_ids") or []) or wanted in (t.lower() for t in s.get("compliance_tags") or [])]
+        if not stories and not reqs:
+            raise HTTPException(404, "Nothing carries the compliance tag %s" % tag.strip())
     if not stories and not reqs:
         raise HTTPException(404, "Nothing to export yet")
     for item in stories + reqs:
         item.pop("issues", None)
         item.pop("rev", None)
     details = ["Generated %s UTC" % _utc_minutes(db.now()), "Scope: " + ("approved only" if scope == "approved" else "everything in review")]
+    if tag.strip():
+        details.append("Compliance tag: " + tag.strip())
     payload, mime = (exporters.html_report(stories, reqs, project["name"] + " backlog", details) if format == "html"
                      else entry[0](stories, reqs))
     slug = re.sub(r"[^a-z0-9]+", "-", project["name"].lower()).strip("-") or "backlog"

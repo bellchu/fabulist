@@ -88,5 +88,12 @@ with sync_playwright() as p:
     page.goto(f"{BASE}/#/p/{pid}/trace")
     page.wait_for_selector("text=Download matrix")
     check(page.get_by_role("link", name="Compliance matrix").count() == 1, "the traceability page offers the compliance matrix once tags are in use")
+    page.goto(f"{BASE}/#/p/{pid}/export")
+    page.wait_for_selector("text=What to export")
+    page.get_by_label("Compliance tag").select_option("Sarbanes-Oxley")
+    page.wait_for_selector("text=Narrowed to the requirements tagged Sarbanes-Oxley")
+    with page.expect_download() as asked:
+        page.locator(".card", has=page.get_by_role("heading", name="JSON")).get_by_role("button", name="Download").click()
+    check("tag=Sarbanes-Oxley" in asked.value.url, "the download asks for the chosen compliance tag (%s)" % asked.value.url[-60:])
     browser.close()
 sys.exit(1 if failures else 0)
