@@ -189,6 +189,8 @@ scripts/scan-image-k8s.sh           # Trivy scan of the deployed image for fixab
 scripts/ci.sh                    # full local gate: lint, tests, JS check, dependency audit, image build (Docker only)
 ```
 
+The cluster scripts clear what a dropped SSH tunnel leaves behind: each run first deletes the temporary run namespaces (`fabulist-ci-…`, `-ui-…`, `-load-…` and the like) that are older than three hours (`STALE_NAMESPACE_SECONDS` changes the limit). Production and the image-build namespaces are never touched.
+
 Check dependencies for known vulnerabilities before releases:
 
 ```bash
