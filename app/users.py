@@ -141,9 +141,27 @@ def provision_sso_user(username: str, auto_role: str) -> Optional[str]:
     return role_of(username)
 
 
+_must_change: Dict[str, Tuple[float, bool]] = {}
+
+
+def must_change_password(username: str) -> bool:
+    """True while an administrator-chosen password has not been replaced by its owner (cached for a few seconds: this runs on every request)."""
+    now = time.monotonic()
+    with _cache_lock:
+        hit = _must_change.get(username)
+        if hit and now - hit[0] < 5:
+            return hit[1]
+    row = db.one("SELECT must_change FROM users WHERE username=%s", (username,))
+    value = bool(row and row["must_change"])
+    with _cache_lock:
+        _must_change[username] = (now, value)
+    return value
+
+
 def forget(username: str) -> None:
     with _cache_lock:
         _roles.pop(username, None)
+        _must_change.pop(username, None)
         for key in [k for k in _cache if k[0] == username]:
             del _cache[key]
 
@@ -193,7 +211,7 @@ def touch(username: str) -> None:
 
 def _public(r: Dict[str, Any]) -> Dict[str, Any]:
     return {"id": r["id"], "username": r["username"], "role": r["role"], "role_label": ROLES.get(r["role"], r["role"]),
-            "disabled": r["disabled"], "created": r["created"], "last_seen": r.get("last_seen")}
+            "disabled": r["disabled"], "created": r["created"], "last_seen": r.get("last_seen"), "must_change": bool(r.get("must_change"))}
 
 
 def _validate_password(pw: str) -> None:
@@ -222,9 +240,10 @@ def create_user(request: Request, body: Dict[str, Any] = Body(...)):
     if db.one("SELECT 1 AS x FROM users WHERE username=%s", (username,)):
         raise HTTPException(409, "Username already exists")
     uid = db.new_id()
-    db.execute("INSERT INTO users (id, username, password_hash, role, disabled, created) VALUES (%s,%s,%s,%s,FALSE,%s)",
-               (uid, username, hash_password(password), role, db.now()))
-    audit.record(request, "user created", username, "role " + role)
+    must = bool(body.get("must_change"))
+    db.execute("INSERT INTO users (id, username, password_hash, role, disabled, must_change, created) VALUES (%s,%s,%s,%s,FALSE,%s,%s)",
+               (uid, username, hash_password(password), role, must, db.now()))
+    audit.record(request, "user created", username, "role " + role + ("; must change the password at first use" if must else ""))
     return _public(db.one("SELECT * FROM users WHERE id=%s", (uid,)))
 
 
@@ -241,7 +260,8 @@ def update_user(uid: str, request: Request, body: Dict[str, Any] = Body(...)):
     if body.get("password"):
         _validate_password(str(body["password"]))
         pw_hash = hash_password(str(body["password"]))
-    db.execute("UPDATE users SET role=%s, disabled=%s, password_hash=%s WHERE id=%s", (role, disabled, pw_hash, uid))
+    must = bool(body.get("must_change")) if body.get("password") else bool(row.get("must_change"))  # a password the administrator just chose can require a change
+    db.execute("UPDATE users SET role=%s, disabled=%s, password_hash=%s, must_change=%s WHERE id=%s", (role, disabled, pw_hash, must, uid))
     forget(row["username"])
     if role != row["role"]:
         audit.record(request, "role changed", row["username"], "%s to %s" % (row["role"], role), {"role": {"from": row["role"], "to": role}})
@@ -355,7 +375,7 @@ def change_own_password(request: Request, body: Dict[str, Any] = Body(...)):
     _validate_password(new)
     if new == old:
         raise HTTPException(400, "Choose a password different from the current one")
-    db.execute("UPDATE users SET password_hash=%s WHERE id=%s", (hash_password(new), row["id"]))
+    db.execute("UPDATE users SET password_hash=%s, must_change=FALSE WHERE id=%s", (hash_password(new), row["id"]))
     forget(username)
     audit.record(request, "password changed", username, "by the account holder")
     return {"ok": True}

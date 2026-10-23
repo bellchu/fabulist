@@ -53,7 +53,7 @@ function appearanceCard() {
 }
 
 // Named accounts that sign in with a password can change it here (SSO accounts have none, and tokens must not be able to).
-function passwordCard() {
+function passwordCard(done) {
   const field_ = (label, name, auto) => field(label, h("input", { type: "password", name, autocomplete: auto, "aria-label": label }));
   const current = field_("Current password", "current", "current-password");
   const next = field_("New password", "new", "new-password");
@@ -67,11 +67,19 @@ function passwordCard() {
         await api.post("/api/me/password", { current_password: val(current), new_password: val(next) });
         toast("Password changed. Sign in again with the new one when your browser asks.", "ok");
         [current, next, again].forEach((b) => { b.querySelector("input").value = ""; });
+        if (done) done();
       }) }, "Change password"))));
 }
 
 export async function renderAccount(content) {
   setCrumbs("Account");
+  if (state.me.must_change) {  // only the password form works until it is done
+    mount(content, h("div", { class: "page-head" }, h("span", { class: "object-icon setup" }, icon("lock")),
+      h("div", { class: "grow" }, h("div", { class: "object-label" }, "Account"), h("h1", {}, "Choose your own password"),
+        h("p", { class: "sub" }, "The password you signed in with was chosen by an administrator. Set a new one to continue."))),
+      passwordCard(() => { state.me.must_change = false; }));
+    return;
+  }
   let tokens = null;
   if (state.me.named) {  // only an account with a row can own tokens: the bootstrap administrator and anonymous cannot, and asking would only log a 400
     try { tokens = await api.get("/api/me/tokens"); } catch (e) {
