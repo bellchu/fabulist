@@ -117,6 +117,7 @@ SCHEMA = [
     # fail the runs of one that is still alive, and the runs of one that stopped are found by whoever notices first.
     """CREATE TABLE IF NOT EXISTS instances (id TEXT PRIMARY KEY, started TEXT NOT NULL, seen TEXT NOT NULL)""",
     "ALTER TABLE runs ADD COLUMN IF NOT EXISTS owner TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TEXT",  # when the account last used the API (about once per quarter hour): access reviews
     "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS events TEXT NOT NULL DEFAULT ''",  # 'runs': a webhook that also hears when an AI run finishes
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'upload'",
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS repo_id TEXT",

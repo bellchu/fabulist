@@ -264,6 +264,8 @@ async def auth_and_guards(request: Request, call_next):
             return JSONResponse({"detail": "Your role (%s) does not allow this action" % role}, status_code=403)
     if path.startswith("/api/") and path not in PROBES:
         who = getattr(request.state, "user", "anonymous")
+        if who != "anonymous" and users.touch_due(who):
+            await run_in_threadpool(users.touch, who)  # "last active", to the quarter hour (the page's own files do not count)
         wait = ratelimit.take(who if who != "anonymous" else "ip:" + netaddr.client_ip(request))
         if wait:
             metrics.inc("fabulist_rate_limited_total")

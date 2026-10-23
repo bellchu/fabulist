@@ -431,13 +431,14 @@ async function viewUsers(content) {
     return;
   }
   card.append(h("div", { class: "table-wrap" }, h("table", { class: "table" },
-    h("thead", {}, h("tr", {}, [["User", ""], ["Role", ""], ["Status", ""], ["Created", "hide-sm"], ["", ""]].map(([x, c]) => h("th", { class: c }, x)))),
+    h("thead", {}, h("tr", {}, [["User", ""], ["Role", ""], ["Status", ""], ["Last active", "hide-sm"], ["Created", "hide-sm"], ["", ""]].map(([x, c]) => h("th", { class: c }, x)))),
     h("tbody", {}, data.users.map((u) => {
       const role = select(Object.entries(data.roles), u.role, { "aria-label": "Role for " + u.username });
       role.addEventListener("change", guard(async () => { await api.patch("/api/admin/users/" + u.id, { role: role.value }); toast(u.username + " is now " + role.value, "ok"); }));
       return h("tr", {},
         h("td", {}, h("b", {}, u.username)), h("td", { style: { minWidth: "150px" } }, role),
         h("td", {}, u.disabled ? badge("Disabled", "red") : badge("Active", "green")),
+        h("td", { class: "small hide-sm" + (u.last_seen ? " muted" : ""), title: u.last_seen || "" }, u.last_seen ? timeAgo(u.last_seen) : "never"),
         h("td", { class: "muted small hide-sm" }, timeAgo(u.created)),
         h("td", { style: { textAlign: "right" } }, h("div", { class: "row wrap", style: { justifyContent: "flex-end", gap: "0" } },
           h("button", { class: "btn btn-sm btn-ghost", onclick: () => userDialog(data, u) }, "Reset password"),
