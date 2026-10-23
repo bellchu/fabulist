@@ -258,6 +258,16 @@ def html_report(stories: List[Item], reqs: List[Item], title: str = "Product bac
         out.append("<tr><td>%s</td><td>%s</td><td>%s</td></tr>" % (e(r["key"]), e(r["statement"]),
                                                                    e(", ".join(linked)) if linked else "<span class='gap'>Gap</span>"))
     out.append("</tbody></table>")
+    by_tag: Dict[str, List[bool]] = {}
+    for r in reqs:
+        for tag in r.get("compliance_tags") or []:
+            by_tag.setdefault(tag, []).append(r["key"] in covered)
+    if by_tag:
+        out.append("<h2>Compliance coverage</h2><table><thead><tr><th scope='col'>Tag</th><th scope='col'>Requirements</th><th scope='col'>Covered by stories</th></tr></thead><tbody>")
+        for tag in sorted(by_tag, key=str.lower):
+            done = sum(by_tag[tag])
+            out.append("<tr><td>%s</td><td>%d</td><td>%d of %d%s</td></tr>" % (e(tag), len(by_tag[tag]), done, len(by_tag[tag]), "" if done == len(by_tag[tag]) else " <span class='gap'>gaps</span>"))
+        out.append("</tbody></table>")
     # The document goes to the business for sign-off: leave room to record who agreed, in what role, and when.
     out.append("<div class='approval'><h2>Review and approval</h2><table class='sign'><thead><tr><th scope='col'>Name</th><th scope='col'>Role</th>"
                "<th scope='col'>Signature</th><th scope='col'>Date</th></tr></thead><tbody>%s</tbody></table></div></body></html>"
