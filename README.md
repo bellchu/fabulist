@@ -178,6 +178,7 @@ scripts/dev-db.sh &              # port-forward the cluster Postgres to localhos
 scripts/dev-server.sh            # app on :8765 against a separate fabulist_test database
 scripts/test.sh                  # lint + tests in a Python 3.12 container
 scripts/ci-k8s.sh                # the same gate (minus image build) in a temporary cluster namespace; needs only kubectl
+COVERAGE=1 scripts/ci-k8s.sh      # the same, measuring which lines of app/ the tests run (96% at the last measurement)
 scripts/ui-check-k8s.sh             # browser regression checks (tests/ui) in a temporary cluster namespace
 scripts/load-test-k8s.sh            # load scenarios (tests/load): 20 requesters x 20 BRDs at once; a project with 1,000+ BRDs (cluster, offline AI provider)
 scripts/release-check-k8s.sh        # the whole battery on the cluster (gate, browser suite, load scenarios, image scan, restore drill) and one summary: is this build ready?

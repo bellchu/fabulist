@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- `COVERAGE=1 scripts/ci-k8s.sh` measures test coverage of `app/` on the cluster and lists the files below 100% (coverage.py 7.6.10, installed only for that run). Measured today: 96% overall, `workspace.py` 97%.
 - Copy fix: the search results page said it searched "words" only; it now says compliance tags too.
 - Copy fix: the empty BRD repositories card said "Upload files below" although the upload area is above it.
 - **Fix: the Export tab said "1 stories" and "1 requirements", and its compliance choice stretched across the whole card.** Counts now read "1 story" / "1 requirement", and the dropdown is a normal size (`tests/ui/export_tab.py`).
