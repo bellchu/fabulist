@@ -150,3 +150,34 @@ def test_approved_work_is_no_longer_waiting_and_private_or_archived_projects_are
 
 def test_anonymous_and_bootstrap_have_nothing_assigned(client):
     assert client.get("/api/me/assigned").json() == {"requirements": 0, "stories": 0, "projects": []}
+
+
+def test_one_field_can_be_set_on_many_requirements_at_once(client):
+    pid = client.post("/api/projects", json={"name": "Bulk set", "platform": "generic"}).json()["id"]
+    ids = [client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall support settable capability %d." % i}).json()["id"] for i in range(3)]
+    base = "/api/projects/%s/requirements/set" % pid
+    r = client.post(base, json={"ids": ids[:2], "field": "epic", "value": "Billing"})
+    assert r.status_code == 200 and r.json() == {"updated": 2}
+    got = {x["id"]: x for x in client.get("/api/projects/%s/requirements" % pid).json()}
+    assert got[ids[0]]["epic"] == "Billing" and got[ids[1]]["epic"] == "Billing" and got[ids[2]]["epic"] != "Billing"
+    assert client.post(base, json={"ids": ids, "field": "type", "value": "rule"}).json() == {"updated": 3}
+    assert {x["type"] for x in client.get("/api/projects/%s/requirements" % pid).json()} == {"rule"}
+    assert client.post(base, json={"ids": ids[:2], "field": "epic", "value": "Billing"}).json() == {"updated": 0}, "already so: untouched"
+    edits = [e for e in client.get("/api/projects/%s/history?limit=100" % pid).json() if e["action"] == "edited"]
+    assert len(edits) == 5 and sum(1 for e in edits if e["changes"].get("epic", {}).get("to") == "Billing") == 2, "one trail entry per item per change"
+
+
+def test_only_sensible_fields_and_values_are_accepted(client):
+    pid = client.post("/api/projects", json={"name": "Bulk set 2", "platform": "generic"}).json()["id"]
+    rid = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall support settable capability."}).json()["id"]
+    sid = client.post("/api/projects/%s/stories" % pid, json={"title": "A story", "narrative": "As a user I want it."}).json()["id"]
+    req, story = "/api/projects/%s/requirements/set" % pid, "/api/projects/%s/stories/set" % pid
+    assert client.post(req, json={"ids": [rid], "field": "statement", "value": "overwrite everything"}).status_code == 400, "not the statement"
+    assert client.post(req, json={"ids": [rid], "field": "type", "value": "nonsense"}).status_code == 400
+    assert client.post(req, json={"ids": [rid], "field": "epic", "value": ""}).status_code == 400, "an epic cannot be blank"
+    assert client.post(story, json={"ids": [sid], "field": "priority", "value": "High"}).json() == {"updated": 1}
+    assert client.post(story, json={"ids": [sid], "field": "priority", "value": "Urgent"}).status_code == 400
+    assert client.post(story, json={"ids": [sid], "field": "feature", "value": "Invoices"}).json() == {"updated": 1}
+    assert client.post(story, json={"ids": [sid], "field": "title", "value": "x"}).status_code == 400
+    s = client.get("/api/projects/%s/stories" % pid).json()[0]
+    assert s["priority"] == "High" and s["feature"] == "Invoices"

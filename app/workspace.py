@@ -83,6 +83,12 @@ class AssignIn(BaseModel):
     assignee: str = Field(default="", max_length=64)
 
 
+class SetFieldIn(BaseModel):
+    ids: List[str] = Field(min_length=1, max_length=2000)
+    field: str = Field(max_length=40)
+    value: str = Field(max_length=200)
+
+
 class BulkIn(BaseModel):
     ids: List[str] = Field(min_length=1, max_length=2000)
     status: str
@@ -1042,6 +1048,31 @@ def _bulk_assign(table: str, pid: str, body: AssignIn, who: str) -> Dict[str, in
     return {"updated": len(changed)}
 
 
+_SETTABLE = {"requirements": ("epic", "section", "type"), "stories": ("epic", "feature", "priority")}  # what a bulk "set" may change: grouping and classification, never the text
+
+
+def _bulk_set(table: str, pid: str, body: SetFieldIn, who: str) -> Dict[str, int]:
+    if body.field not in _SETTABLE[table]:
+        raise HTTPException(400, "Only %s can be set for many at once" % ", ".join(_SETTABLE[table]))
+    value = body.value.strip()
+    if body.field == "type" and value not in pipeline.REQ_TYPES:
+        raise HTTPException(400, "Type must be one of: %s" % ", ".join(pipeline.REQ_TYPES))
+    if body.field == "priority" and value not in pipeline.PRIORITIES:
+        raise HTTPException(400, "Priority must be one of: %s" % ", ".join(pipeline.PRIORITIES))
+    if not value:
+        raise HTTPException(400, "A value is needed (an epic, a section or a feature cannot be blank)")
+    value = value[:200]
+    kind = _kind(table)
+    with db.conn() as c:
+        rows = c.execute("SELECT id, seq, data FROM %s WHERE project_id=%%s AND id = ANY(%%s) FOR UPDATE" % table, (pid, body.ids)).fetchall()
+        changed = [r for r in rows if (r["data"].get(body.field) or "") != value]
+        for r in changed:
+            c.execute("UPDATE %s SET data = jsonb_set(data, ARRAY[%%s], to_jsonb(%%s::text)), rev = rev + 1 WHERE id=%%s" % table, (body.field, value, r["id"]))
+            history.record(c, pid, kind, r["id"], history.item_key(kind, r["seq"]), "edited", who, _label(r["data"]),
+                           {body.field: {"from": r["data"].get(body.field) or "", "to": value}})
+    return {"updated": len(changed)}
+
+
 def _delete_item(table: str, pid: str, iid: str, who: str) -> None:
     kind = _kind(table)
     with db.conn() as c:
@@ -1288,6 +1319,18 @@ def _import_rows(pid: str, rows: List[Dict[str, Any]], who: str, origin: str) ->
         if fresh:
             history.record(c, pid, "project", pid, "", "imported", who, "%d requirements from %s" % (len(fresh), origin))
     return {"created": len(fresh), "duplicates_skipped": skipped}
+
+
+@router.post("/api/projects/{pid}/requirements/set")
+def set_requirements(pid: str, body: SetFieldIn, request: Request):
+    _project(pid)
+    return _bulk_set("requirements", pid, body, history.actor(request))
+
+
+@router.post("/api/projects/{pid}/stories/set")
+def set_stories(pid: str, body: SetFieldIn, request: Request):
+    _project(pid)
+    return _bulk_set("stories", pid, body, history.actor(request))
 
 
 @router.post("/api/projects/{pid}/requirements/assign")
