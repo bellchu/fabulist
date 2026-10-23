@@ -226,6 +226,14 @@ The app pod runs with a read-only root filesystem (writable `/tmp` only), no Lin
 seccomp profile. `networkpolicy.yaml` lets only the ingress controller and Prometheus reach the app and only the
 namespace's own pods reach Postgres (Calico or another policy-enforcing CNI is required for it to take effect).
 
+What `scripts/deploy.sh` does, in order: refuses to run unless you are on a clean, up-to-date `main`; creates the secrets once (never overwriting);
+applies Postgres, the network policy and the backup jobs; builds the image on the cluster; **scans it** and stops on a fixable HIGH or CRITICAL
+vulnerability (`SKIP_IMAGE_SCAN=1` overrides); **waits for AI runs that are executing** (`DEPLOY_WAIT_FOR_RUNS` minutes, default 15); creates, once, the
+limited database role `fabulist_app` that the app runs as (the owner login moves to `MIGRATION_DATABASE_URL`); rolls the app out with no downtime
+(the new pod must be ready before the old one stops); applies the monitoring rules; and finishes with a **read-only smoke test of the live site**
+(`SKIP_SMOKE=1` skips it; a problem gives a failing exit status and the roll-back command). `scripts/ship-k8s.sh` wraps all of it with the checks and
+the pull request.
+
 A nightly CronJob (`deploy/k8s/backup.yaml`) writes `pg_dump` backups to a separate volume and
 keeps every dump of the last 7 days and the Sunday dump of each of the last 5 weeks. To restore one:
 

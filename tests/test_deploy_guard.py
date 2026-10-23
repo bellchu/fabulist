@@ -74,3 +74,12 @@ def test_a_deploy_ends_with_a_look_at_what_was_deployed():
     deploy = open(os.path.join(REPO, "scripts", "deploy.sh")).read()
     assert "scripts/live-smoke-k8s.sh" in deploy and "SKIP_SMOKE" in deploy and "rollout undo" in deploy
     assert deploy.index("Deployed ${IMAGE}") < deploy.index("live-smoke-k8s.sh"), "the smoke test runs after the rollout, never instead of it"
+
+
+def test_the_readme_describes_what_the_deploy_script_really_does():
+    deploy = open(os.path.join(REPO, "scripts", "deploy.sh")).read()
+    for marker in ("scan-image-k8s.sh", "wait-for-runs.sh", "CREATE ROLE fabulist_app", "live-smoke-k8s.sh", "SKIP_IMAGE_SCAN", "SKIP_SMOKE", "DEPLOY_WAIT_FOR_RUNS", "restore-check.yaml"):
+        assert marker in deploy, marker
+    readme = open(os.path.join(REPO, "README.md")).read()
+    for claim in ("SKIP_IMAGE_SCAN=1", "DEPLOY_WAIT_FOR_RUNS", "fabulist_app", "SKIP_SMOKE=1", "MIGRATION_DATABASE_URL", "ship-k8s.sh"):
+        assert claim in readme, claim
