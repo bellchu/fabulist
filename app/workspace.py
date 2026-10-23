@@ -98,6 +98,11 @@ class SplitIn(BaseModel):
     statements: List[str] = Field(min_length=2, max_length=10)
 
 
+class RenameTagIn(BaseModel):
+    old: str = Field(alias="from", max_length=80)
+    new: str = Field(alias="to", max_length=80)
+
+
 class TagIn(BaseModel):
     ids: List[str] = Field(min_length=1, max_length=2000)
     tag: str = Field(max_length=80)
@@ -1462,6 +1467,33 @@ def _bulk_tag(table: str, pid: str, body: TagIn, who: str) -> Dict[str, int]:
                            {"compliance_tags": {"from": ", ".join(old), "to": ", ".join(new)}})
             updated += 1
     return {"updated": updated}
+
+
+@router.post("/api/projects/{pid}/tags/rename")
+def rename_tag(pid: str, body: RenameTagIn, request: Request):
+    """Rename a compliance tag across the project's requirements and stories (matching ignores case); if the new name is already on an item the two fold into one."""
+    _project(pid)
+    old, new = body.old.strip(), body.new.strip()
+    if not old or not new:
+        raise HTTPException(400, "Both the current tag and the new name are needed")
+    who = history.actor(request)
+    changed = {"requirements": 0, "stories": 0}
+    with db.conn() as c:
+        for table in ("requirements", "stories"):
+            kind = _kind(table)
+            for r in c.execute("SELECT id, seq, data FROM %s WHERE project_id=%%s AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(data->'compliance_tags') t WHERE lower(t) = lower(%%s)) FOR UPDATE" % table,
+                               (pid, old)).fetchall():
+                tags = r["data"].get("compliance_tags") or []
+                renamed = sorted({new if t.lower() == old.lower() else t for t in tags})
+                if renamed == sorted(tags):
+                    continue
+                c.execute("UPDATE %s SET data = jsonb_set(data, '{compliance_tags}', %%s::jsonb), rev = rev + 1 WHERE id=%%s" % table, (json.dumps(renamed), r["id"]))
+                history.record(c, pid, kind, r["id"], history.item_key(kind, r["seq"]), "edited", who, _label(r["data"]),
+                               {"compliance_tags": {"from": ", ".join(tags), "to": ", ".join(renamed)}})
+                changed[table] += 1
+    if not any(changed.values()):
+        raise HTTPException(404, "No requirement or story carries that tag")
+    return changed
 
 
 @router.post("/api/projects/{pid}/requirements/tag")

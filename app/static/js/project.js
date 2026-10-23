@@ -326,9 +326,10 @@ async function viewOverview(body) {
           : h("p", { class: "muted" }, "No requirements yet."))),
       Object.keys(p.compliance || {}).length ? h("div", { class: "card", style: { gridColumn: "1 / -1" } }, h("div", { class: "card-head" }, h("h3", {}, "Compliance coverage")),
         h("div", { class: "table-wrap" }, h("table", { class: "table" },
-          h("thead", {}, h("tr", {}, ["Tag", "Requirements", "Covered by stories"].map((x) => h("th", {}, x)))),
+          h("thead", {}, h("tr", {}, ["Tag", "Requirements", "Covered by stories", ""].map((x) => h("th", {}, x)))),
           h("tbody", {}, Object.entries(p.compliance).map(([tag, c]) => h("tr", {}, h("td", {}, h("a", { href: "#/p/" + p.id + "/requirements", title: "Show the requirements with this tag", onclick: () => { filters.reqTag = tag; filters.reqStatus = ""; filters.reqType = ""; filters.reqQ = ""; filters.reqFlagged = false; filters.reqAssignee = ""; } }, tag)), h("td", {}, c.requirements),
-            h("td", {}, c.covered + " of " + c.requirements + (c.covered < c.requirements ? " – gaps" : "")))))))) : null,
+            h("td", {}, c.covered + " of " + c.requirements + (c.covered < c.requirements ? " – gaps" : "")),
+            h("td", {}, writer(h("button", { class: "btn btn-sm btn-ghost", "aria-label": "Rename " + tag, onclick: () => renameTagDialog(tag) }, "Rename"))))))))) : null,
       h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", {}, "Recent runs")),
         runs.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
           h("thead", {}, h("tr", {}, ["Stage", "Status", "Items", "When"].map((x) => h("th", {}, x)))),
@@ -775,6 +776,19 @@ async function postInBatches(path, body) {
     total.updated += r.updated || 0;
   }
   return total;
+}
+
+// Rename (or fold together) a compliance tag across the project, from the overview's coverage card.
+function renameTagDialog(tag) {
+  const to = h("input", { type: "text", maxlength: "80", value: tag, "aria-label": "New name" });
+  modal({
+    title: "Rename " + tag, description: "Changes it on every requirement and story in this project that carries it. If the new name is already used, the two become one tag. Each change is recorded in the audit trail.",
+    body: field("New name", to),
+    actions: [{ label: "Rename", kind: "btn-primary", onClick: async () => {
+      const r = await api.post(base() + "/tags/rename", { from: tag, to: to.value });
+      toast(r.requirements + " requirement" + (r.requirements === 1 ? "" : "s") + " and " + r.stories + " " + (r.stories === 1 ? "story" : "stories") + " updated", "ok"); rerender();
+    } }],
+  });
 }
 
 // "Tag…" in the bulk bars: add a compliance tag to everything selected (requirements or stories), or take it off.
