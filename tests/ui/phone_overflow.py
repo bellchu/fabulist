@@ -1,0 +1,60 @@
+"""At phone width no screen, dialog or drawer pushes the page sideways. Run with scripts/ui-check-k8s.sh."""
+import os
+import sys
+
+from playwright.sync_api import sync_playwright
+
+BASE = os.environ.get("BASE_URL", "http://127.0.0.1:8000")
+H = {"X-Requested-With": "fabulist"}
+failures = []
+
+
+def check(ok, what):
+    print(("ok   " if ok else "FAIL ") + what)
+    if not ok:
+        failures.append(what)
+
+
+def fits(page, what):
+    page.wait_for_timeout(500)
+    over = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
+    check(over <= 0, f"{what}: no sideways scroll ({over}px over)")
+
+
+with sync_playwright() as p:
+    browser = p.chromium.launch()
+    ctx = browser.new_context(viewport={"width": 375, "height": 800}, bypass_csp=True)
+    pid = ctx.request.post(BASE + "/api/projects", data={"name": "Phone sweep", "platform": "generic"}, headers=H).json()["id"]
+    for text in ("The system shall export invoices to CSV on request.", "The system shall email order confirmations to buyers."):
+        ctx.request.post(f"{BASE}/api/projects/{pid}/requirements", data={"statement": text, "compliance_tags": ["SOX"]}, headers=H)
+    ctx.request.post(f"{BASE}/api/projects/{pid}/stories", data={"title": "Export invoices", "requirement_ids": ["REQ-001"], "compliance_tags": ["SOX"]}, headers=H)
+    page = ctx.new_page()
+    page.goto(BASE + "/#/")
+    page.wait_for_selector(".page-head")
+    fits(page, "home")
+    for tab in ("overview", "sources", "requirements", "stories", "trace", "audit", "export"):
+        page.goto(f"{BASE}/#/p/{pid}/{tab}")
+        page.wait_for_selector(".page-head")
+        fits(page, tab)
+    page.goto(f"{BASE}/#/p/{pid}/requirements")
+    page.wait_for_selector("tr.clickable")
+    page.get_by_label("Select REQ-001").check()
+    page.get_by_label("Select REQ-002").check()
+    for button in ("Tag…", "Set…", "Merge…", "Assign…"):
+        page.get_by_role("button", name=button).click()
+        page.wait_for_selector(".modal")
+        fits(page, button + " dialog")
+        box = page.locator(".modal").bounding_box()
+        check(box["x"] >= 0 and box["x"] + box["width"] <= 376, f"{button} dialog fits the screen")
+        page.locator(".modal-foot").get_by_role("button", name="Cancel").click()
+        page.wait_for_function("!document.querySelector('.modal')")
+    page.get_by_role("button", name="Open REQ-001").click()
+    page.wait_for_selector(".drawer")
+    fits(page, "requirement drawer")
+    page.get_by_role("button", name="Split…").click()
+    page.wait_for_selector(".modal")
+    fits(page, "Split… dialog")
+    box = page.locator(".modal").bounding_box()
+    check(box["x"] >= 0 and box["x"] + box["width"] <= 376, "Split… dialog fits the screen")
+    browser.close()
+sys.exit(1 if failures else 0)
