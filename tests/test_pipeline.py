@@ -424,3 +424,12 @@ def test_the_html_report_summarises_compliance_coverage_only_when_tags_are_in_us
     assert page.index("Compliance coverage") < page.index("Review and approval"), "it comes before the sign-off block"
     plain, _ = exporters.html_report([_story()], [dict(REQ, key="REQ-001", compliance_tags=[])], "Demo")
     assert "Compliance coverage" not in plain.decode()
+
+
+def test_the_confluence_page_summarises_compliance_coverage_when_tags_are_in_use():
+    tagged = dict(REQ, key="REQ-001", compliance_tags=["SOX"])
+    other = dict(REQ, key="REQ-002", compliance_tags=["SOX", "<b>GDPR</b>"])
+    page = exporters.confluence_storage([dict(_story(), requirement_ids=["REQ-001"])], [tagged, other], "Demo")
+    assert "<h2>Compliance coverage</h2>" in page and "<td>SOX</td><td>2</td><td>1 of 2" in page
+    assert "<b>GDPR</b>" not in page
+    assert "Compliance coverage" not in exporters.confluence_storage([_story()], [dict(REQ, key="REQ-001", compliance_tags=[])], "Demo")

@@ -213,6 +213,16 @@ td,th{border-bottom:1px solid #e5e7eb;padding:6px 8px;text-align:left;vertical-a
 """
 
 
+def _tag_coverage(stories: List[Item], reqs: List[Item]) -> List[Tuple[str, int, int]]:
+    """(tag, requirements carrying it, how many of those a story covers), by tag."""
+    covered = {k for s in stories for k in s.get("requirement_ids", [])}
+    by_tag: Dict[str, List[bool]] = {}
+    for r in reqs:
+        for tag in r.get("compliance_tags") or []:
+            by_tag.setdefault(tag, []).append(r["key"] in covered)
+    return [(tag, len(by_tag[tag]), sum(by_tag[tag])) for tag in sorted(by_tag, key=str.lower)]
+
+
 def html_report(stories: List[Item], reqs: List[Item], title: str = "Product backlog", details: Optional[List[str]] = None) -> Output:
     e = html.escape
     covered = {k for s in stories for k in s.get("requirement_ids", [])}
@@ -258,15 +268,11 @@ def html_report(stories: List[Item], reqs: List[Item], title: str = "Product bac
         out.append("<tr><td>%s</td><td>%s</td><td>%s</td></tr>" % (e(r["key"]), e(r["statement"]),
                                                                    e(", ".join(linked)) if linked else "<span class='gap'>Gap</span>"))
     out.append("</tbody></table>")
-    by_tag: Dict[str, List[bool]] = {}
-    for r in reqs:
-        for tag in r.get("compliance_tags") or []:
-            by_tag.setdefault(tag, []).append(r["key"] in covered)
-    if by_tag:
+    coverage = _tag_coverage(stories, reqs)
+    if coverage:
         out.append("<h2>Compliance coverage</h2><table><thead><tr><th scope='col'>Tag</th><th scope='col'>Requirements</th><th scope='col'>Covered by stories</th></tr></thead><tbody>")
-        for tag in sorted(by_tag, key=str.lower):
-            done = sum(by_tag[tag])
-            out.append("<tr><td>%s</td><td>%d</td><td>%d of %d%s</td></tr>" % (e(tag), len(by_tag[tag]), done, len(by_tag[tag]), "" if done == len(by_tag[tag]) else " <span class='gap'>gaps</span>"))
+        for tag, total, done in coverage:
+            out.append("<tr><td>%s</td><td>%d</td><td>%d of %d%s</td></tr>" % (e(tag), total, done, total, "" if done == total else " <span class='gap'>gaps</span>"))
         out.append("</tbody></table>")
     # The document goes to the business for sign-off: leave room to record who agreed, in what role, and when.
     out.append("<div class='approval'><h2>Review and approval</h2><table class='sign'><thead><tr><th scope='col'>Name</th><th scope='col'>Role</th>"
@@ -310,6 +316,12 @@ def confluence_storage(stories: List[Item], reqs: List[Item], title: str) -> str
     for r in reqs:
         out.append("<tr><td>%s</td><td>%s</td><td>%s</td></tr>" % (e(r["key"]), e(r["statement"]), e(", ".join(by_req.get(r["key"], []))) or "<strong>Gap</strong>"))
     out.append("</tbody></table>")
+    coverage = _tag_coverage(stories, reqs)
+    if coverage:
+        out.append("<h2>Compliance coverage</h2><table><tbody><tr><th>Tag</th><th>Requirements</th><th>Covered by stories</th></tr>")
+        for tag, total, done in coverage:
+            out.append("<tr><td>%s</td><td>%d</td><td>%d of %d%s</td></tr>" % (e(tag), total, done, total, "" if done == total else " <strong>gaps</strong>"))
+        out.append("</tbody></table>")
     return "".join(out)
 
 
