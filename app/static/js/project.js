@@ -389,7 +389,7 @@ function reposCard(repoList) {
         if (!(await confirmBox("Disconnect " + r.url + "? Its " + r.documents + " synced documents are removed; existing requirements are kept.", { danger: true, okLabel: "Disconnect" }))) return;
         await api.del(base() + "/repos/" + r.id); rerender();
       }) }, icon("trash")))))
-      : h("div", { class: "card-body muted small" }, "No repository connected. Upload files below, or connect a Git repository that holds your BRDs."));
+      : h("div", { class: "card-body muted small" }, "No repository connected. Upload files above, or connect a Git repository that holds your BRDs."));
 }
 
 async function viewSources(body) {

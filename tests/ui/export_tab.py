@@ -32,5 +32,9 @@ with sync_playwright() as p:
     check("1 approved story and 1 approved requirement will be exported" in text, "the approved-only sentence too: %r" % text[:110].replace("\n", " "))
     width = page.get_by_label("Compliance tag").bounding_box()["width"]
     check(width < 400, "the compliance choice is a normal dropdown, not a full-width bar (%dpx)" % width)
+    page.goto(f"{BASE}/#/p/{pid}/sources")
+    page.wait_for_selector("text=No repository connected")
+    above = page.get_by_text("Drop BRD files here").bounding_box()["y"] < page.get_by_text("No repository connected").bounding_box()["y"]
+    check(above and "Upload files above" in page.get_by_text("No repository connected").inner_text(), "the repository card points at the upload area where it really is (above)")
     browser.close()
 sys.exit(1 if failures else 0)
