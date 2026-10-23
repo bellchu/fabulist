@@ -154,7 +154,7 @@ SAMPLE_BRD_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samp
 
 
 @router.post("/providers/{pid}/evaluate", dependencies=[Depends(ai_fair_use)])
-def evaluate_provider(pid: str, request: Request):
+def evaluate_provider(pid: str, request: Request, stages: str = "requirements"):
     """How does this provider do on a BRD whose answer is known? Runs the extraction on the built-in sample (twelve numbered requirements, one of
     them an open item that must stay open) and scores it: how many of the twelve numbers were found, what was missed, whether the TBD survived,
     and what it cost in time, requests and tokens. A trial before relying on a provider, not a benchmark."""
@@ -178,10 +178,45 @@ def evaluate_provider(pid: str, request: Request):
         "Found %d of %d requirement numbers%s; %s the open item (TBD) %s; %d requests, %.1f s." % (
             len(found), len(expected), (" (missed " + ", ".join(missing) + ")") if missing else "", "kept" if kept_tbd else "LOST",
             "as it was" if kept_tbd else "(it was resolved or dropped)", usage.get("requests", 0), seconds))
+    stories_result = None
+    if "stories" in stages.split(","):
+        stories_result = _evaluate_stories(profile, text)
+        verdict += " " + stories_result["verdict"]
     audit.record(request, "provider evaluated", profile["name"], verdict[:280])
-    return {"provider": profile["name"], "model": profile.get("model") or "", "expected": len(expected), "found": len(found), "missing": missing,
+    return dict(({"stories": stories_result} if stories_result else {}), **{"provider": profile["name"], "model": profile.get("model") or "", "expected": len(expected), "found": len(found), "missing": missing,
             "items": len(items), "kept_tbd": kept_tbd, "seconds": seconds, "requests": usage.get("requests", 0), "tokens_in": usage.get("in", 0),
-            "tokens_out": usage.get("out", 0), "error": error, "verdict": verdict}
+            "tokens_out": usage.get("out", 0), "error": error, "verdict": verdict})
+
+
+def _evaluate_stories(profile: Dict[str, Any], sample_text: str) -> Dict[str, Any]:
+    """Stories from the sample's twelve requirements (taken from the BRD itself, so the provider under test does not write its own exam)."""
+    epic, section, reqs = "Order Management", "General", []
+    for line in sample_text.splitlines():
+        if line.startswith("## "):
+            section = line[3:].strip()
+        m = re.match(r"(BR-\d+): (.+)", line)
+        if m:
+            item = pipeline.normalize_requirement({"statement": m.group(2), "source_id": m.group(1), "epic": epic, "section": section}, {"epic": epic, "heading": section}, "Sample")
+            if item:
+                item["key"] = "REQ-%03d" % (len(reqs) + 1)
+                reqs.append(item)
+    usage = {"in": 0, "out": 0, "requests": 0}
+    started = time.monotonic()
+    error, stories = "", []
+    try:
+        stories = pipeline.generate_stories(reqs, "", "generic", profile, dict(settings.get_settings(), rag_top_k=0), lambda m: None, usage)
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)[:300] or type(exc).__name__
+    keys = [r["key"] for r in reqs]
+    covered = sorted({k for s in stories for k in s.get("requirement_ids", []) if k in keys})
+    uncovered = [k for k in keys if k not in covered]
+    gherkin = sum(1 for s in stories if s.get("acceptance_criteria") and all(re.match(r"\s*(given|when|then|and|but)\b", c, re.I) for c in s["acceptance_criteria"]))
+    seconds = round(time.monotonic() - started, 1)
+    verdict = ("Stories: the provider could not be used: " + error) if error else (
+        "Stories: %d stories cover %d of %d requirements%s; %d of them have Given/When/Then criteria; %d requests, %.1f s." % (
+            len(stories), len(covered), len(keys), (" (not covered: " + ", ".join(uncovered) + ")") if uncovered else "", gherkin, usage.get("requests", 0), seconds))
+    return {"requirements": len(keys), "covered": len(covered), "uncovered": uncovered, "stories": len(stories), "gherkin": gherkin, "seconds": seconds,
+            "requests": usage.get("requests", 0), "tokens_in": usage.get("in", 0), "tokens_out": usage.get("out", 0), "error": error, "verdict": verdict}
 
 
 # ---- product taxonomy ----------------------------------------------------

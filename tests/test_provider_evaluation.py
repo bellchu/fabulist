@@ -69,3 +69,44 @@ def test_an_unknown_provider_is_404ish_and_an_unreachable_one_says_so(client):
     pid = client.post("/api/admin/providers", json={"name": "Dead", "kind": "openai", "base_url": "http://127.0.0.1:9/v1", "model": "m", "api_key": "k"}).json()["id"]
     r = client.post("/api/admin/providers/%s/evaluate" % pid)
     assert r.status_code == 200 and r.json()["error"] and r.json()["found"] == 0
+
+
+def test_stories_are_scored_too_on_request(client):
+    r = client.post("/api/admin/providers/%s/evaluate?stages=requirements,stories" % _provider(client)["id"]).json()
+    s = r["stories"]
+    assert s["requirements"] == 12 and s["covered"] == 12 and s["uncovered"] == []
+    assert s["stories"] >= 1 and s["gherkin"] == s["stories"], "every story has Given/When/Then criteria"
+    assert "12 of 12" in s["verdict"] and "stories" in s["verdict"]
+    assert "stories" not in client.post("/api/admin/providers/%s/evaluate" % _provider(client)["id"]).json(), "off unless asked for: it costs a second round of requests"
+
+
+class _WeakStories(BaseHTTPRequestHandler):
+    """Writes one story per feature area, covering only the first requirement, with criteria that are not Gherkin."""
+    def do_POST(self):
+        import re
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        first = re.findall(r"(REQ-\d+) \[", body["messages"][-1]["content"])[:1]
+        stories = [{"epic": "E", "feature": "F", "title": "Do the thing", "persona": "user", "narrative": "As a user, I want it, so that it works",
+                    "acceptance_criteria": ["It works"], "priority": "High", "story_points": 3, "requirement_ids": first}]
+        out = json.dumps({"choices": [{"message": {"content": json.dumps(stories)}}], "usage": {"prompt_tokens": 50, "completion_tokens": 10}}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def log_message(self, *a):
+        pass
+
+
+def test_weak_stories_score_lower_and_say_what_is_uncovered(client):
+    server = ThreadingHTTPServer(("127.0.0.1", 9188), _WeakStories)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        pid = client.post("/api/admin/providers", json={"name": "Weak writer", "kind": "openai", "base_url": "http://127.0.0.1:9188/v1", "model": "m", "api_key": "k"}).json()["id"]
+        s = client.post("/api/admin/providers/%s/evaluate?stages=stories" % pid).json()["stories"]
+    finally:
+        server.shutdown()
+    assert 0 < s["covered"] < 12 and s["covered"] + len(s["uncovered"]) == 12
+    assert s["gherkin"] < s["stories"], "criteria that are not Given/When/Then are counted against it"
+    assert s["tokens_in"] > 0

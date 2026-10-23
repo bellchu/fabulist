@@ -23,6 +23,8 @@ with sync_playwright() as p:
     page.wait_for_selector("text=Found 12 of 12")
     text = page.locator(".content").inner_text()
     check("kept the open item (TBD) as it was" in text, "the verdict says how many numbers were found and that the TBD survived")
+    page.wait_for_selector("text=cover 12 of 12 requirements")
+    check("have Given/When/Then criteria" in page.locator(".content").inner_text(), "the stories are scored in the same sentence")
     check(page.locator(".callout.ok").count() >= 1, "a full score is shown as good")
     browser.close()
 sys.exit(1 if failures else 0)
