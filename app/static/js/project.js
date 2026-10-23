@@ -10,7 +10,7 @@ const TABS = [["overview", "Overview"], ["sources", "Sources"], ["requirements",
 const TYPE_COLORS = { business: "#5867e8", functional: "#0176d3", "non-functional": "#dd7a01", constraint: "#ba0517", rule: "#06a59a" };
 
 // Filters survive re-renders within the session.
-const filters = { reqAssignee: "", storyAssignee: "", reqQ: "", reqType: "", reqTag: "", reqStatus: "", reqFlagged: false, reqSort: "", reqDir: 1, storySort: "", storyDir: 1, storyQ: "", storyStatus: "", storyView: "map", storyReady: "", traceGaps: false, exportScope: "all" };
+const filters = { reqAssignee: "", storyAssignee: "", reqQ: "", reqType: "", reqTag: "", reqStatus: "", reqFlagged: false, reqSort: "", reqDir: 1, storySort: "", storyDir: 1, storyQ: "", storyStatus: "", storyTag: "", storyView: "map", storyReady: "", traceGaps: false, exportScope: "all" };
 let ctx = null;
 let pollTimer = null;
 
@@ -948,11 +948,14 @@ async function viewStories(body) {
   const box = h("div");
   const q = h("input", { type: "search", class: "search", placeholder: "Search stories", "aria-label": "Search stories", value: filters.storyQ });
   const status = select([["", "All statuses"], ["draft", "Draft"], ["approved", "Approved"], ["rejected", "Rejected"]], filters.storyStatus, { "aria-label": "Status" });
+  const tagNames = [...new Set(stories.flatMap((x) => x.compliance_tags || []))].sort();
+  if (filters.storyTag && !tagNames.includes(filters.storyTag)) filters.storyTag = "";  // the tag was removed everywhere since the filter was set
+  const tagFilter = tagNames.length ? select([["", "All compliance"], ...tagNames.map((t) => [t, t])], filters.storyTag, { "aria-label": "Compliance tag" }) : null;
   const ready = select([["", "Any readiness"], ["ready", "Ready"], ["not-ready", "Needs work"]], filters.storyReady, { "aria-label": "Readiness" });
   const visible = () => stories.filter((s) =>
     (!filters.storyQ || (s.key + " " + s.title + " " + s.narrative + " " + s.epic + " " + s.feature).toLowerCase().includes(filters.storyQ.toLowerCase())) &&
     (!filters.storyStatus || s.status === filters.storyStatus) && matchesAssignee(s, filters.storyAssignee) &&
-    (!filters.storyReady || (filters.storyReady === "ready") === s.ready));
+    (!filters.storyTag || (s.compliance_tags || []).includes(filters.storyTag)) && (!filters.storyReady || (filters.storyReady === "ready") === s.ready));
   const sorted = () => { const rows = visible(), by = STORY_SORTS[filters.storySort]; return by ? rows.sort((a, b) => filters.storyDir * by(a, b)) : rows; };
   const selected = new Set();
   const bulk = h("div", { class: "bulk-sticky" });
@@ -976,6 +979,7 @@ async function viewStories(body) {
   const restart = () => { paging.limit = PAGE; render(); };  // a new filter, view or order starts again from the top
   q.addEventListener("input", debounce(() => { filters.storyQ = q.value; restart(); }));
   status.addEventListener("change", () => { filters.storyStatus = status.value; restart(); });
+  if (tagFilter) tagFilter.addEventListener("change", () => { filters.storyTag = tagFilter.value; restart(); });
   ready.addEventListener("change", () => { filters.storyReady = ready.value; restart(); });
   const count = h("span", { class: "muted small right" });
   const tally = () => {
@@ -988,7 +992,7 @@ async function viewStories(body) {
   tally();
   mount(body, h("div", { class: "toolbar" },
     segmented([["map", "Story map"], ["list", "List"]], filters.storyView, (v) => { filters.storyView = v; restart(); }),
-    q, status, assigneeFilter(stories, filters.storyAssignee, (v) => { filters.storyAssignee = v; restart(); }), ready,
+    q, status, tagFilter, assigneeFilter(stories, filters.storyAssignee, (v) => { filters.storyAssignee = v; restart(); }), ready,
     count,
     writer(h("button", { class: "btn", onclick: guard(estimateDialog) }, icon("sparkles"), "Estimate with AI")),
     writer(importFileButton("story")),
