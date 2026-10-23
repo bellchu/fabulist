@@ -30,6 +30,7 @@ with sync_playwright() as p:
         ctx.request.post(f"{BASE}/api/projects/{pid}/stories", data={"title": "Export invoices", "requirement_ids": ["REQ-001"]}, headers=H)
         page = ctx.new_page()
         for route in ("", f"p/{pid}/overview", f"p/{pid}/requirements", f"p/{pid}/stories", f"p/{pid}/trace", f"p/{pid}/export", "admin/settings"):
+            page.evaluate("document.querySelectorAll('.page-head').forEach((e) => e.remove())")  # the old page's header would satisfy the wait below
             page.goto(f"{BASE}/#/{route}")
             page.wait_for_selector(".page-head")
             page.add_style_tag(content=SPACING)
