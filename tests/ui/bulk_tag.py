@@ -37,6 +37,7 @@ with sync_playwright() as p:
         ctx.request.post(f"{BASE}/api/projects/{pid}/stories", data={"title": title}, headers=H)
     page.goto(f"{BASE}/#/p/{pid}/stories")
     page.wait_for_selector("text=Export invoices")
+    page.get_by_role("button", name="List").click()
     boxes = page.locator("tbody input[type=checkbox]")
     boxes.nth(0).check()
     boxes.nth(1).check()
