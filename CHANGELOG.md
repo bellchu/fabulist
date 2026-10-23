@@ -4,7 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
-- The stories toolbar fits on one line at laptop width again: with the compliance filter added, **Add story** had wrapped onto its own line. The search box in list toolbars is a little narrower (`tests/ui/toolbar_fits.py`).
+- **Toolbar actions wrap together.** With the compliance filter (and the assignee filter once accounts exist) the stories toolbar is too wide for one line at laptop width, and **Add story** had wrapped onto a line of its own. The count and the action buttons are now one group, so a wrapped toolbar keeps them side by side (`tests/ui/toolbar_fits.py`); the requirements toolbar does the same.
 - **Export one regulation's evidence.** The Export tab has a compliance tag choice (shown when tags are in use) and `GET /api/projects/{id}/export` takes `tag=`: every format is narrowed to the requirements carrying the tag, the stories that implement them and stories tagged themselves, and the report says which tag it covers. A tag nothing carries is a clear 404. Frozen baselines take `tag=` as well, and the Export tab's choice applies to their Export buttons too.
 - The Confluence page published from a project also gets the **Compliance coverage** table the stakeholder report has, when tags are in use.
 - The stakeholder HTML report gets a **Compliance coverage** table (each tag, its requirements, how many stories cover them, gaps marked) between the traceability table and the sign-off block, when any requirement carries a tag.

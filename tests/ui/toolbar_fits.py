@@ -1,4 +1,4 @@
-"""The list toolbars hold their filters and actions on one line at laptop width. Run with scripts/ui-check-k8s.sh."""
+"""When a list toolbar has to wrap (many filters, named accounts), its action buttons wrap as one group instead of leaving a lone button on its own line. Run with scripts/ui-check-k8s.sh."""
 import os
 import sys
 
@@ -26,8 +26,8 @@ with sync_playwright() as p:
         page.goto(f"{BASE}/#/p/{pid}/{tab}")
         page.wait_for_selector(wait)
         page.wait_for_timeout(300)
-        rows = page.evaluate("""(() => { const t = [...document.querySelectorAll('.toolbar')].pop();
-          return new Set([...t.children].filter((c) => c.offsetParent).map((c) => Math.round((c.getBoundingClientRect().top + c.getBoundingClientRect().height / 2) / 20))).size; })()""")
-        check(rows == 1, f"{tab}: the toolbar is one line at 1280px ({rows} lines)")
+        rows = page.evaluate("""(() => { const g = [...document.querySelectorAll('.toolbar .actions')].pop();
+          return new Set([...g.children].filter((c) => c.offsetParent).map((c) => Math.round((c.getBoundingClientRect().top + c.getBoundingClientRect().height / 2) / 20))).size; })()""")
+        check(rows == 1, f"{tab}: the action buttons stay together on one line ({rows} lines)")
     browser.close()
 sys.exit(1 if failures else 0)
