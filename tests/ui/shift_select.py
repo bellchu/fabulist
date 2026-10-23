@@ -34,6 +34,15 @@ with sync_playwright() as p:
     page.wait_for_selector("text=2 selected")
     check(not page.get_by_label("Select REQ-004").is_checked() and not page.get_by_label("Select REQ-005").is_checked() and page.get_by_label("Select REQ-003").is_checked(),
           "shift-unticking clears the run back to the last row clicked")
+    page.get_by_role("button", name="Clear").click()
+    page.get_by_label("Select REQ-002").check()  # the anchor is the second row ...
+    page.get_by_role("button", name="ID").click()  # ... then the order changes underneath it
+    page.get_by_role("button", name="ID").click()
+    page.wait_for_function("document.querySelector('tr.clickable .row-open').textContent === 'REQ-006'")
+    page.get_by_label("Select REQ-004").click(modifiers=["Shift"])
+    page.wait_for_timeout(300)
+    check(page.get_by_label("Select REQ-004").is_checked() and not page.get_by_label("Select REQ-005").is_checked(),
+          "after the order changes, a shift-click ticks just that row (the old anchor is forgotten)")
     page.goto(f"{BASE}/#/p/{pid}/stories")
     page.get_by_role("button", name="List").click()
     page.wait_for_selector("tr.clickable")
