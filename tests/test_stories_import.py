@@ -125,3 +125,18 @@ def test_imported_story_tags_use_the_projects_spelling(client):
     client.post("/api/projects/%s/stories" % pid, json={"title": "Existing", "compliance_tags": ["SOX"]})
     assert _import(client, pid, "Title,Compliance\nNew one,sox; gdpr\n").json()["created"] == 1
     assert {s["title"]: s["compliance_tags"] for s in _stories(client, pid)}["New one"] == ["SOX", "gdpr"]
+
+
+def test_fabulists_own_excel_workbook_imports_back_for_stories_and_requirements(client):
+    a = _project(client, "Excel source")
+    client.post("/api/projects/%s/requirements" % a, json={"statement": "The system shall log every payment attempt.", "compliance_tags": ["SOX"], "epic": "Billing"})
+    client.post("/api/projects/%s/stories" % a, json={"title": "Audit payments", "compliance_tags": ["SOX"], "epic": "Billing", "story_points": 3})
+    workbook = client.get("/api/projects/%s/export?format=xlsx" % a).content
+    b = _project(client, "Excel copy")
+    files = {"file": ("fabulist.xlsx", workbook, "application/octet-stream")}
+    r = client.post("/api/projects/%s/stories/import-file" % b, files=files)
+    assert r.status_code == 200 and r.json()["created"] == 1, r.text
+    got = _stories(client, b)[0]
+    assert got["title"] == "Audit payments" and got["story_points"] == 3 and got["compliance_tags"] == ["SOX"]
+    r = client.post("/api/projects/%s/requirements/import-file" % b, files={"file": ("fabulist.xlsx", workbook, "application/octet-stream")})
+    assert r.status_code == 200 and r.json()["created"] == 1, r.text
