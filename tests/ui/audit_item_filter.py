@@ -23,7 +23,7 @@ with sync_playwright() as p:
         ctx.request.post(f"{BASE}/api/projects/{pid}/requirements", data={"statement": text}, headers=H)
     page = ctx.new_page()
     page.goto(f"{BASE}/#/p/{pid}/audit")
-    page.wait_for_selector("text=2 entries")
+    page.wait_for_selector("text=REQ-001")
     page.get_by_label("Filter by item key").fill("req-002")
     page.wait_for_selector("text=1 entry")
     check("REQ-002" in page.inner_text(".card-body") and "REQ-001" not in page.inner_text(".card-body"), "only the chosen item's entries are listed")
