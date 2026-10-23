@@ -690,7 +690,7 @@ async function viewRequirements(body) {
   count.textContent = reqs.filter((r) => r.status === "approved").length + " of " + reqs.length + " approved";
   const who = assigneeFilter(reqs, filters.reqAssignee, (v) => { filters.reqAssignee = v; restart(); });
   mount(body, h("div", { class: "toolbar" }, q, type, status, tagFilter, who, h("label", { class: "switch small" }, flagged, "Flagged only"),
-    h("span", { class: "row right actions" }, count,
+    h("span", { class: "row actions" }, count,
       writer(importRequirementsButton()),
       writer(h("button", { class: "btn", onclick: () => reqDrawer(null) }, icon("plus"), "Add requirement")))), bulk, tableBox);
   renderTable();
@@ -1043,7 +1043,7 @@ async function viewStories(body) {
   mount(body, h("div", { class: "toolbar" },
     segmented([["map", "Story map"], ["list", "List"]], filters.storyView, (v) => { filters.storyView = v; restart(); }),
     q, status, tagFilter, assigneeFilter(stories, filters.storyAssignee, (v) => { filters.storyAssignee = v; restart(); }), ready,
-    h("span", { class: "row right actions" },  // wraps as one group, never leaving a lone button on its own line
+    h("span", { class: "row actions" },  // wraps as one group, never leaving a lone button on its own line
       count,
       writer(h("button", { class: "btn", onclick: guard(estimateDialog) }, icon("sparkles"), "Estimate with AI")),
       writer(importFileButton("story")),
