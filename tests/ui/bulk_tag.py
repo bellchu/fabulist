@@ -95,5 +95,12 @@ with sync_playwright() as p:
     with page.expect_download() as asked:
         page.locator(".card", has=page.get_by_role("heading", name="JSON")).get_by_role("button", name="Download").click()
     check("tag=Sarbanes-Oxley" in asked.value.url, "the download asks for the chosen compliance tag (%s)" % asked.value.url[-60:])
+    ctx.request.post(f"{BASE}/api/projects/{pid}/baselines", data={"name": "Audit freeze", "scope": "all"}, headers=H)
+    page.reload()
+    page.wait_for_selector("text=Audit freeze")
+    page.get_by_label("Compliance tag").select_option("Sarbanes-Oxley")
+    with page.expect_download() as asked:
+        page.locator("tr, .row", has_text="Audit freeze").get_by_role("button", name="Export", exact=True).first.click()
+    check("tag=Sarbanes-Oxley" in asked.value.url and "/baselines/" in asked.value.url, "a baseline's Export also asks for the chosen tag (%s)" % asked.value.url[-70:])
     browser.close()
 sys.exit(1 if failures else 0)
