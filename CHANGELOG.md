@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- **Shift-click selects a run of rows.** In the requirements and stories lists, shift-clicking a checkbox ticks (or clears) every row between it and the last one you clicked, instead of one click per row.
 - **Rename a compliance tag across a project.** A **Rename** button on each row of the overview's Compliance coverage card (`POST /api/projects/{id}/tags/rename`, `{from, to}`) changes the tag on every requirement and story that carries it, ignoring case. Renaming into a name already in use folds the two together, which is how `sox` and `SOX` already in a project become one. Every changed item is in the audit trail.
 - The Compliance coverage card on the overview now spans the page, so the Requirement mix and Recent runs cards no longer leave a gap beside it.
 - **Search finds compliance tags.** Typing `SOX` in the search box now lists every requirement and story tagged SOX across the projects you can open, not just those that mention the word.
