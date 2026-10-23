@@ -107,3 +107,21 @@ def test_it_is_audited_and_respects_archive_and_roles(client, monkeypatch):
     client.post("/api/admin/users", json={"username": "vic", "role": "viewer", "password": "vic-password-12"}, auth=root)
     other = client.post("/api/projects", json={"name": "P", "platform": "generic"}, auth=root).json()["id"]
     assert client.post("/api/projects/%s/stories/import" % other, json={"csv": CSV}, auth=("vic", "vic-password-12")).status_code == 403
+
+
+def test_the_tags_scope_and_questions_in_a_stories_export_survive_the_round_trip(client):
+    a = _project(client, "Rich source")
+    client.post("/api/projects/%s/stories" % a, json={"title": "Audit payments", "compliance_tags": ["SOX", "PCI-DSS"], "product_scope": ["Devices"],
+                                                      "open_questions": ["Retention period?", "Who signs off?"]})
+    exported = client.get("/api/projects/%s/export?format=stories-csv" % a).text
+    b = _project(client, "Rich copy")
+    assert _import(client, b, exported).json()["created"] == 1
+    got = _stories(client, b)[0]
+    assert got["compliance_tags"] == ["PCI-DSS", "SOX"] and got["product_scope"] == ["Devices"] and got["open_questions"] == ["Retention period?", "Who signs off?"]
+
+
+def test_imported_story_tags_use_the_projects_spelling(client):
+    pid = _project(client, "Spelling")
+    client.post("/api/projects/%s/stories" % pid, json={"title": "Existing", "compliance_tags": ["SOX"]})
+    assert _import(client, pid, "Title,Compliance\nNew one,sox; gdpr\n").json()["created"] == 1
+    assert {s["title"]: s["compliance_tags"] for s in _stories(client, pid)}["New one"] == ["SOX", "gdpr"]
