@@ -17,7 +17,7 @@ def check(ok, what):
 
 with sync_playwright() as p:
     browser = p.chromium.launch()
-    ctx = browser.new_context(viewport={"width": 375, "height": 800}, bypass_csp=True)
+    ctx = browser.new_context(viewport={"width": 320, "height": 800}, bypass_csp=True)
     pid = ctx.request.post(BASE + "/api/projects", data={"name": "Phone bulk", "platform": "generic"}, headers=H).json()["id"]
     for text in ("The system shall export invoices to CSV on request.", "The system shall email order confirmations to buyers."):
         ctx.request.post(f"{BASE}/api/projects/{pid}/requirements", data={"statement": text}, headers=H)
@@ -32,6 +32,6 @@ with sync_playwright() as p:
         over = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
         check(over <= 0, f"{tab}: with the bulk bar open the page does not scroll sideways ({over}px over)")
         bar = page.locator(".bulkbar").bounding_box()
-        check(bar["x"] >= 0 and bar["x"] + bar["width"] <= 376, f"{tab}: the bulk bar fits the screen")
+        check(bar["x"] >= 0 and bar["x"] + bar["width"] <= 321, f"{tab}: the bulk bar fits the screen")
     browser.close()
 sys.exit(1 if failures else 0)
