@@ -1226,7 +1226,8 @@ _STORY_COLUMNS = {
     "story points": "story_points", "points": "story_points", "estimate": "story_points",
     "acceptance criteria": "acceptance_criteria", "acceptance": "acceptance_criteria", "criteria": "acceptance_criteria",
     "requirement ids": "requirement_ids", "requirements": "requirement_ids", "requirement": "requirement_ids",
-    "labels": "labels", "status": "status", "assignee": "assignee", "owner": "assignee"}
+    "labels": "labels", "status": "status", "assignee": "assignee", "owner": "assignee",
+    "compliance tags": "compliance_tags", "compliance": "compliance_tags", "product scope": "product_scope", "open questions": "open_questions"}
 
 
 @router.post("/api/projects/{pid}/stories/import")
@@ -1281,6 +1282,10 @@ def _import_story_rows(pid: str, rows: List[Dict[str, Any]], who: str, origin: s
                 raw[field_name] = [v for v in value.split("\n") if v.strip()]
             elif field_name in ("requirement_ids", "labels"):
                 raw[field_name] = [v for v in re.split(r"[;,\s]+", value) if v.strip()]
+            elif field_name in ("compliance_tags", "product_scope"):  # an export writes one per line; a hand-made sheet may use semicolons or commas
+                raw[field_name] = [v.strip() for v in re.split(r"[;,\n]+", value) if v.strip()]
+            elif field_name == "open_questions":
+                raw[field_name] = [v for v in value.split("\n") if v.strip()]
             elif value:
                 raw[field_name] = value
         status = str(raw.pop("status", "draft")).strip().lower()
@@ -1302,7 +1307,9 @@ def _import_story_rows(pid: str, rows: List[Dict[str, Any]], who: str, origin: s
         raise HTTPException(400, "Nothing was imported. " + "; ".join(errors[:10]) + ("; and %d more" % (len(errors) - 10) if len(errors) > 10 else ""))
     with db.conn() as c:
         seq = c.execute("SELECT coalesce(max(seq), -1) + 1 AS n FROM stories WHERE project_id=%s", (pid,)).fetchone()["n"]
+        known = _project_tags(c, pid)
         for item, status in fresh:
+            item["compliance_tags"] = _respell(known, item.get("compliance_tags"))
             new = db.new_id()
             c.execute("INSERT INTO stories (id, project_id, run_id, seq, status, data) VALUES (%s,%s,'manual',%s,%s,%s)", (new, pid, seq, status, json.dumps(item)))
             history.record(c, pid, "story", new, history.item_key("story", seq), "created", who, _label(item))
