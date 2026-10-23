@@ -14,9 +14,9 @@ Item = Dict[str, Any]
 Output = Tuple[bytes, str]
 STORY_COLUMNS = ["key", "epic", "feature", "title", "persona", "narrative", "acceptance_criteria", "priority",
                  "story_points", "requirement_ids", "labels", "product_scope", "variant_criteria", "compliance_tags",
-                 "open_questions", "quality_score", "ready", "status"]
+                 "open_questions", "assignee", "quality_score", "ready", "status"]
 REQ_COLUMNS = ["key", "type", "statement", "epic", "section", "source_id", "source_ref", "actors", "product_scope",
-               "compliance_tags", "quality_score", "status"]
+               "compliance_tags", "assignee", "quality_score", "status"]
 
 
 def _cell(item: Item, col: str) -> str:

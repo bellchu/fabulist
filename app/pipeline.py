@@ -172,6 +172,7 @@ def normalize_requirement(raw: Any, section: Dict[str, str], source: str) -> Opt
         "source_ref": str(raw.get("source_ref") or "%s > %s" % (source, section.get("heading", ""))).strip()[:300],
         "product_scope": _clean_list(raw.get("product_scope")),
         "compliance_tags": _clean_list(raw.get("compliance_tags")),
+        "assignee": str(raw.get("assignee") or "").strip()[:64],
         "notes": str(raw.get("notes") or "").strip()[:1000],
     }
     _enrich(req, statement)
@@ -207,6 +208,7 @@ def normalize_story(raw: Any, fallback: Optional[Dict[str, str]] = None) -> Opti
         "variant_criteria": variants[:20],
         "compliance_tags": _clean_list(raw.get("compliance_tags")),
         "open_questions": _clean_list(raw.get("open_questions"))[:20],
+        "assignee": str(raw.get("assignee") or "").strip()[:64],
         "notes": str(raw.get("notes") or "").strip()[:2000],
     }
 

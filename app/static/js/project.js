@@ -10,7 +10,7 @@ const TABS = [["overview", "Overview"], ["sources", "Sources"], ["requirements",
 const TYPE_COLORS = { business: "#5867e8", functional: "#0176d3", "non-functional": "#dd7a01", constraint: "#ba0517", rule: "#06a59a" };
 
 // Filters survive re-renders within the session.
-const filters = { reqQ: "", reqType: "", reqStatus: "", reqFlagged: false, reqSort: "", reqDir: 1, storySort: "", storyDir: 1, storyQ: "", storyStatus: "", storyView: "map", storyReady: "", traceGaps: false, exportScope: "all" };
+const filters = { reqAssignee: "", storyAssignee: "", reqQ: "", reqType: "", reqStatus: "", reqFlagged: false, reqSort: "", reqDir: 1, storySort: "", storyDir: 1, storyQ: "", storyStatus: "", storyView: "map", storyReady: "", traceGaps: false, exportScope: "all" };
 let ctx = null;
 let pollTimer = null;
 
@@ -589,7 +589,7 @@ function importFileButton(kind) {  // kind: "requirement" or "story"
 const importRequirementsButton = () => importFileButton("requirement");
 
 async function viewRequirements(body) {
-  const [reqs, talk] = await Promise.all([api.get(base() + "/requirements"), api.get(base() + "/comments")]);
+  const [reqs, talk] = await Promise.all([api.get(base() + "/requirements"), api.get(base() + "/comments"), loadPeople()]);
   mount(body, runPanel("requirements"));
   if (!reqs.length) {
     mount(body, h("div", { class: "card" }, empty({ iconName: "list", title: "No requirements yet",
@@ -607,7 +607,7 @@ async function viewRequirements(body) {
 
   const visible = () => reqs.filter((r) =>
     (!filters.reqQ || (r.key + " " + r.statement + " " + r.section).toLowerCase().includes(filters.reqQ.toLowerCase())) &&
-    (!filters.reqType || r.type === filters.reqType) && (!filters.reqStatus || r.status === filters.reqStatus) &&
+    (!filters.reqType || r.type === filters.reqType) && (!filters.reqStatus || r.status === filters.reqStatus) && matchesAssignee(r, filters.reqAssignee) &&
     (!filters.reqFlagged || r.issues.some((i) => i.severity !== "info")));
   const sorted = () => {
     const rows = visible(), by = SORTS[filters.reqSort];
@@ -650,7 +650,7 @@ async function viewRequirements(body) {
           r.issues.length ? h("div", { class: "issues" }, r.issues.map((i) => h("span", { class: "chip", title: i.message }, issueIcon(i.severity), i.code))) : null),
         h("td", { class: "small muted hide-sm" }, r.section),
         h("td", { class: "hide-sm" }, scorePill(r.quality_score)),
-        h("td", {}, h("div", { class: "row", style: { flexWrap: "wrap" } }, badge(r.status, statusTone[r.status]), talkBadge(talk[r.id])))))
+        h("td", {}, h("div", { class: "row", style: { flexWrap: "wrap" } }, badge(r.status, statusTone[r.status]), talkBadge(talk[r.id])), r.assignee ? h("div", { class: "small muted" }, "→ " + r.assignee) : null)))
         : h("tr", {}, h("td", { colspan: "7", class: "muted", style: { textAlign: "center", padding: "28px" } }, "No requirements match the filters.")),
         pagerRow(rows.length, drawn.length, 7, (n) => { const before = drawn.length; limit = n; renderTable(); tableBox.querySelectorAll("tbody tr.clickable .row-open")[before]?.focus(); })))));
   };
@@ -669,7 +669,8 @@ async function viewRequirements(body) {
   flagged.addEventListener("change", () => { filters.reqFlagged = flagged.checked; restart(); });
 
   count.textContent = reqs.filter((r) => r.status === "approved").length + " of " + reqs.length + " approved";
-  mount(body, h("div", { class: "toolbar" }, q, type, status, h("label", { class: "switch small" }, flagged, "Flagged only"), count,
+  const who = assigneeFilter(reqs, filters.reqAssignee, (v) => { filters.reqAssignee = v; restart(); });
+  mount(body, h("div", { class: "toolbar" }, q, type, status, who, h("label", { class: "switch small" }, flagged, "Flagged only"), count,
     writer(importRequirementsButton()),
     writer(h("button", { class: "btn", onclick: () => reqDrawer(null) }, icon("plus"), "Add requirement"))), bulk, tableBox);
   renderTable();
@@ -678,6 +679,37 @@ async function viewRequirements(body) {
 
 // An address ending in an item's key (#/p/<id>/requirements/REQ-002) opens that item. The address then goes back to the tab, so closing the drawer
 // or saving (which redraws the page) does not open it again.
+// Who work can be assigned to: the named accounts (a picker), or, on installations without accounts, free text. Loaded once per session.
+let peopleCache = null;
+async function loadPeople() {
+  if (!peopleCache) { try { peopleCache = await api.get("/api/people"); } catch (_) { peopleCache = []; } }
+  return peopleCache;
+}
+
+function assigneeControl(current) {
+  const people = peopleCache || [];
+  if (!people.length) {
+    const box = h("input", { type: "text", value: current || "", maxlength: "64", placeholder: "A name or a team (optional)", "aria-label": "Assignee" });
+    return { el: box, value: () => box.value.trim() };
+  }
+  const names = people.map((p) => p.username);
+  const options = [["", "Unassigned"], ...(current && !names.includes(current) ? [[current, current + " (no longer an account)"]] : []), ...names.map((n) => [n, n])];
+  const box = select(options, current || "", { "aria-label": "Assignee" });
+  return { el: box, value: () => box.value };
+}
+
+// "Assigned to" filter options for a list: everyone, me, nobody, then each person who has something.
+function assigneeFilter(items, current, onChange) {
+  const names = [...new Set([...(peopleCache || []).map((p) => p.username), ...items.map((x) => x.assignee).filter(Boolean)])].sort();
+  if (!names.length) return null;
+  const options = [["", "All assignees"], ...(state.me.named ? [["me", "Assigned to me"]] : []), ["none", "Unassigned"], ...names.map((n) => [n, n])];
+  const box = select(options, current, { "aria-label": "Assignee filter" });
+  box.addEventListener("change", () => onChange(box.value));
+  return box;
+}
+
+const matchesAssignee = (item, want) => !want || (want === "none" ? !item.assignee : (want === "me" ? state.me.username : want) === item.assignee);
+
 // A small "copy link" button for a drawer: the address that opens this very item.
 const copyLinkButton = (tab, key) => h("button", { class: "btn btn-ghost icon-btn", "aria-label": "Copy link to " + key, title: "Copy a link to " + key,
   onclick: guard(async () => { await copyText(location.origin + "/#/p/" + ctx.pid + "/" + tab + "/" + key); toast("Link to " + key + " copied", "ok"); }) }, icon("link"));
@@ -708,6 +740,7 @@ function reqDrawer(r, nav) {
   const compliance = tagsInput(r.compliance_tags, state.meta.compliance_tags);
   const rationale = h("textarea", { rows: 2, value: r.rationale || "" });
   const notes = h("textarea", { rows: 2, value: r.notes || "", placeholder: "Reviewer notes, decisions, clarifications" });
+  const assignee = assigneeControl(r.assignee);
   const rows = nav && !isNew ? nav.rows() : [];
   const at = rows.findIndex((x) => x.id === r.id);
   const [prevId, nextId] = [rows[at - 1]?.id, rows[at + 1]?.id];  // neighbours as the list is now, before a save reorders or filters it
@@ -715,7 +748,7 @@ function reqDrawer(r, nav) {
   const save = (approveAndNext) => guard(async () => {
     if (approveAndNext) status = "approved";
     const payload = { statement: statement.value, type: type.value, status, epic: epic.value, section: section.value, source_id: sourceId.value,
-      actors: actors.get(), product_scope: scope.get(), compliance_tags: compliance.get(), rationale: rationale.value, notes: notes.value };
+      actors: actors.get(), product_scope: scope.get(), compliance_tags: compliance.get(), rationale: rationale.value, notes: notes.value, assignee: assignee.value() };
     if (isNew) await api.post(base() + "/requirements", Object.assign(payload, { source_ref: "Manual" }));
     else await api.patch(base() + "/requirements/" + r.id, Object.assign(payload, { rev: r.rev }));  // refused if someone saved first
     close(); toast(isNew ? "Requirement added" : "Saved " + r.key, "ok");
@@ -741,7 +774,7 @@ function reqDrawer(r, nav) {
       h("fieldset", { class: "plain-fieldset stack", disabled: readOnly() },  // a disabled fieldset makes every field below read-only
       field("Review status", segmented([["draft", "Draft"], ["approved", "Approved"], ["excluded", "Excluded"]], status, (v) => { status = v; dirty = true; })),
       field("Statement", statement, "One verifiable requirement. Avoid vague terms such as 'fast' or 'user-friendly'."),
-      h("div", { class: "form-grid" }, field("Type", type), field("BRD reference ID", sourceId), field("Epic", epic), field("Section / feature", section)),
+      h("div", { class: "form-grid" }, field("Type", type), field("BRD reference ID", sourceId), field("Epic", epic), field("Section / feature", section), field("Assignee", assignee.el)),
       field("Actors", actors.el),
       field("Product classes", scope.el, "Leave empty if it applies to all products."),
       field("Compliance", compliance.el),
@@ -802,7 +835,7 @@ const shortcutHint = () => h("div", { class: "shortcut-hint small muted hide-sm"
 let storyNav = null;  // list context for the story drawer: set by the Stories tab, never used from other tabs
 
 async function viewStories(body) {
-  const [stories, reqs, talk] = await Promise.all([api.get(base() + "/stories"), api.get(base() + "/requirements"), api.get(base() + "/comments")]);
+  const [stories, reqs, talk] = await Promise.all([api.get(base() + "/stories"), api.get(base() + "/requirements"), api.get(base() + "/comments"), loadPeople()]);
   ctx.reqs = reqs;
   ctx.talk = talk;
   mount(body, runPanel("stories"));
@@ -818,7 +851,7 @@ async function viewStories(body) {
   const ready = select([["", "Any readiness"], ["ready", "Ready"], ["not-ready", "Needs work"]], filters.storyReady, { "aria-label": "Readiness" });
   const visible = () => stories.filter((s) =>
     (!filters.storyQ || (s.key + " " + s.title + " " + s.narrative + " " + s.epic + " " + s.feature).toLowerCase().includes(filters.storyQ.toLowerCase())) &&
-    (!filters.storyStatus || s.status === filters.storyStatus) &&
+    (!filters.storyStatus || s.status === filters.storyStatus) && matchesAssignee(s, filters.storyAssignee) &&
     (!filters.storyReady || (filters.storyReady === "ready") === s.ready));
   const sorted = () => { const rows = visible(), by = STORY_SORTS[filters.storySort]; return by ? rows.sort((a, b) => filters.storyDir * by(a, b)) : rows; };
   const selected = new Set();
@@ -852,7 +885,7 @@ async function viewStories(body) {
   tally();
   mount(body, h("div", { class: "toolbar" },
     segmented([["map", "Story map"], ["list", "List"]], filters.storyView, (v) => { filters.storyView = v; restart(); }),
-    q, status, ready,
+    q, status, assigneeFilter(stories, filters.storyAssignee, (v) => { filters.storyAssignee = v; restart(); }), ready,
     count,
     writer(h("button", { class: "btn", onclick: guard(estimateDialog) }, icon("sparkles"), "Estimate with AI")),
     writer(importFileButton("story")),
@@ -989,6 +1022,7 @@ function storyDrawer(s, nav = storyNav) {
   const variants = linesInput((s.variant_criteria || []).map((v) => v.scope + ": " + v.criteria), 3, "Product class: criteria");
   const questions = linesInput(s.open_questions, 2, "One question per line");
   const notes = h("textarea", { rows: 2, value: s.notes || "" });
+  const assignee = assigneeControl(s.assignee);
   const linked = reqs.filter((r) => s.requirement_ids.includes(r.key));
   const rows = nav && !isNew ? nav.rows() : [];
   const at = rows.findIndex((x) => x.id === s.id);
@@ -1000,7 +1034,7 @@ function storyDrawer(s, nav = storyNav) {
       priority: priority.value, story_points: points.value ? Number(points.value) : null, status, epic: epic.value, feature: feature.value,
       requirement_ids: links.get(), labels: labels.get(), product_scope: scope.get(), compliance_tags: compliance.get(),
       variant_criteria: readLines(variants).map((line) => { const i = line.indexOf(":"); return i > 0 ? { scope: line.slice(0, i).trim(), criteria: line.slice(i + 1).trim() } : { scope: "", criteria: line }; }),
-      open_questions: readLines(questions), notes: notes.value };
+      open_questions: readLines(questions), notes: notes.value, assignee: assignee.value() };
     if (isNew) await api.post(base() + "/stories", payload);
     else await api.patch(base() + "/stories/" + s.id, Object.assign(payload, { rev: s.rev }));
     close(); toast(isNew ? "Story added" : "Saved " + s.key, "ok");
@@ -1030,7 +1064,7 @@ function storyDrawer(s, nav = storyNav) {
       h("fieldset", { class: "plain-fieldset stack", disabled: readOnly() },
       field("Review status", segmented([["draft", "Draft"], ["approved", "Approved"], ["rejected", "Rejected"]], status, (v) => { status = v; dirty = true; })),
       field("Title", title),
-      h("div", { class: "form-grid" }, field("Persona", persona), field("Priority", priority), field("Epic", epic), field("Feature", feature)),
+      h("div", { class: "form-grid" }, field("Persona", persona), field("Priority", priority), field("Epic", epic), field("Feature", feature), field("Assignee", assignee.el)),
       field("Narrative", narrative, "As a <role>, I want <goal>, so that <benefit>."),
       field("Acceptance criteria", ac, "One per line, in Given / When / Then form."),
       field("Product variants", variants, "One per line: 'Product class: criteria'. Variants avoid duplicate stories per product type."),
