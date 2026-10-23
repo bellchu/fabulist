@@ -345,3 +345,35 @@ def test_retries_are_counted_by_reason_so_a_throttling_provider_is_visible(monke
         llm.complete(OPENAI, "s", "u", OPTS)
     counts = {dict(labels)["reason"]: v for (name, labels), v in metrics._counters.items() if name == "fabulist_llm_retries_total"}
     assert counts == {"unreachable": 2}, "two retries after the first failed attempt (the last attempt is a failure, not a retry): %s" % counts
+
+
+def test_a_reply_without_the_expected_shape_is_a_clear_error_not_a_crash(monkeypatch):
+    monkeypatch.setattr(llm.httpx, "post", Fake([(200, {"choices": []})]))
+    with pytest.raises(llm.LLMError, match="Unexpected provider response shape"):
+        llm.complete(OPENAI, "sys", "hello", OPTS)
+
+
+def test_a_provider_type_that_cannot_write_text_is_refused_by_name(monkeypatch):
+    with pytest.raises(llm.LLMError, match="cannot generate text"):
+        llm.complete({"kind": "carrier-pigeon", "name": "x", "base_url": "https://x.test", "model": "m", "api_key": "k"}, "sys", "hello", OPTS)
+
+
+def test_the_model_list_reports_an_unreachable_provider_and_a_reply_that_is_not_a_list(monkeypatch):
+    def down(url, headers=None, timeout=None):
+        raise httpx.ConnectError("no route")
+    monkeypatch.setattr(llm.httpx, "get", down)
+    with pytest.raises(llm.LLMError, match="ConnectError contacting provider"):
+        llm.list_models("openai", "https://llm.test/v1", "k")
+    monkeypatch.setattr(llm.httpx, "get", lambda url, headers=None, timeout=None: httpx.Response(200, text="<html>not json</html>", request=httpx.Request("GET", url)))
+    with pytest.raises(llm.LLMError, match="did not return a model list"):
+        llm.list_models("openai", "https://llm.test/v1", "k")
+    assert llm.list_models("carrier-pigeon", "https://x.test", "k") == [], "a type with no model list is simply empty"
+
+
+def test_a_failure_page_that_is_not_json_still_gives_the_provider_text():
+    resp = httpx.Response(502, text="<html>Bad gateway from the corporate proxy</html>", request=httpx.Request("POST", "https://llm.test"))
+    assert llm._error_text(resp) == "<html>Bad gateway from the corporate proxy</html>"
+
+
+def test_the_offline_provider_always_passes_the_connection_test():
+    assert llm.test_connection({"kind": "mock"}, OPTS)["ok"] is True
