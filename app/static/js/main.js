@@ -14,12 +14,31 @@ function navItem(href, label, active, iconName) {
 // One input for the life of the page: the header is rebuilt on every route, and a new input would lose half-typed text and the cursor.
 let searchInput = null;
 
+// "?" lists the keyboard shortcuts (the review drawers' own are only visible once one is open).
+function shortcutsDialog() {
+  const rows = [[["/"], "Jump to the search box"], [["?"], "Show this list"], [["Esc"], "Close a dialog or drawer"],
+    [["Ctrl", "Enter"], "Save the open requirement or story"], [["Ctrl", "Shift", "Enter"], "Approve it and open the next one"],
+    [["Alt", "←"], "Previous requirement or story"], [["Alt", "→"], "Next requirement or story"]];
+  modal({
+    title: "Keyboard shortcuts", description: "On a Mac, use Cmd in place of Ctrl.",
+    body: h("table", { class: "table" }, h("tbody", {}, rows.map(([keys, what]) => h("tr", {},
+      h("td", { class: "nowrap" }, keys.flatMap((k, i) => (i ? ["+"] : []).concat([h("kbd", {}, k)]))), h("td", {}, what))))),
+  });
+}
+
 function globalSearch(route) {
   const listId = "project-search";
   if (!searchInput) {
     searchInput = h("input", { type: "search", list: listId, placeholder: "Search projects, requirements, stories…  ( / )", "aria-label": "Search projects, requirements and stories", "aria-keyshortcuts": "/" });
     // "/" jumps to the search box from anywhere, except while typing in a field (or with a dialog open: its fields are fields too)
     document.addEventListener("keydown", (e) => {
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const t = e.target;
+        if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) || document.querySelector(".modal, .drawer")) return;
+        e.preventDefault();
+        shortcutsDialog();
+        return;
+      }
       if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
       const t = e.target;
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
