@@ -46,7 +46,7 @@ with sync_playwright() as p:
             page.goto(f"{BASE}/#/p/{pid}/{tab}")
             page.wait_for_selector(".page-head")
             fits(page, tab)
-        for route in ("admin/overview", "admin/users", "admin/providers", "admin/settings", "admin/integrations", "admin/taxonomy", "admin/activity", "account", "search/" + "q" * 120):
+        for route in ("admin/overview", "admin/users", "admin/providers", "admin/settings", "admin/integrations", "admin/taxonomy", "admin/activity", "account", "compliance", "search/" + "q" * 120):
             page.goto(f"{BASE}/#/{route}")
             page.wait_for_selector(".page-head")
             fits(page, route.split("/")[0] + "/" + route.split("/")[-1][:12])

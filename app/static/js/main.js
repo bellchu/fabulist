@@ -4,6 +4,7 @@ import { renderProject, showMyWork } from "./project.js";
 import { renderAdmin } from "./admin.js";
 import { renderAccount } from "./account.js";
 import { renderSearch } from "./search.js";
+import { renderCompliance } from "./compliance.js";
 
 export const state = { meta: null, projects: [], me: null };
 
@@ -77,6 +78,7 @@ function shell(route) {
     h("a", { class: "waffle", href: "#/", title: "App launcher", "aria-label": "Home" }, h("span", {}, Array.from({ length: 9 }, () => h("i")))),
     h("span", { class: "app-name" }, "Story Studio"),
     navItem("#/", "Projects", route[0] === "" || (route[0] === "p" && !current)),
+    navItem("#/compliance", "Compliance", route[0] === "compliance"),
     current ? navItem("#/p/" + current.id, current.name, true, "folder") : null,
     isAdmin ? navItem("#/admin/overview", "Setup", route[0] === "admin") : null);
   const content = h("div", { class: "content", id: "content", tabindex: "-1" }, h("div", { class: "crumbs", id: "crumbs" }));
@@ -156,6 +158,7 @@ async function route() {
     if (parts[0] === "p" && parts[1]) await renderProject(content, parts[1], parts[2] || "overview", decodeURIComponent(parts[3] || ""));
     else if (parts[0] === "admin" && state.me.role === "admin") await renderAdmin(content, parts[1] || "overview");
     else if (parts[0] === "account") await renderAccount(content);
+    else if (parts[0] === "compliance") await renderCompliance(content);
     else if (parts[0] === "search") await renderSearch(content, decodeURIComponent(parts.slice(1).join("/")));
     else renderHome(content);
     if (ticket === rendering) announceRoute();
