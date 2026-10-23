@@ -14,6 +14,9 @@ const filters = { reqAssignee: "", storyAssignee: "", reqQ: "", reqType: "", req
 let ctx = null;
 let pollTimer = null;
 
+// From the home page's "Waiting for you": open the lists already filtered to what is assigned to the signed-in person.
+export function showMyWork() { filters.reqAssignee = "me"; filters.storyAssignee = "me"; }
+
 const rerender = () => window.dispatchEvent(new HashChangeEvent("hashchange"));
 // Reviewers (the viewer role) read and take part in discussions, and an archived project is frozen: the server refuses
 // every other change, so the UI does not offer it.

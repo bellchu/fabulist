@@ -1,6 +1,6 @@
 // App shell, routing and the projects home view.
 import { h, mount, icon, api, guard, toast, modal, field, requireValue, select, empty, badge, timeAgo, meter, setUnauthorizedHandler, markScrollRegions, accessPicker, guardLeaving, hasPendingEdits, confirmBox } from "./core.js";
-import { renderProject } from "./project.js";
+import { renderProject, showMyWork } from "./project.js";
 import { renderAdmin } from "./admin.js";
 import { renderAccount } from "./account.js";
 import { renderSearch } from "./search.js";
@@ -200,8 +200,19 @@ function renderHome(content, keepView = false) {
       h("div", { class: "muted small" }, "Active " + timeAgo(p.last_activity || p.created) + " · created " + timeAgo(p.created)));
   };
   const grid = h("div", { class: "grid grid-3" });
+  const waiting = h("div");  // "waiting for you": filled in a moment, only for named accounts with something assigned
+  if (state.me.named && !archivedList) {
+    api.get("/api/me/assigned").then((w) => {
+      if (!w.projects.length) return;
+      waiting.append(h("div", { class: "card", style: { marginBottom: "16px" }, id: "waiting-for-me" },
+        h("div", { class: "card-head" }, h("h3", {}, "Waiting for you"), h("span", { class: "muted small" }, " " + w.requirements + " requirements and " + w.stories + " stories assigned to you, still drafts")),
+        h("div", { class: "card-body stack", style: { gap: "6px" } }, w.projects.map((p) => h("div", { class: "row" },
+          h("a", { href: "#/p/" + p.project_id + "/" + (p.requirements ? "requirements" : "stories"), class: "grow", onclick: showMyWork }, p.project_name),
+          h("span", { class: "muted small" }, [p.requirements ? p.requirements + " requirements" : "", p.stories ? p.stories + " stories" : ""].filter(Boolean).join(" · ")))))));
+    }).catch(() => {});  // a convenience: never an error on the home page
+  }
   // A filter bar only earns its space once the list is long enough to scroll.
-  if (list.length < FILTER_FROM) { grid.append(...list.map(card)); mount(content, head, grid); return; }
+  if (list.length < FILTER_FROM) { grid.append(...list.map(card)); mount(content, head, waiting, grid); return; }
   const q = h("input", { type: "search", value: homeFilter.q, placeholder: "Filter by name or description", "aria-label": "Filter projects", style: { maxWidth: "280px" } });
   const platforms = [...new Set(list.map((p) => p.platform))].sort();
   const platform = select([["", "All platforms"], ...platforms.map((k) => [k, state.meta.platforms[k] || k])], homeFilter.platform, { "aria-label": "Platform", style: { width: "auto" } });
@@ -222,7 +233,7 @@ function renderHome(content, keepView = false) {
       iconName: "search", title: "No projects match", text: "Try a different name or clear the platform filter." }))]));
   };
   [q, platform, sort].forEach((el) => el.addEventListener(el === q ? "input" : "change", draw));
-  mount(content, head, h("div", { class: "row wrap", style: { marginBottom: "12px" } }, q, platform, sort, count), grid);
+  mount(content, head, waiting, h("div", { class: "row wrap", style: { marginBottom: "12px" } }, q, platform, sort, count), grid);
   draw();
 }
 
