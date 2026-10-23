@@ -73,6 +73,8 @@ with sync_playwright() as p:
     check(True, "filtering stories by the tag leaves the two that carry it")
     page.goto(f"{BASE}/#/p/{pid}/overview")
     page.wait_for_selector("text=Compliance coverage")
+    card = page.locator(".card", has=page.get_by_role("heading", name="Compliance coverage")).bounding_box()
+    check(card["width"] > 900, "the compliance card spans the page instead of leaving a gap beside the requirement mix (%dpx)" % card["width"])
     check(page.locator("tr", has_text="SOX").locator("text=0 of 2").count() == 1, "the overview shows SOX on 2 requirements, none covered yet")
     page.get_by_role("link", name="SOX").click()
     page.wait_for_function("document.querySelectorAll('tr.clickable').length === 2")
