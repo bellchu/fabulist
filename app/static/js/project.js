@@ -865,9 +865,26 @@ function reqDrawer(r, nav) {
       nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Previous requirement", title: "Alt+Left", disabled: !prevId, onclick: step(prevId) }, "‹ Prev") : null,
       nav && !isNew ? h("button", { class: "btn btn-ghost", "aria-label": "Next requirement", title: "Alt+Right", disabled: !nextId, onclick: step(nextId) }, "Next ›") : null,
       isNew ? null : writer(h("button", { class: "btn", onclick: guard(() => refineRequirementDialog(r, close, nav)) }, icon("sparkles"), "Refine with AI")),
+      isNew ? null : writer(h("button", { class: "btn", title: "Divide into several requirements by hand", onclick: () => splitRequirementDialog(r, close, nav) }, "Split…")),
       h("span", { class: "grow" }),
       isNew ? null : writer(h("button", { class: "btn btn-danger", onclick: remove }, icon("trash"), "Delete")),
       nav && !isNew && !readOnly() ? shortcutHint() : null],
+  });
+}
+
+// Divide one requirement that says several things into parts by hand (no AI): the first part stays in place, the rest become new drafts.
+function splitRequirementDialog(r, closeDrawer, nav) {
+  const parts = h("div", { class: "stack" });
+  const add = (text) => parts.append(h("textarea", { rows: "2", maxlength: "1000", "aria-label": "Part " + (parts.children.length + 1), value: text }));
+  add(r.statement); add("");
+  modal({
+    title: "Split " + r.key, description: "The first part replaces " + r.key + "; the others are added as new draft requirements with the same epic, section, actors and source.",
+    body: h("div", { class: "stack" }, parts, h("button", { class: "btn btn-sm", onclick: () => add("") }, "Add another part")),
+    actions: [{ label: "Split", kind: "btn-primary", onClick: async () => {
+      const statements = [...parts.children].map((t) => t.value.trim()).filter(Boolean);
+      const res = await api.post(base() + "/requirements/" + r.id + "/split", { statements });
+      closeDrawer(); toast(r.key + " split; new: " + res.created.join(", "), "ok"); nav ? await nav.refresh() : rerender();
+    } }],
   });
 }
 
