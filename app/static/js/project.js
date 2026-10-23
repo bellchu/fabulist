@@ -654,9 +654,9 @@ async function viewRequirements(body) {
       h("thead", {}, h("tr", {}, writer(h("th", { class: "w-check" }, all)), ...[["ID", "", "key"], ["Type", "hide-sm", "type"], ["Requirement", ""], ["Section", "hide-sm", "section"], ["Quality", "hide-sm", "quality"], ["Status", "", "status"]].map(([x, c, k]) => sortHeader(x, c, k, "req", () => restart())))),
       h("tbody", {}, rows.length ? drawn.map((r) => h("tr", { class: "clickable" + (selected.has(r.id) ? " selected" : ""), onclick: () => reqDrawer(r, nav) },
         writer(h("td", { onclick: (e) => e.stopPropagation() }, h("input", { type: "checkbox", "aria-label": "Select " + r.key, checked: selected.has(r.id),
+          onclick: (e) => { ticks.requirement.shift = e.shiftKey; },
           onchange: (e) => {
-            e.target.checked ? selected.add(r.id) : selected.delete(r.id);
-            e.target.closest("tr").classList.toggle("selected", e.target.checked);
+            tick(ticks.requirement, drawn, r, e, selected, tableBox);
             all.checked = rows.every((x) => selected.has(x.id));
             renderBulk();
           } }))),
@@ -764,6 +764,20 @@ function bulkSet(kind, selected, refresh) {
       toast(r.updated + " " + (r.updated === 1 ? kind : plural) + " updated", "ok"); selected.clear(); await refresh();
     } }],
   }) }, "Set…");
+}
+
+// Shift-click ticks (or clears) every row between the last one ticked and this one, as in a mail list. `anchor` is a row's position in what is drawn.
+const ticks = { requirement: { anchor: null, shift: false }, story: { anchor: null, shift: false } };
+function tick(state, drawn, item, e, selected, container) {
+  const rows = container.querySelectorAll("tbody tr.clickable");
+  const at = drawn.indexOf(item);
+  const [from, to] = state.shift && state.anchor !== null && state.anchor < drawn.length ? [Math.min(state.anchor, at), Math.max(state.anchor, at)] : [at, at];
+  for (let i = from; i <= to; i++) {
+    e.target.checked ? selected.add(drawn[i].id) : selected.delete(drawn[i].id);
+    rows[i].classList.toggle("selected", e.target.checked);
+    rows[i].querySelector("input").checked = e.target.checked;
+  }
+  state.anchor = at; state.shift = false;
 }
 
 // One request carries at most 2,000 ids; "select all matching" in a big project can be more. Send them in batches and add up what was changed
@@ -1124,9 +1138,9 @@ function storyTable(rows, redraw, pick) {
     h("thead", {}, h("tr", {}, writer(h("th", { class: "w-check" }, all)), [["ID", "", "key"], ["Story", "", "title"], ["Epic / feature", "hide-sm", "epic"], ["Priority", "hide-sm", "priority"], ["Pts", "hide-sm", "points"], ["Requirements", "hide-sm"], ["Quality", "hide-sm", "quality"], ["Status", "", "status"]].map(([x, c, k]) => sortHeader(x, c, k, "story", redraw)))),
     h("tbody", {}, drawn.map((s) => h("tr", { class: "clickable" + (selected.has(s.id) ? " selected" : ""), onclick: () => storyDrawer(s) },
       writer(h("td", { onclick: (e) => e.stopPropagation() }, h("input", { type: "checkbox", "aria-label": "Select " + s.key, checked: selected.has(s.id),
+        onclick: (e) => { ticks.story.shift = e.shiftKey; },
         onchange: (e) => {
-          e.target.checked ? selected.add(s.id) : selected.delete(s.id);
-          e.target.closest("tr").classList.toggle("selected", e.target.checked);
+          tick(ticks.story, drawn, s, e, selected, table);
           all.checked = rows.every((x) => selected.has(x.id));
           changed();
         } }))),
