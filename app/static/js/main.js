@@ -197,7 +197,7 @@ function renderHome(content, keepView = false) {
         h("div", {}, h("b", {}, p.requirements), h("span", {}, "Requirements")),
         h("div", {}, h("b", {}, p.stories), h("span", {}, "Stories"))),
       h("div", {}, h("div", { class: "row small muted" }, h("span", { class: "grow" }, "Requirements reviewed"), pct + "%"), meter(pct, "good")),
-      h("div", { class: "muted small" }, "Created " + timeAgo(p.created)));
+      h("div", { class: "muted small" }, "Active " + timeAgo(p.last_activity || p.created) + " · created " + timeAgo(p.created)));
   };
   const grid = h("div", { class: "grid grid-3" });
   // A filter bar only earns its space once the list is long enough to scroll.
@@ -205,7 +205,7 @@ function renderHome(content, keepView = false) {
   const q = h("input", { type: "search", value: homeFilter.q, placeholder: "Filter by name or description", "aria-label": "Filter projects", style: { maxWidth: "280px" } });
   const platforms = [...new Set(list.map((p) => p.platform))].sort();
   const platform = select([["", "All platforms"], ...platforms.map((k) => [k, state.meta.platforms[k] || k])], homeFilter.platform, { "aria-label": "Platform", style: { width: "auto" } });
-  const sort = select([["new", "Newest first"], ["name", "Name A–Z"], ["review", "Most left to review"]], homeFilter.sort, { "aria-label": "Sort projects", style: { width: "auto" } });
+  const sort = select([["new", "Newest first"], ["name", "Name A–Z"], ["review", "Most left to review"], ["active", "Recently active"]], homeFilter.sort, { "aria-label": "Sort projects", style: { width: "auto" } });
   const count = h("span", { class: "muted small", role: "status" });
   const draw = () => {
     Object.assign(homeFilter, { q: q.value, platform: platform.value, sort: sort.value });
@@ -215,6 +215,7 @@ function renderHome(content, keepView = false) {
     const left = (p) => p.requirements - p.requirements_approved;
     shown.sort(sort.value === "name" ? (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
       : sort.value === "review" ? (a, b) => left(b) - left(a) || a.name.localeCompare(b.name)
+      : sort.value === "active" ? (a, b) => ((a.last_activity || a.created) < (b.last_activity || b.created) ? 1 : -1)
       : (a, b) => (a.created < b.created ? 1 : -1));
     count.textContent = shown.length === list.length ? list.length + " projects" : shown.length + " of " + list.length + " projects";
     grid.replaceChildren(...(shown.length ? shown.map(card) : [h("div", { class: "card", style: { gridColumn: "1 / -1" } }, empty({

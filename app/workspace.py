@@ -98,7 +98,8 @@ SELECT p.*,
   (SELECT count(*) FROM requirements r WHERE r.project_id = p.id AND r.status <> 'excluded') AS requirements,
   (SELECT count(*) FROM requirements r WHERE r.project_id = p.id AND r.status = 'approved') AS requirements_approved,
   (SELECT count(*) FROM stories s WHERE s.project_id = p.id AND s.status <> 'rejected') AS stories,
-  (SELECT count(*) FROM stories s WHERE s.project_id = p.id AND s.status = 'approved') AS stories_approved
+  (SELECT count(*) FROM stories s WHERE s.project_id = p.id AND s.status = 'approved') AS stories_approved,
+  coalesce((SELECT max(h.created) FROM history h WHERE h.project_id = p.id), p.created) AS last_activity
 FROM projects p
 """
 
