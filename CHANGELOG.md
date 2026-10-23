@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- **Tag… for stories too.** The bulk Tag… that landed for requirements now exists in the stories bulk bar (`POST /api/projects/{id}/stories/tag`), same behaviour and audit trail.
 - **Split a requirement by hand.** Merge had no opposite: a requirement that says two things could only be split with the AI. **Split…** in the requirement's drawer takes two or more statements; the first replaces the original, the others become new draft requirements with the same epic, section, actors, scope, tags and source plus a "Split from REQ-x" note (`POST /api/projects/{id}/requirements/{rid}/split`). Every part is in the audit trail.
 - **Tag many requirements at once.** Applying a compliance tag (SOX, GDPR…) to fifty requirements meant opening each one. **Tag…** in the requirements bulk bar adds a tag to everything selected, or removes it (`POST /api/projects/{id}/requirements/tag`); requirements that already match are left alone and every change is in the audit trail.
 - A regression test that a merged pair is no longer flagged as possible duplicates of each other.

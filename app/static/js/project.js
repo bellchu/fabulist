@@ -626,7 +626,7 @@ async function viewRequirements(body) {
       }) }, l)),
     bulkAssign("requirement", selected, refresh),
     bulkSet("requirement", selected, refresh),
-    bulkTag(selected, refresh),
+    bulkTag("requirement", selected, refresh),
     selected.size >= 2 ? bulkMerge(reqs, selected, refresh) : null,
     h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); renderTable(); renderBulk(); } }, "Clear"))] : []));
 
@@ -755,16 +755,17 @@ function bulkSet(kind, selected, refresh) {
   }) }, "Set…");
 }
 
-// "Tag…" in the requirements bulk bar: add a compliance tag to everything selected, or take it off.
-function bulkTag(selected, refresh) {
+// "Tag…" in the bulk bars: add a compliance tag to everything selected (requirements or stories), or take it off.
+function bulkTag(kind, selected, refresh) {
+  const plural = kind === "story" ? "stories" : "requirements";
   const tag = h("input", { type: "text", maxlength: "80", "aria-label": "Compliance tag", placeholder: "e.g. SOX" });
   const mode = select([["add", "Add to all"], ["remove", "Remove from all"]], "add", { "aria-label": "Action" });
   return h("button", { class: "btn btn-sm", title: "Add or remove a compliance tag", onclick: () => modal({
-    title: "Tag " + selected.size + " requirement" + (selected.size === 1 ? "" : "s"), description: "Each change is recorded in the audit trail.",
+    title: "Tag " + selected.size + " " + (selected.size === 1 ? kind : plural), description: "Each change is recorded in the audit trail.",
     body: h("div", { class: "stack" }, field("Action", mode), field("Compliance tag", tag)),
     actions: [{ label: "Apply", kind: "btn-primary", onClick: async () => {
-      const r = await api.post(base() + "/requirements/tag", { ids: [...selected], tag: tag.value, remove: mode.value === "remove" });
-      toast(r.updated + " requirement" + (r.updated === 1 ? "" : "s") + " updated", "ok"); selected.clear(); await refresh();
+      const r = await api.post(base() + "/" + plural + "/tag", { ids: [...selected], tag: tag.value, remove: mode.value === "remove" });
+      toast(r.updated + " " + (r.updated === 1 ? kind : plural) + " updated", "ok"); selected.clear(); await refresh();
     } }],
   }) }, "Tag…");
 }
@@ -960,6 +961,7 @@ async function viewStories(body) {
       }) }, l)),
     bulkAssign("story", selected, refresh),
     bulkSet("story", selected, refresh),
+    bulkTag("story", selected, refresh),
     h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); render(); } }, "Clear"))] : []));
   const paging = { limit: PAGE };  // rows of the list view drawn so far
   const render = () => {
