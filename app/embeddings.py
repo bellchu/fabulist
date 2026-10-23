@@ -6,7 +6,7 @@ from typing import List
 
 import httpx
 
-from . import config, db, settings
+from . import config, db, llm, settings
 
 _TOKEN = re.compile(r"[a-z0-9]{2,}")
 INDEX_BATCH = 100  # chunks embedded and inserted at a time
@@ -22,6 +22,29 @@ def _hash_embed(text: str) -> List[float]:
     return [x / norm for x in v]
 
 
+EMBED_ATTEMPTS = 3
+
+
+def _post_batch(url: str, headers: dict, model: str, batch: List[str]) -> List[List[float]]:
+    """One /embeddings request, tried up to EMBED_ATTEMPTS times when the provider hiccups (network trouble, 429, 5xx); anything else is final."""
+    last = "unknown error"
+    for attempt in range(EMBED_ATTEMPTS):
+        try:
+            resp = httpx.post(url, headers=headers, timeout=60, json={"model": model, "input": batch})
+        except httpx.HTTPError as exc:
+            last = "%s contacting the embeddings provider" % type(exc).__name__
+        else:
+            if resp.status_code == 429 or resp.status_code >= 500:
+                last = "the embeddings provider answered HTTP %d" % resp.status_code
+            elif resp.status_code >= 400:
+                raise RuntimeError("The embeddings provider refused the request (HTTP %d): check the model name and the key" % resp.status_code)
+            else:
+                return [d["embedding"] for d in sorted(resp.json()["data"], key=lambda d: d["index"])]
+        if attempt < EMBED_ATTEMPTS - 1:
+            llm._sleep(1.5 * (2 ** attempt))
+    raise RuntimeError("Could not get embeddings after %d attempts: %s" % (EMBED_ATTEMPTS, last))
+
+
 def _remote_embed(texts: List[str], provider_id: str, model: str) -> List[List[float]]:
     profile = settings.get_provider(provider_id)
     if not model:
@@ -30,10 +53,7 @@ def _remote_embed(texts: List[str], provider_id: str, model: str) -> List[List[f
     headers = {"Authorization": "Bearer " + profile["api_key"]} if profile["api_key"] else {}
     out: List[List[float]] = []
     for i in range(0, len(texts), 64):
-        resp = httpx.post(url, headers=headers, timeout=60, json={"model": model, "input": texts[i:i + 64]})
-        resp.raise_for_status()
-        data = sorted(resp.json()["data"], key=lambda d: d["index"])
-        out.extend(d["embedding"] for d in data)
+        out.extend(_post_batch(url, headers, model, texts[i:i + 64]))
     for e in out:
         if len(e) != config.EMBED_DIM:
             raise RuntimeError("Embedding size %d != EMBED_DIM %d" % (len(e), config.EMBED_DIM))

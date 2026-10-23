@@ -337,12 +337,13 @@ def _add_document(pid: str, filename: str, text: str) -> Dict[str, Any]:
     did = db.new_id()
     db.execute("INSERT INTO documents (id, project_id, filename, text, created) VALUES (%s,%s,%s,%s,%s)",
                (did, pid, filename, text, db.now()))
-    indexed = 0
+    indexed, index_error = 0, ""
     try:
         indexed = embeddings.index_document(pid, did, text)
-    except Exception:  # retrieval degrades; generation still works without it
+    except Exception as exc:  # retrieval degrades; generation still works without it
         log.exception("indexing failed for document %s", did)
-    return {"id": did, "filename": filename, "chars": len(text), "indexed_chunks": indexed}
+        index_error = str(exc)[:200] or type(exc).__name__
+    return {"id": did, "filename": filename, "chars": len(text), "indexed_chunks": indexed, "index_error": index_error}
 
 
 def _document_added(pid: str, doc: Dict[str, Any], request: Request) -> Dict[str, Any]:
