@@ -357,7 +357,7 @@ async function viewIntegrations(content) {
     const result = h("div", { class: "small", style: { flexBasis: "100%" } });
     return h("div", { class: "provider-row" },
       h("div", { class: "grow", style: { minWidth: "240px" } },
-        h("div", { class: "row" }, h("b", {}, it.name), badge(it.kind_label, "accent")),
+        h("div", { class: "row" }, h("b", {}, it.name), badge(it.kind_label, "accent"), it.notify_runs ? badge("Run notifications", "blue") : null),
         h("div", { class: "small muted mono" }, it.base_url + (it.target ? " · default " + it.target : "")),
         h("div", { class: "small" }, it.has_token ? h("span", { class: "muted" }, (it.username ? it.username + " · " : "") + "token " + it.key_hint)
           : h("span", { style: { color: "var(--amber)" } }, "No API token")),
