@@ -411,3 +411,16 @@ def test_the_excel_workbook_gets_a_compliance_sheet_only_when_tags_are_in_use():
     assert rows[0][:2] == ("compliance_tag", "requirement") and [(r[0], r[1], r[-1]) for r in rows[1:]] == [("SOX", "REQ-001", "covered")]
     plain, _ = exporters.xlsx([_story()], [dict(REQ, key="REQ-001", compliance_tags=[])])
     assert load_workbook(io.BytesIO(plain)).sheetnames == ["Stories", "Requirements", "Traceability"]
+
+
+def test_the_html_report_summarises_compliance_coverage_only_when_tags_are_in_use():
+    tagged = dict(REQ, key="REQ-001", compliance_tags=["SOX"])
+    other = dict(REQ, key="REQ-002", compliance_tags=["SOX", "<b>GDPR</b>"])
+    data, _ = exporters.html_report([dict(_story(), requirement_ids=["REQ-001"])], [tagged, other], "Demo")
+    page = data.decode()
+    assert "<h2>Compliance coverage</h2>" in page
+    assert "<td>SOX</td><td>2</td><td>1 of 2" in page.replace("</td><td>", "</td><td>"), "SOX: two requirements, one covered"
+    assert "<b>GDPR</b>" not in page and "&lt;b&gt;GDPR&lt;/b&gt;" in page, "tags are escaped"
+    assert page.index("Compliance coverage") < page.index("Review and approval"), "it comes before the sign-off block"
+    plain, _ = exporters.html_report([_story()], [dict(REQ, key="REQ-001", compliance_tags=[])], "Demo")
+    assert "Compliance coverage" not in plain.decode()

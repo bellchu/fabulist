@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- The stakeholder HTML report gets a **Compliance coverage** table (each tag, its requirements, how many stories cover them, gaps marked) between the traceability table and the sign-off block, when any requirement carries a tag.
 - The Excel workbook export gains a **Compliance** sheet (the same rows as the compliance matrix CSV) when any requirement carries a tag; projects without tags get the same three sheets as before.
 - **Shift-click selects a run of rows.** In the requirements and stories lists, shift-clicking a checkbox ticks (or clears) every row between it and the last one you clicked, instead of one click per row. The starting row is forgotten when the list is re-sorted or filtered, so a range never lands on rows that moved.
 - **Rename a compliance tag across a project.** A **Rename** button on each row of the overview's Compliance coverage card (`POST /api/projects/{id}/tags/rename`, `{from, to}`) changes the tag on every requirement and story that carries it, ignoring case. Renaming into a name already in use folds the two together, which is how `sox` and `SOX` already in a project become one. Every changed item is in the audit trail.
