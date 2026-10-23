@@ -768,6 +768,9 @@ function bulkSet(kind, selected, refresh) {
   }) }, "Set…");
 }
 
+// Compliance tags to suggest: the built-in list plus whatever this project already uses, so one spelling is reused.
+const complianceChoices = () => [...new Set([...state.meta.compliance_tags, ...Object.keys(ctx.project.compliance || {})])].sort((a, b) => a.localeCompare(b));
+
 // Shift-click ticks (or clears) every row between the last one ticked and this one, as in a mail list. `anchor` is a row's position in what is drawn.
 const ticks = { requirement: { anchor: null, shift: false }, story: { anchor: null, shift: false } };
 function tick(state, drawn, item, e, selected, container) {
@@ -870,7 +873,7 @@ function reqDrawer(r, nav) {
   const sourceId = h("input", { type: "text", value: r.source_id || "", placeholder: "e.g. BR-12" });
   const actors = tagsInput(r.actors, []);
   const scope = tagsInput(r.product_scope, state.meta.product_classes);
-  const compliance = tagsInput(r.compliance_tags, state.meta.compliance_tags);
+  const compliance = tagsInput(r.compliance_tags, complianceChoices());
   const rationale = h("textarea", { rows: 2, value: r.rationale || "" });
   const notes = h("textarea", { rows: 2, value: r.notes || "", placeholder: "Reviewer notes, decisions, clarifications" });
   const assignee = assigneeControl(r.assignee);
@@ -1178,7 +1181,7 @@ function storyDrawer(s, nav = storyNav) {
   const links = tagsInput(s.requirement_ids, reqs.map((r) => r.key));
   const labels = tagsInput(s.labels, []);
   const scope = tagsInput(s.product_scope, state.meta.product_classes);
-  const compliance = tagsInput(s.compliance_tags, state.meta.compliance_tags);
+  const compliance = tagsInput(s.compliance_tags, complianceChoices());
   const variants = linesInput((s.variant_criteria || []).map((v) => v.scope + ": " + v.criteria), 3, "Product class: criteria");
   const questions = linesInput(s.open_questions, 2, "One question per line");
   const notes = h("textarea", { rows: 2, value: s.notes || "" });
