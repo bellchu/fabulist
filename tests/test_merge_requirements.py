@@ -57,3 +57,15 @@ def test_refusals(client):
     assert client.post(url, json={"keep": "nope", "merge": [ids["a"]]}).status_code == 404
     client.post(url, json={"keep": ids["a"], "merge": [ids["b"]]})
     assert client.post(url, json={"keep": ids["b"], "merge": [ids["c"]]}).status_code == 400, "an already merged requirement cannot be the survivor"
+
+
+def test_a_merged_pair_is_no_longer_flagged_as_duplicates_of_each_other(client):
+    pid = client.post("/api/projects", json={"name": "Merge dup", "platform": "generic"}).json()["id"]
+    a = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall export invoices to CSV on request by a user."}).json()["id"]
+    b = client.post("/api/projects/%s/requirements" % pid, json={"statement": "The system shall export invoices to CSV on request by a user!"}).json()["id"]
+    flagged = lambda: {r["key"]: [i["code"] for i in r["issues"]] for r in client.get("/api/projects/%s/requirements" % pid).json()}  # noqa: E731
+    assert "duplicate" in flagged()["REQ-001"] and "duplicate" in flagged()["REQ-002"], "before: each is a possible duplicate of the other"
+    client.post("/api/projects/%s/requirements/merge" % pid, json={"keep": a, "merge": [b]})
+    after = flagged()
+    assert "duplicate" not in after["REQ-001"], "the survivor is not a duplicate of the one that was merged into it"
+    assert "duplicate" not in after["REQ-002"], "and the retired one has nothing to be a duplicate of"
