@@ -33,6 +33,9 @@ with sync_playwright() as p:
     check("1 of 2 – gaps" in row.inner_text(), "the tag shows 2 requirements, 1 covered: %r" % row.inner_text().replace("\n", " ")[:90])
     check(row.locator("a.chip").count() == 2, "and links to both projects")
     check("Compliance" in page.title(), "the tab title says where you are (%s)" % page.title())
+    with page.expect_download() as got:
+        page.get_by_role("button", name="Download CSV").click()
+    check(got.value.url.endswith("/api/compliance.csv"), "the page downloads the same overview as a CSV (%s)" % got.value.url[-24:])
     row.get_by_role("link", name="Corp-Policy-9").first.click()
     page.wait_for_selector("text=Results for")
     check(page.locator("tr", has_text="REQ-001").count() >= 2, "the tag opens a search for everything carrying it")

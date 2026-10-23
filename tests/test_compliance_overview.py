@@ -41,3 +41,17 @@ def test_private_projects_count_only_for_their_members_and_administrators(client
     tags = lambda who: [t["tag"] for t in client.get("/api/compliance", auth=who).json()["tags"]]  # noqa: E731
     assert "HIPAA" in tags(ana) and "HIPAA" in tags(ROOT)
     assert "HIPAA" not in tags(bob), "no hint that the tag exists elsewhere"
+
+
+def test_the_overview_downloads_as_a_csv_one_row_per_tag_and_project(client):
+    import csv
+    import io
+    a = _project(client, "Billing", [("The system shall log every payment attempt.", ["SOX"], "draft")])
+    _project(client, "=Portal", [("The system shall log every portal login.", ["SOX"], "draft")])
+    client.post("/api/projects/%s/stories" % a, json={"title": "Audit payments", "requirement_ids": ["REQ-001"]})
+    r = client.get("/api/compliance.csv")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv") and "compliance" in r.headers["content-disposition"]
+    rows = list(csv.reader(io.StringIO(r.content.decode("utf-8-sig"))))
+    assert rows[0] == ["compliance_tag", "project", "requirements", "covered", "gaps"]
+    got = {(row[0], row[1]): row[2:] for row in rows[1:]}
+    assert got[("SOX", "Billing")] == ["1", "1", "0"] and got[("SOX", "'=Portal")] == ["1", "0", "1"], "spreadsheet formulas in project names are neutralised"

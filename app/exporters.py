@@ -111,6 +111,12 @@ def compliance_csv(stories: List[Item], reqs: List[Item]) -> Output:
     return _csv(COMPLIANCE_HEADER, _compliance_rows(stories, reqs))
 
 
+def compliance_overview_csv(tags: List[Dict[str, Any]]) -> Output:
+    """The cross-project compliance overview: one row per tag and project."""
+    rows = [[t["tag"], p["name"], str(p["requirements"]), str(p["covered"]), str(p["requirements"] - p["covered"])] for t in tags for p in t["projects"]]
+    return _csv(["compliance_tag", "project", "requirements", "covered", "gaps"], rows)
+
+
 def jira_csv(stories: List[Item], reqs: List[Item]) -> Output:
     rows = []
     for s in stories:

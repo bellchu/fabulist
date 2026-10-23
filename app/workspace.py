@@ -213,6 +213,12 @@ def compliance_overview(request: Request):
     return {"tags": list(tags.values())}
 
 
+@router.get("/api/compliance.csv")
+def compliance_overview_download(request: Request):
+    payload, mime = exporters.compliance_overview_csv(compliance_overview(request)["tags"])
+    return Response(payload, media_type=mime, headers={"Content-Disposition": 'attachment; filename="compliance-coverage.csv"'})
+
+
 @router.get("/api/me/assigned")
 def assigned_to_me(request: Request):
     """What is waiting for this person: requirements and stories assigned to them that are still drafts, by project (the projects they may see,
