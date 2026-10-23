@@ -982,6 +982,11 @@ def _project_tags(c, pid: str) -> Dict[str, str]:
     return known
 
 
+def _respell(known: Dict[str, str], tags: List[str]) -> List[str]:
+    """Spell each tag as the project already does (adding new ones to `known`), collapsing tags that differ only in case."""
+    return sorted({known.setdefault(t.lower(), t) for t in tags or []})
+
+
 def _save_item(table: str, pid: str, iid: Optional[str], body: Dict[str, Any], who: str) -> str:
     statuses = STATUSES if table == "requirements" else STORY_STATUSES
     fields = REQ_FIELDS if table == "requirements" else STORY_FIELDS
@@ -1019,7 +1024,7 @@ def _save_item(table: str, pid: str, iid: Optional[str], body: Dict[str, Any], w
     kind = _kind(table)
     with db.conn() as c:
         known = _project_tags(c, pid)
-        item["compliance_tags"] = sorted({known.setdefault(t.lower(), t) for t in item.get("compliance_tags") or []})
+        item["compliance_tags"] = _respell(known, item.get("compliance_tags"))
         if iid:
             changes = history.diff(dict(current, status=old_status), dict(item, status=status))
             if c.execute("UPDATE %s SET data=%%s, status=%%s, rev=rev+1 WHERE id=%%s AND rev=%%s" % table,
@@ -1340,7 +1345,9 @@ def _import_rows(pid: str, rows: List[Dict[str, Any]], who: str, origin: str) ->
         raise HTTPException(400, "Nothing was imported. " + "; ".join(errors[:10]) + ("; and %d more" % (len(errors) - 10) if len(errors) > 10 else ""))
     with db.conn() as c:
         seq = c.execute("SELECT coalesce(max(seq), -1) + 1 AS n FROM requirements WHERE project_id=%s", (pid,)).fetchone()["n"]
+        known = _project_tags(c, pid)
         for item, status in fresh:
+            item["compliance_tags"] = _respell(known, item.get("compliance_tags"))
             new = db.new_id()
             c.execute("INSERT INTO requirements (id, project_id, seq, status, data) VALUES (%s,%s,%s,%s,%s)", (new, pid, seq, status, json.dumps(item)))
             history.record(c, pid, "requirement", new, history.item_key("requirement", seq), "created", who, _label(item))
