@@ -108,6 +108,16 @@ export const api = {
   upload: (p, form) => request("POST", p, form, true),
 };
 
+// Puts text on the clipboard (navigator.clipboard needs HTTPS or localhost; plain-HTTP intranet installs fall back to the legacy command).
+export async function copyText(text) {
+  if (navigator.clipboard) { await navigator.clipboard.writeText(text); return; }
+  const t = h("textarea", { value: text, style: { position: "fixed", opacity: "0" } });
+  document.body.append(t); t.select();
+  const ok = document.execCommand("copy");
+  t.remove();
+  if (!ok) throw new Error("Copy failed: select the address and copy it manually");
+}
+
 // ---- feedback -----------------------------------------------------------
 
 let toastBox;
@@ -198,11 +208,12 @@ export function confirmBox(message, { okLabel = "Confirm", danger = false, title
   });
 }
 
-export function drawer({ title, subtitle, body, footer, onkeydown }) {
+export function drawer({ title, subtitle, body, footer, onkeydown, headExtra = null }) {
   const titleId = "dlg-" + ++layerSeq;
   const panel = h("aside", { class: "drawer", role: "dialog", "aria-modal": "true", "aria-labelledby": titleId, onkeydown },
     h("div", { class: "drawer-head" },
       h("div", { class: "grow" }, subtitle ? h("div", { class: "muted small" }, subtitle) : null, h("h2", { id: titleId }, title)),
+      headExtra,
       h("button", { class: "btn btn-ghost icon-btn", "aria-label": "Close", onclick: () => close() }, icon("x"))),
     h("div", { class: "drawer-body" }, body),
     footer ? h("div", { class: "drawer-foot" }, footer) : null);

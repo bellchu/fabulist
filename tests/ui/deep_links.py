@@ -19,6 +19,7 @@ def check(ok, what):
 with sync_playwright() as p:
     browser = p.chromium.launch()
     ctx = browser.new_context(viewport={"width": 1280, "height": 900}, bypass_csp=True)
+    ctx.grant_permissions(["clipboard-read", "clipboard-write"], origin=BASE)
     pid = ctx.request.post(BASE + "/api/projects", data={"name": "Deep links", "platform": "generic"}, headers=H).json()["id"]
     for i in range(3):
         ctx.request.post(f"{BASE}/api/projects/{pid}/requirements", data={"statement": "The system shall support linkable capability %d for buyers." % i}, headers=H)
@@ -29,8 +30,15 @@ with sync_playwright() as p:
     page.wait_for_selector(".drawer")
     check("capability 1" in page.get_by_label("Statement").input_value(), "an address ending in a requirement's key opens that requirement")
     check(page.evaluate("location.hash") == f"#/p/{pid}/requirements", "and the address goes back to the tab, so saving or closing does not reopen it")
+    page.get_by_role("button", name="Copy link to REQ-002").click()
+    page.wait_for_selector("text=Link to REQ-002 copied")
+    check(page.evaluate("navigator.clipboard.readText()") == f"{BASE}/#/p/{pid}/requirements/REQ-002", "Copy link puts the item's address on the clipboard")
     page.keyboard.press("Escape")
     page.wait_for_selector(".drawer", state="detached")
+
+    page.goto(f"{BASE}/#/p/{pid}/requirements/REQ-999")
+    page.wait_for_function(f"location.hash === '#/p/{pid}/requirements'", timeout=10000)
+    check(page.locator(".drawer").count() == 0, "a key that does not exist just shows the tab (no drawer, and the address is cleaned up)")
 
     page.goto(f"{BASE}/#/p/{pid}/stories/US-001")
     page.wait_for_selector(".drawer")

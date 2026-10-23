@@ -1,7 +1,7 @@
 // Project workspace: Overview, Sources, Requirements, Stories, Traceability, Export.
 import {
   h, mount, icon, api, guard, toast, modal, confirmBox, drawer, badge, statusTone, typeTone, scorePill, meter, issueIcon,
-  issueList, empty, timeAgo, fmt, duration, debounce, field, requireValue, select, linesInput, readLines, tagsInput, segmented, download, historyList, accessPicker,
+  issueList, copyText, empty, timeAgo, fmt, duration, debounce, field, requireValue, select, linesInput, readLines, tagsInput, segmented, download, historyList, accessPicker,
 } from "./core.js";
 import { state, setCrumbs, setTitle } from "./main.js";
 
@@ -678,6 +678,10 @@ async function viewRequirements(body) {
 
 // An address ending in an item's key (#/p/<id>/requirements/REQ-002) opens that item. The address then goes back to the tab, so closing the drawer
 // or saving (which redraws the page) does not open it again.
+// A small "copy link" button for a drawer: the address that opens this very item.
+const copyLinkButton = (tab, key) => h("button", { class: "btn btn-ghost icon-btn", "aria-label": "Copy link to " + key, title: "Copy a link to " + key,
+  onclick: guard(async () => { await copyText(location.origin + "/#/p/" + ctx.pid + "/" + tab + "/" + key); toast("Link to " + key + " copied", "ok"); }) }, icon("link"));
+
 const itemLink = (e) => (e.item_type === "requirement" ? "#/p/" + ctx.pid + "/requirements/" + e.item_key
   : e.item_type === "story" ? "#/p/" + ctx.pid + "/stories/" + e.item_key : null);
 
@@ -731,6 +735,7 @@ function reqDrawer(r, nav) {
   });
   const close = drawer({
     subtitle: isNew ? "New requirement" : r.key + " · " + (r.source_ref || ""), title: isNew ? "Add requirement" : "Review requirement",
+    headExtra: isNew ? null : copyLinkButton("requirements", r.key),
     body: h("div", { class: "stack", oninput: () => { dirty = true; } },
       isNew ? null : h("div", { class: "card card-body" }, h("div", { class: "row", style: { marginBottom: "10px" } }, h("b", { class: "grow" }, "Quality (ISO/IEC/IEEE 29148)"), scorePill(r.quality_score)), issueList(r.issues)),
       h("fieldset", { class: "plain-fieldset stack", disabled: readOnly() },  // a disabled fieldset makes every field below read-only
@@ -1014,6 +1019,7 @@ function storyDrawer(s, nav = storyNav) {
     await api.del(base() + "/stories/" + s.id); close(); nav ? await nav.refresh() : rerender();
   });
   const close = drawer({
+    headExtra: isNew ? null : copyLinkButton("stories", s.key),
     subtitle: isNew ? "New story" : s.key + " · " + s.epic + " › " + s.feature, title: isNew ? "Add story" : s.title,
     body: h("div", { class: "stack", oninput: () => { dirty = true; } },
       (s.external || []).length ? h("div", { class: "row wrap small" }, h("span", { class: "muted" }, "In tracker:"),
