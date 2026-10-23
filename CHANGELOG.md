@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- The Confluence page published from a project also gets the **Compliance coverage** table the stakeholder report has, when tags are in use.
 - The stakeholder HTML report gets a **Compliance coverage** table (each tag, its requirements, how many stories cover them, gaps marked) between the traceability table and the sign-off block, when any requirement carries a tag.
 - The Excel workbook export gains a **Compliance** sheet (the same rows as the compliance matrix CSV) when any requirement carries a tag; projects without tags get the same three sheets as before.
 - **Shift-click selects a run of rows.** In the requirements and stories lists, shift-clicking a checkbox ticks (or clears) every row between it and the last one you clicked, instead of one click per row. The starting row is forgotten when the list is re-sorted or filtered, so a range never lands on rows that moved.
