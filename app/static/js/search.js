@@ -1,4 +1,4 @@
-// Search across every project the person may see: projects by name, requirements and stories by their words.
+// Search across every project the person may see: projects by name, requirements and stories by their words or compliance tag.
 import { h, mount, api, badge, empty, icon, statusTone } from "./core.js";
 import { setCrumbs, setTitle } from "./main.js";
 
@@ -7,7 +7,7 @@ export async function renderSearch(content, q) {
   if (q.trim()) setTitle("“" + q.trim().slice(0, 60) + "”", "Search");  // the query in the tab title and the history entry
   const head = h("div", { class: "page-head" }, h("span", { class: "object-icon project" }, icon("search")),
     h("div", { class: "grow" }, h("div", { class: "object-label" }, "Search"), h("h1", {}, q ? "Results for “" + q + "”" : "Search"),
-      h("p", { class: "sub" }, "Projects by name, requirements and stories by their words, across every project you can open. Archived projects are left out.")));
+      h("p", { class: "sub" }, "Projects by name, requirements and stories by their words or compliance tag, across every project you can open. Archived projects are left out.")));
   if (q.trim().length < 2) {
     mount(content, head, h("div", { class: "card" }, empty({ iconName: "search", title: "Type at least 2 characters", text: "Use the search box at the top of the page." })));
     return;

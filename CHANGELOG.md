@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Copy fix: the search results page said it searched "words" only; it now says compliance tags too.
 - Copy fix: the empty BRD repositories card said "Upload files below" although the upload area is above it.
 - **Fix: the Export tab said "1 stories" and "1 requirements", and its compliance choice stretched across the whole card.** Counts now read "1 story" / "1 requirement", and the dropdown is a normal size (`tests/ui/export_tab.py`).
 - **Fix: Delete sat alone on a second line of the requirement drawer's footer** once Split… was added. The footer's buttons are a little tighter and fit one row in the 640 px drawer (`tests/ui/drawer_footer.py`).
