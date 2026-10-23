@@ -10,7 +10,7 @@ const TABS = [["overview", "Overview"], ["sources", "Sources"], ["requirements",
 const TYPE_COLORS = { business: "#5867e8", functional: "#0176d3", "non-functional": "#dd7a01", constraint: "#ba0517", rule: "#06a59a" };
 
 // Filters survive re-renders within the session.
-const filters = { reqAssignee: "", storyAssignee: "", reqQ: "", reqType: "", reqStatus: "", reqFlagged: false, reqSort: "", reqDir: 1, storySort: "", storyDir: 1, storyQ: "", storyStatus: "", storyView: "map", storyReady: "", traceGaps: false, exportScope: "all" };
+const filters = { reqAssignee: "", storyAssignee: "", reqQ: "", reqType: "", reqTag: "", reqStatus: "", reqFlagged: false, reqSort: "", reqDir: 1, storySort: "", storyDir: 1, storyQ: "", storyStatus: "", storyView: "map", storyReady: "", traceGaps: false, exportScope: "all" };
 let ctx = null;
 let pollTimer = null;
 
@@ -606,12 +606,15 @@ async function viewRequirements(body) {
   const q = h("input", { type: "search", class: "search", placeholder: "Search requirements", "aria-label": "Search requirements", value: filters.reqQ });
   const type = select([["", "All types"], ...state.meta.requirement_types.map((t) => [t, t])], filters.reqType, { "aria-label": "Type" });
   const status = select([["", "All statuses"], ["draft", "Draft"], ["approved", "Approved"], ["excluded", "Excluded"]], filters.reqStatus, { "aria-label": "Status" });
+  const tagNames = [...new Set(reqs.flatMap((r) => r.compliance_tags || []))].sort();
+  if (filters.reqTag && !tagNames.includes(filters.reqTag)) filters.reqTag = "";  // the tag was removed everywhere since the filter was set
+  const tagFilter = tagNames.length ? select([["", "All compliance"], ...tagNames.map((t) => [t, t])], filters.reqTag, { "aria-label": "Compliance tag" }) : null;
   const flagged = h("input", { type: "checkbox", checked: filters.reqFlagged });
 
   const visible = () => reqs.filter((r) =>
     (!filters.reqQ || (r.key + " " + r.statement + " " + r.section).toLowerCase().includes(filters.reqQ.toLowerCase())) &&
     (!filters.reqType || r.type === filters.reqType) && (!filters.reqStatus || r.status === filters.reqStatus) && matchesAssignee(r, filters.reqAssignee) &&
-    (!filters.reqFlagged || r.issues.some((i) => i.severity !== "info")));
+    (!filters.reqTag || (r.compliance_tags || []).includes(filters.reqTag)) && (!filters.reqFlagged || r.issues.some((i) => i.severity !== "info")));
   const sorted = () => {
     const rows = visible(), by = SORTS[filters.reqSort];
     return by ? rows.sort((a, b) => filters.reqDir * by(a, b)) : rows;
@@ -673,11 +676,12 @@ async function viewRequirements(body) {
   q.addEventListener("input", debounce(() => { filters.reqQ = q.value; restart(); }));
   type.addEventListener("change", () => { filters.reqType = type.value; restart(); });
   status.addEventListener("change", () => { filters.reqStatus = status.value; restart(); });
+  if (tagFilter) tagFilter.addEventListener("change", () => { filters.reqTag = tagFilter.value; restart(); });
   flagged.addEventListener("change", () => { filters.reqFlagged = flagged.checked; restart(); });
 
   count.textContent = reqs.filter((r) => r.status === "approved").length + " of " + reqs.length + " approved";
   const who = assigneeFilter(reqs, filters.reqAssignee, (v) => { filters.reqAssignee = v; restart(); });
-  mount(body, h("div", { class: "toolbar" }, q, type, status, who, h("label", { class: "switch small" }, flagged, "Flagged only"), count,
+  mount(body, h("div", { class: "toolbar" }, q, type, status, tagFilter, who, h("label", { class: "switch small" }, flagged, "Flagged only"), count,
     writer(importRequirementsButton()),
     writer(h("button", { class: "btn", onclick: () => reqDrawer(null) }, icon("plus"), "Add requirement"))), bulk, tableBox);
   renderTable();

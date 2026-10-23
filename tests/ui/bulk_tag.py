@@ -33,6 +33,13 @@ with sync_playwright() as p:
     page.wait_for_selector("text=2 requirements updated")
     got = ctx.request.get(f"{BASE}/api/projects/{pid}/requirements").json()
     check(all(r["compliance_tags"] == ["SOX"] for r in got), "both requirements now carry the tag")
+    ctx.request.post(f"{BASE}/api/projects/{pid}/requirements", data={"statement": "The system shall email receipts to buyers."}, headers=H)
+    page.reload()
+    page.wait_for_selector("tr.clickable")
+    check(page.locator("tr.clickable").count() == 3, "three requirements before filtering")
+    page.get_by_label("Compliance tag").select_option("SOX")
+    page.wait_for_function("document.querySelectorAll('tr.clickable').length === 2")
+    check(True, "filtering by the tag leaves the two that carry it")
     for title in ("Export invoices", "Email receipts"):
         ctx.request.post(f"{BASE}/api/projects/{pid}/stories", data={"title": title}, headers=H)
     page.goto(f"{BASE}/#/p/{pid}/stories")
