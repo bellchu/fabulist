@@ -137,3 +137,17 @@ def test_a_blocked_redirect_tells_the_user_what_to_do(tmp_path, monkeypatch):
     monkeypatch.setattr(repos, "_resolve", lambda host: ["93.184.216.34"])
     with pytest.raises(repos.RepoError, match="canonical https URL"):
         repos.fetch("https://git.example.com/old/name.git", "", "", str(tmp_path / "dest"))
+
+
+def test_files_past_the_count_or_size_limit_are_skipped_with_the_reason(tmp_path, monkeypatch):
+    from app import config
+    (tmp_path / "a.md").write_text("# A\nThe system shall do a.")
+    (tmp_path / "b.md").write_text("# B\nThe system shall do b.")
+    (tmp_path / "big.md").write_text("# Big\n" + "x" * 200)
+    monkeypatch.setattr(repos, "MAX_FILES", 1)
+    found, skipped = repos.collect(str(tmp_path), "*")
+    assert list(found) == ["a.md"] and any("b.md: file limit (1) reached" in s for s in skipped)
+    monkeypatch.setattr(repos, "MAX_FILES", 10)
+    monkeypatch.setattr(config, "MAX_UPLOAD_BYTES", 100)
+    found, skipped = repos.collect(str(tmp_path), "*")
+    assert "big.md" not in found and any("big.md: larger than the upload limit" in s for s in skipped)
