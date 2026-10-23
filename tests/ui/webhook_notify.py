@@ -29,6 +29,7 @@ with sync_playwright() as p:
     box.check()
     page.locator(".modal-foot").get_by_role("button", name="Add integration").click()
     page.wait_for_selector("text=Integration saved")
+    check(page.locator(".provider-row", has_text="Chat bridge").get_by_text("Run notifications").count() == 1, "the list shows that this webhook hears about finished runs")
     page.get_by_role("button", name="Edit").first.click()
     page.wait_for_selector(".modal")
     check(page.get_by_label("Also tell this webhook when an AI run finishes", exact=False).is_checked(), "reopened, the choice is still on")
