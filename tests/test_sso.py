@@ -162,3 +162,49 @@ def test_idle_timeout_can_be_disabled_and_legacy_cookies_still_work(client, idp,
     legacy = sso.sign({"u": "ana@example.com", "exp": time.time() + 3600})  # issued before idle tracking existed
     _use(client, legacy)
     assert client.get("/api/me").status_code == 200
+
+
+def test_sso_endpoints_do_not_exist_until_it_is_configured(client):
+    assert client.get("/auth/login", follow_redirects=False).status_code == 404
+    assert client.get("/auth/callback", params={"code": "x", "state": "y"}, follow_redirects=False).status_code == 404
+
+
+def test_an_unreachable_identity_provider_is_a_clear_unavailable_page(client, idp, monkeypatch):
+    def down(url, timeout=None):
+        raise httpx.ConnectError("no route")
+    monkeypatch.setattr(sso.httpx, "get", down)
+    r = client.get("/auth/login", follow_redirects=False)
+    assert r.status_code == 503 and "discovery failed" in r.text
+
+
+def test_a_refusal_from_the_identity_provider_is_shown_and_never_signs_anyone_in(client, idp):
+    r = client.get("/auth/callback", params={"error": "access_denied"}, follow_redirects=False)
+    assert r.status_code == 400 and "access_denied" in r.text
+    assert client.get("/api/me").status_code == 401
+
+
+def test_a_token_reply_without_an_id_token_fails_the_sign_in(client, idp, monkeypatch):
+    def no_token(url, data=None, timeout=None):
+        return httpx.Response(200, json={"access_token": "x"}, request=httpx.Request("POST", url))
+    monkeypatch.setattr(sso.httpx, "post", no_token)
+    r = _sign_in(client, idp, "ana@example.com")
+    assert r.status_code == 400 and "Token exchange failed" in r.text
+    assert client.get("/api/me").status_code == 401
+
+
+def test_a_session_for_a_user_who_was_removed_stops_working(client, idp, monkeypatch):
+    from app import config, db
+    monkeypatch.setattr(config, "OIDC_AUTO_PROVISION_ROLE", "viewer")
+    assert _sign_in(client, idp, "gone@example.com").status_code == 302
+    assert client.get("/api/me").status_code == 200
+    db.execute("DELETE FROM users WHERE username='gone@example.com'")
+    users.forget("gone@example.com")
+    assert client.get("/api/me").status_code == 401
+
+
+def test_sessions_cannot_be_signed_without_any_server_secret(client, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "SETTINGS_KEY", "")
+    monkeypatch.setattr(config, "BASIC_PASSWORD", "")
+    with pytest.raises(sso.SSOError, match="SETTINGS_ENCRYPTION_KEY"):
+        sso.sign({"u": "x"})
