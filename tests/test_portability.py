@@ -185,3 +185,39 @@ def test_every_kind_of_trail_entry_the_app_writes_is_accepted_by_the_importer():
             written.add(m.group(1))
     assert {"project", "document", "run", "baseline", "push", "repository"} <= written, written  # the scan found the calls
     assert written - portability.HISTORY_TYPES == set(), written - portability.HISTORY_TYPES
+
+
+@pytest.mark.parametrize("mutate,message", [
+    (lambda a: a.update(stories="nope"), "stories must be a list"),
+    (lambda a: a["requirements"].__setitem__(0, "not an object"), "requirement 1 is malformed"),
+    (lambda a: a["requirements"][0]["data"].update(statement=""), "has no usable statement"),
+    (lambda a: a["stories"][0]["data"].update(title=""), "has no usable title"),
+    (lambda a: a.update(documents=["not an object"]), "document 1 is malformed"),
+    (lambda a: a["documents"][0].update(filename="   "), "filename must be non-empty"),
+    (lambda a: a["documents"][0].update(filename=5), "filename must be"),
+    (lambda a: a["baselines"][0].update(version=0), "baseline 1 is malformed"),
+    (lambda a: a["baselines"].append(dict(a["baselines"][0])), "duplicate baseline version"),
+    (lambda a: a.update(comments=[{"item_type": "evil"}]), "comment 1 is malformed"),
+])
+def test_more_ways_an_archive_can_be_wrong_each_refused_with_the_reason(client, mutate, message):
+    pid, _, _ = _project_with_everything(client)
+    archive = _export(client, pid)
+    before = len(client.get("/api/projects").json())
+    mutate(archive)
+    r = client.post("/api/projects/import", json=archive)
+    assert r.status_code == 400 and message in r.json()["detail"], r.text
+    assert len(client.get("/api/projects").json()) == before, "a refused archive creates nothing"
+
+
+def test_a_document_that_cannot_be_indexed_still_imports(client, monkeypatch):
+    from app import embeddings
+    pid, _, _ = _project_with_everything(client)
+    archive = _export(client, pid)
+
+    def boom(*a, **k):
+        raise RuntimeError("embedding service down")
+    monkeypatch.setattr(embeddings, "index_document", boom)
+    r = client.post("/api/projects/import", json=archive)
+    assert r.status_code in (200, 201), r.text
+    new = r.json()["id"]
+    assert client.get("/api/projects/%s/documents" % new).json(), "the document text is there; only its search index is missing until re-indexed"
