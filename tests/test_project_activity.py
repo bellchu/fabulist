@@ -17,7 +17,8 @@ def test_a_new_project_is_active_from_its_creation(client):
 
 
 def test_work_moves_it_forward_and_other_projects_stay_put(client):
-    a, b = _project(client, "A"), _project(client, "B")
+    a = _project(client, "A")
+    _project(client, "B")
     before = _listed(client)
     time.sleep(0.05)
     client.post("/api/projects/%s/requirements" % a, json={"statement": "The system shall export invoices to CSV."})
