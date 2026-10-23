@@ -34,7 +34,9 @@ with sync_playwright() as p:
     def open_tab(tab):
         page.goto(f"{BASE}/#/p/{pid}/{tab}")
         page.reload()
-        page.wait_for_timeout(1200)
+        page.wait_for_selector(".tabs")  # the project has loaded; every check here is about what is NOT offered, which would pass on a half-drawn page
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(300)
 
     WRITES = ("Edit", "Add document", "Connect repository", "Re-extract", "Add requirement", "Regenerate", "Estimate with AI", "Add story", "Create baseline")
     api.post(f"{BASE}/api/projects/{pid}/archive", data={}, headers=H)
