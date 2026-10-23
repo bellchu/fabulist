@@ -46,3 +46,15 @@ def test_every_test_the_acceptance_page_names_exists():
     paths = set(re.findall(r"`((?:tests|scripts)/[\w./-]+)`", text))
     assert len(paths) >= 30
     assert [p for p in sorted(paths) if not os.path.exists(os.path.join(REPO, p))] == []
+
+
+def test_every_link_in_the_readme_contents_leads_somewhere():
+    import re
+    text = open(os.path.join(REPO, "README.md")).read()
+    contents = re.search(r"\*\*Contents:\*\*(.*)", text).group(1)
+    slugs = {re.sub(r"[^a-z0-9 -]", "", h.lower()).strip().replace(" ", "-") for h in re.findall(r"^#{2,3} (.+)$", text, re.M)}
+    anchors = re.findall(r"\]\(#([\w-]+)\)", contents)
+    assert len(anchors) >= 12
+    assert [a for a in anchors if a not in slugs] == [], slugs
+    files = re.findall(r"\]\(([\w./-]+\.md)\)", contents)
+    assert [f for f in files if not os.path.exists(os.path.join(REPO, f))] == []
