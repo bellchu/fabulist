@@ -398,14 +398,14 @@ function groupBulk(entries) {
 // Entries about the project itself have no item key: say what they are about ("added document"), except runs, whose action already says "ai run".
 const KIND_NOUN = new Set(["project", "document", "repository"]);
 
-export function historyList(entries, { showItem = false, group = showItem } = {}) {
+export function historyList(entries, { showItem = false, group = showItem, link = null } = {}) {
   if (!entries.length) return h("p", { class: "muted small" }, "No changes recorded yet.");
   return h("div", { class: "stack", style: { gap: "10px" } }, (group ? groupBulk(entries) : entries).map((e) => {
     const fields = Object.entries(e.changes || {});
     return h("div", { class: "row", style: { alignItems: "flex-start" } },
       h("span", { class: "dot", style: { marginTop: "7px", background: e.action === "deleted" ? "var(--red)" : e.action === "created" ? "var(--green)" : "var(--accent)" } }),
       h("div", { class: "grow small" },
-        h("div", {}, h("b", {}, e.actor), " " + e.action + " ", showItem ? (e.item_key ? h("span", { class: "mono" }, e.item_key) : KIND_NOUN.has(e.item_type) ? e.item_type : null) : null,
+        h("div", {}, h("b", {}, e.actor), " " + e.action + " ", showItem ? (e.item_key ? (link && link(e) ? h("a", { class: "mono", href: link(e) }, e.item_key) : h("span", { class: "mono" }, e.item_key)) : KIND_NOUN.has(e.item_type) ? e.item_type : null) : null,
           h("span", { class: "muted" }, " · " + timeAgo(e.created))),
         showItem && e.summary ? h("div", { class: "muted" }, e.summary) : null,
         fields.length ? h("div", { class: "muted" }, fields.map(([k, c], i) => [i ? "; " : "",

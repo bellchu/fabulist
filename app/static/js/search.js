@@ -23,9 +23,9 @@ export async function renderSearch(content, q) {
     none ? h("div", { class: "card" }, empty({ iconName: "search", title: "Nothing found", text: "Try fewer or different words. Projects you cannot open are not searched." })) : null,
     section("Projects", r.projects, (p) => h("tr", {}, h("td", {}, h("a", { href: "#/p/" + p.id }, p.name)), h("td", { class: "muted small" }, p.platform))),
     section("Requirements", r.requirements, (x) => h("tr", {},
-      h("td", { class: "mono nowrap" }, x.key), h("td", { class: "small nowrap" }, where(x, "requirements")),
+      h("td", { class: "mono nowrap" }, h("a", { href: "#/p/" + x.project_id + "/requirements/" + x.key }, x.key)), h("td", { class: "small nowrap" }, where(x, "requirements")),
       h("td", {}, x.statement), h("td", {}, badge(x.status, statusTone[x.status])))),
     section("Stories", r.stories, (x) => h("tr", {},
-      h("td", { class: "mono nowrap" }, x.key), h("td", { class: "small nowrap" }, where(x, "stories")),
+      h("td", { class: "mono nowrap" }, h("a", { href: "#/p/" + x.project_id + "/stories/" + x.key }, x.key)), h("td", { class: "small nowrap" }, where(x, "stories")),
       h("td", {}, x.title), h("td", {}, badge(x.status, statusTone[x.status])))));
 }

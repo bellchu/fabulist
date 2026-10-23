@@ -22,11 +22,11 @@ const readOnly = () => state.me.role === "viewer" || frozen();
 const writer = (el) => (readOnly() ? null : el);
 const base = () => "/api/projects/" + ctx.pid;
 
-export async function renderProject(content, pid, tab) {
+export async function renderProject(content, pid, tab, key = "") {
   clearTimeout(pollTimer);
   const project = await api.get("/api/projects/" + pid);
   if (!content.isConnected) return;  // the user already navigated away: don't touch the new page's breadcrumb
-  ctx = { pid, project, tab };
+  ctx = { pid, project, tab, key };
   setCrumbs({ href: "#/", label: "Projects" }, project.name);
   setTitle((TABS.find(([k]) => k === tab) || TABS[0])[1], project.name);
   const body = h("div");
@@ -332,7 +332,7 @@ async function viewOverview(body) {
     h("div", { class: "card", style: { marginTop: "16px" } }, h("div", { class: "card-head" }, h("h3", {}, "Recent changes"),
       h("span", { class: "muted small" }, "Audit trail of manual edits and reviews"),
       h("button", { class: "btn btn-sm right", title: "Download the complete audit trail as CSV", onclick: () => download(base() + "/history.csv") }, icon("download"), "Export trail")),
-      h("div", { class: "card-body" }, historyList(changes, { showItem: true }))));
+      h("div", { class: "card-body" }, historyList(changes, { showItem: true, link: itemLink }))));
 }
 
 // ---- sources ------------------------------------------------------------
@@ -673,6 +673,21 @@ async function viewRequirements(body) {
     writer(importRequirementsButton()),
     writer(h("button", { class: "btn", onclick: () => reqDrawer(null) }, icon("plus"), "Add requirement"))), bulk, tableBox);
   renderTable();
+  openLinkedItem(reqs, (r) => reqDrawer(r, nav));
+}
+
+// An address ending in an item's key (#/p/<id>/requirements/REQ-002) opens that item. The address then goes back to the tab, so closing the drawer
+// or saving (which redraws the page) does not open it again.
+const itemLink = (e) => (e.item_type === "requirement" ? "#/p/" + ctx.pid + "/requirements/" + e.item_key
+  : e.item_type === "story" ? "#/p/" + ctx.pid + "/stories/" + e.item_key : null);
+
+function openLinkedItem(items, open) {
+  const key = ctx.key;
+  if (!key) return;
+  ctx.key = "";
+  history.replaceState(null, "", "#/p/" + ctx.pid + "/" + ctx.tab);
+  const item = items.find((x) => x.key === key);
+  if (item) open(item);
 }
 
 function reqDrawer(r, nav) {
@@ -838,6 +853,7 @@ async function viewStories(body) {
     writer(importFileButton("story")),
     writer(h("button", { class: "btn", onclick: () => storyDrawer(null) }, icon("plus"), "Add story"))), bulk, box);
   render();
+  openLinkedItem(stories, (s) => storyDrawer(s));
 }
 
 async function estimateDialog() {
@@ -1082,7 +1098,7 @@ async function viewAudit(body) {
     if (rows.length) q.set("before", rows[rows.length - 1].n);
     const page = await api.get(base() + "/history?" + q);
     rows = rows.concat(page);
-    list.replaceChildren(historyList(rows, { showItem: true, group: false }));
+    list.replaceChildren(historyList(rows, { showItem: true, group: false, link: itemLink }));
     const last = page.length < AUDIT_PAGE;
     more.style.display = last ? "none" : "";  // `hidden` loses to .btn's display rule
     status.textContent = rows.length + " entr" + (rows.length === 1 ? "y" : "ies") + (last ? "" : " shown");

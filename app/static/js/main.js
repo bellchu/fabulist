@@ -133,7 +133,7 @@ async function route() {
     } else await refreshProjects();
     if (ticket !== rendering) return;
     const content = shell(parts);
-    if (parts[0] === "p" && parts[1]) await renderProject(content, parts[1], parts[2] || "overview");
+    if (parts[0] === "p" && parts[1]) await renderProject(content, parts[1], parts[2] || "overview", decodeURIComponent(parts[3] || ""));
     else if (parts[0] === "admin" && state.me.role === "admin") await renderAdmin(content, parts[1] || "overview");
     else if (parts[0] === "account") await renderAccount(content);
     else if (parts[0] === "search") await renderSearch(content, decodeURIComponent(parts.slice(1).join("/")));
