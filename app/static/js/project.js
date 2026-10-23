@@ -630,7 +630,7 @@ async function viewRequirements(body) {
     ...[["approved", "Approve"], ["draft", "Mark draft"], ["excluded", "Exclude"]].map(([s, l]) =>
       h("button", { class: "btn btn-sm", onclick: guard(async () => {
         if (selected.size >= BULK_CONFIRM_AT && !(await confirmBox(l + " " + selected.size + " requirements?", { okLabel: l, danger: s === "excluded" }))) return;
-        await api.post(base() + "/requirements/bulk", { ids: [...selected], status: s }); toast(l + ": " + selected.size, "ok"); selected.clear(); await refresh();
+        await postInBatches(base() + "/requirements/bulk", { ids: [...selected], status: s }); toast(l + ": " + selected.size, "ok"); selected.clear(); await refresh();
       }) }, l)),
     bulkAssign("requirement", selected, refresh),
     bulkSet("requirement", selected, refresh),
@@ -733,7 +733,7 @@ function bulkAssign(kind, selected, refresh) {
     title: "Assign " + selected.size + " " + (selected.size === 1 ? kind : plural), description: "Everything selected goes to the same person. Choose Unassigned to clear it.",
     body: field("Assignee", who.el),
     actions: [{ label: "Assign", kind: "btn-primary", onClick: async () => {
-      const r = await api.post(base() + "/" + plural + "/assign", { ids: [...selected], assignee: who.value() });
+      const r = await postInBatches(base() + "/" + plural + "/assign", { ids: [...selected], assignee: who.value() });
       toast(r.updated + " " + (r.updated === 1 ? kind : plural) + " updated", "ok"); selected.clear(); await refresh();
     } }],
   }) }, "Assign…");
@@ -759,10 +759,22 @@ function bulkSet(kind, selected, refresh) {
     title: "Change " + selected.size + " " + (selected.size === 1 ? kind : plural), description: "Everything selected gets the same value; each change is recorded in the audit trail.",
     body: h("div", { class: "stack" }, field("Field", which), field("Value", holder)),
     actions: [{ label: "Apply", kind: "btn-primary", onClick: async () => {
-      const r = await api.post(base() + "/" + plural + "/set", { ids: [...selected], field: which.value, value: value.value });
+      const r = await postInBatches(base() + "/" + plural + "/set", { ids: [...selected], field: which.value, value: value.value });
       toast(r.updated + " " + (r.updated === 1 ? kind : plural) + " updated", "ok"); selected.clear(); await refresh();
     } }],
   }) }, "Set…");
+}
+
+// One request carries at most 2,000 ids; "select all matching" in a big project can be more. Send them in batches and add up what was changed
+// (a batch that fails stops the rest; the ones already applied stay, and running the action again is harmless).
+const BULK_BATCH = 2000;
+async function postInBatches(path, body) {
+  const total = { updated: 0 };
+  for (let i = 0; i < body.ids.length; i += BULK_BATCH) {
+    const r = await api.post(path, { ...body, ids: body.ids.slice(i, i + BULK_BATCH) });
+    total.updated += r.updated || 0;
+  }
+  return total;
 }
 
 // "Tag…" in the bulk bars: add a compliance tag to everything selected (requirements or stories), or take it off.
@@ -776,7 +788,7 @@ function bulkTag(kind, items, selected, refresh) {
     title: "Tag " + selected.size + " " + (selected.size === 1 ? kind : plural), description: "Each change is recorded in the audit trail.",
     body: h("div", { class: "stack" }, field("Action", mode), field("Compliance tag", tag), options),
     actions: [{ label: "Apply", kind: "btn-primary", onClick: async () => {
-      const r = await api.post(base() + "/" + plural + "/tag", { ids: [...selected], tag: tag.value, remove: mode.value === "remove" });
+      const r = await postInBatches(base() + "/" + plural + "/tag", { ids: [...selected], tag: tag.value, remove: mode.value === "remove" });
       toast(r.updated + " " + (r.updated === 1 ? kind : plural) + " updated", "ok"); selected.clear(); await refresh();
     } }],
   }) }, "Tag…");
@@ -972,7 +984,7 @@ async function viewStories(body) {
     ...[["approved", "Approve"], ["draft", "Mark draft"], ["rejected", "Reject"]].map(([st, l]) =>
       h("button", { class: "btn btn-sm", onclick: guard(async () => {
         if (selected.size >= BULK_CONFIRM_AT && !(await confirmBox(l + " " + selected.size + " stories?", { okLabel: l, danger: st === "rejected" }))) return;
-        await api.post(base() + "/stories/bulk", { ids: [...selected], status: st }); toast(l + ": " + selected.size, "ok"); selected.clear(); await refresh();
+        await postInBatches(base() + "/stories/bulk", { ids: [...selected], status: st }); toast(l + ": " + selected.size, "ok"); selected.clear(); await refresh();
       }) }, l)),
     bulkAssign("story", selected, refresh),
     bulkSet("story", selected, refresh),
