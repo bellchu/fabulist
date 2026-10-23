@@ -35,6 +35,8 @@ Large inputs are incremental: `documents` = all / new / reset and `stories_for` 
 - **Strict CSP, no build step.** `script-src 'self'`, no inline script, no CDN: the UI works on locked-down networks and the API reference is served by the app itself.
 - **Authorization on the server, deny by default.** Roles (admin, analyst, viewer) are checked per route in one place; the UI hides what you cannot do but is never the control. Tests assert every admin and token write route records an audit entry and every route group honours private projects.
 - **Audit entries never hold secrets.** Settings changes store old and new values (none are secret); passwords and keys are recorded only as "changed".
+- **Bulk edits are ordinary edits, many at a time.** Tag, set, assign, merge, split and rename change items through the same revision counter and write one audit entry per changed item; a refused call (viewer, archived project) changes nothing. One request carries at most 2,000 ids, so the browser sends larger selections in batches (a failed batch stops the rest; repeating the action is harmless).
+- **One spelling per compliance tag.** Reports, filters, coverage and the compliance matrix group by exact text, so every write path (saving an item, importing, a run that adds to what exists, bulk tagging) respells a tag as the project already writes it; renaming a tag across a project is the clean-up for older data.
 - **Offline AI provider for tests and load tests**, so the whole battery runs without cost or network.
 
 ## Trust boundaries

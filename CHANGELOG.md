@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- `docs/ARCHITECTURE.md` records two design decisions made over this stretch: bulk edits are ordinary audited edits sent in batches, and compliance tags keep one spelling per project.
 - `COVERAGE=1 scripts/ci-k8s.sh` measures test coverage of `app/` on the cluster and lists the files below 100% (coverage.py 7.6.10, installed only for that run). Measured today: 96% overall, `workspace.py` 97%.
 - Copy fix: the search results page said it searched "words" only; it now says compliance tags too.
 - Copy fix: the empty BRD repositories card said "Upload files below" although the upload area is above it.
