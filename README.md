@@ -32,6 +32,12 @@ IDs → human review → epics, features and stories → requirements traceabili
    2,000 rows; see `samples/requirements-import.csv`): a column called Requirement or Statement is needed, and
    Type, Epic, Section, Source ID, Actors and Status are used when present. Everything is checked first, repeats
    are skipped, and Fabulist's own Requirements export imports back.
+   Tick several rows to work on them together: approve, exclude, **Assign…**, **Set…** (epic, section or type for
+   requirements; epic, feature or priority for stories), **Tag…** (add or remove a compliance tag; the project's own
+   spelling is reused) and, for requirements, **Merge…** (fold duplicates into the one you keep; the others are
+   excluded with a pointer, never deleted). **Split…** in a requirement's drawer divides one that says several things.
+   The list filters by compliance tag, and the project overview shows each tag's coverage by stories. Press `?` for the
+   keyboard shortcuts.
 3. **Stories**: approved requirements become epics → features → user stories with Gherkin
    acceptance criteria, product-class variants and compliance tags. Each story is scored
    against INVEST and a Definition of Ready, and is shown on a story map or a list.
