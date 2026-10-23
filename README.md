@@ -20,7 +20,7 @@ IDs → human review → epics, features and stories → requirements traceabili
    Postgres/pgvector for semantic search and retrieval-augmented generation. **Ask the BRDs**
    answers questions from retrieved passages only, with numbered citations.
    The search box at the top finds projects by name and, across every project you can open, requirements and
-   stories by their words (`GET /api/search`); archived projects and private projects you are not part of are
+   stories by their words or compliance tag (`GET /api/search`; searching SOX lists everything tagged SOX); archived projects and private projects you are not part of are
    left out.
 2. **Requirements**: the AI engine extracts atomic requirements (business, functional,
    non-functional, constraint, rule), keeping BRD IDs and source references. Each one is
