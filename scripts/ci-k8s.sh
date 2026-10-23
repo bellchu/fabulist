@@ -41,9 +41,12 @@ kubectl -n "$NS" exec ci -c db -- psql -q -h 127.0.0.1 -U fabulist -d fabulist_t
 git ls-files -z --cached --others --exclude-standard | COPYFILE_DISABLE=1 tar --null -T - -cf - | kubectl -n "$NS" exec -i ci -c py -- tar -xf - -C /src
 echo "== lint + tests"
 # PYTEST_ARGS narrows the run (e.g. "tests/test_api.py -k stuck"); REPEAT=N runs it N times, to chase a test that fails now and then.
+# COVERAGE=1 measures which lines of app/ the tests run and prints the files below 100% (coverage.py, installed only for that run).
+if [ -n "${COVERAGE:-}" ]; then PYTEST="python -m coverage run --source=app -m pytest"; EXTRA="pip install -q --root-user-action=ignore coverage==7.6.10 &&"; REPORT="&& python -m coverage report --skip-covered --sort=cover"
+else PYTEST="python -m pytest"; EXTRA=""; REPORT=""; fi
 kubectl -n "$NS" exec ci -c py -- sh -c \
-  "apt-get update -qq >/dev/null && apt-get install -y -qq git >/dev/null && pip install -q --root-user-action=ignore -r requirements-dev.txt \
-   && python -m pyflakes app tests && for i in \$(seq 1 ${REPEAT:-1}); do python -m pytest -q -p no:cacheprovider ${PYTEST_ARGS:-} || exit 1; done"
+  "apt-get update -qq >/dev/null && apt-get install -y -qq git >/dev/null && pip install -q --root-user-action=ignore -r requirements-dev.txt && $EXTRA \
+   python -m pyflakes app tests && for i in \$(seq 1 ${REPEAT:-1}); do $PYTEST -q -p no:cacheprovider ${PYTEST_ARGS:-} || exit 1; done $REPORT"
 echo "== frontend"
 kubectl -n "$NS" exec ci -c node -- sh -c \
   'set -e; mkdir /t; for f in app/static/js/*.js; do cp "$f" "/t/$(basename "$f" .js).mjs"; done; for f in /t/*.mjs; do node --check "$f"; done; echo "js ok"'
