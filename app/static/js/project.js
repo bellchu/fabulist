@@ -391,6 +391,7 @@ async function viewSources(body) {
       const fd = new FormData(); fd.append("file", f);
       const r = await api.upload(base() + "/documents", fd);
       toast("Added " + r.filename + " (" + r.indexed_chunks + " passages indexed)", "ok");
+      if (r.index_error) toast(r.filename + " is stored but not searchable yet: " + r.index_error + " Rebuild the search index in Admin > Generation settings once the provider works.", "error");
     }
     rerender();
   });
@@ -463,7 +464,8 @@ async function viewSources(body) {
         h("div", { class: "card-body stack" }, field("Document name", pasteName), pasteText,
           h("div", {}, h("button", { class: "btn", onclick: guard(async () => {
             requireValue(pasteText, "Paste some text first");
-            await api.post(base() + "/documents/text", { name: pasteName.value, text: pasteText.value });
+            const added = await api.post(base() + "/documents/text", { name: pasteName.value, text: pasteText.value });
+            if (added.index_error) toast(added.filename + " is stored but not searchable yet: " + added.index_error + " Rebuild the search index in Admin > Generation settings once the provider works.", "error");
             toast("Document added", "ok"); rerender();
           }) }, icon("plus"), "Add document")))))),
     reposCard(repoList),
