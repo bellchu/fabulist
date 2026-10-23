@@ -30,5 +30,8 @@ with sync_playwright() as p:
     page.keyboard.press("Escape")
     page.wait_for_function("!document.querySelector('.modal')")
     check(True, "Esc closes it")
+    page.get_by_role("button", name="Keyboard shortcuts").click()
+    page.wait_for_selector(".modal")
+    check(page.get_by_role("heading", name="Keyboard shortcuts").count() == 1, "the footer link opens the same list, for people without a keyboard shortcut habit")
     browser.close()
 sys.exit(1 if failures else 0)

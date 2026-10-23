@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- The page footer has a **Keyboard shortcuts** link that opens the same list as pressing `?`, so the list can be found without knowing the key.
 - **Cluster scripts sweep up after dropped runs.** When the SSH tunnel drops mid-run the script cannot delete its temporary namespace, and its pods sat there for hours (three were found, the oldest 26 h). Every cluster script now first deletes its predecessors' run namespaces (`fabulist-ci|ui|load|drill|sbom|scan|py|smoke-<epoch>-<pid>`) older than three hours (`STALE_NAMESPACE_SECONDS`); production and the image-build namespaces are never touched.
 - The compliance field in a requirement's or story's drawer now suggests the tags the project already uses, next to the built-in ones, so a custom tag is picked from the list instead of retyped.
 - **Toolbar actions wrap together.** With the compliance filter (and the assignee filter once accounts exist) the stories toolbar is too wide for one line at laptop width, and **Add story** had wrapped onto a line of its own. The count and the action buttons are now one group, so a wrapped toolbar keeps them side by side (`tests/ui/toolbar_fits.py`); the requirements toolbar does the same.
