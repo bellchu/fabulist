@@ -626,6 +626,7 @@ async function viewRequirements(body) {
       }) }, l)),
     bulkAssign("requirement", selected, refresh),
     bulkSet("requirement", selected, refresh),
+    selected.size >= 2 ? bulkMerge(reqs, selected, refresh) : null,
     h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); renderTable(); renderBulk(); } }, "Clear"))] : []));
 
   let limit = PAGE;
@@ -751,6 +752,23 @@ function bulkSet(kind, selected, refresh) {
       toast(r.updated + " " + (r.updated === 1 ? kind : plural) + " updated", "ok"); selected.clear(); await refresh();
     } }],
   }) }, "Set…");
+}
+
+// "Merge…" in the requirements bulk bar (two or more selected): pick the one to keep; the others are retired into it.
+function bulkMerge(reqs, selected, refresh) {
+  const chosen = reqs.filter((r) => selected.has(r.id));
+  let keep = chosen[0].id;
+  const options = chosen.map((r, i) => h("label", { class: "row small", style: { alignItems: "flex-start", gap: "8px" } },
+    h("input", { type: "radio", name: "keep", value: r.id, checked: i === 0, onchange: () => { keep = r.id; } }),
+    h("span", {}, h("b", {}, r.key), " " + r.statement.slice(0, 140))));
+  return h("button", { class: "btn btn-sm", title: "Merge duplicates into one requirement", onclick: () => modal({
+    title: "Merge " + chosen.length + " requirements", description: "The one you keep gains where each was stated, the actors, product scope and compliance tags of the others; the others are excluded with a pointer to it, and stories that used them point at the one you keep.",
+    body: h("fieldset", { class: "plain-fieldset stack" }, h("legend", { class: "small muted" }, "Keep"), ...options),
+    actions: [{ label: "Merge", kind: "btn-primary", onClick: async () => {
+      const r = await api.post(base() + "/requirements/merge", { keep, merge: chosen.map((x) => x.id).filter((id) => id !== keep) });
+      toast("Merged " + r.merged.join(", ") + " into " + r.kept + (r.stories_relinked ? " (" + r.stories_relinked + " stories re-linked)" : ""), "ok"); selected.clear(); await refresh();
+    } }],
+  }) }, "Merge…");
 }
 
 const matchesAssignee = (item, want) => !want || (want === "none" ? !item.assignee : (want === "me" ? state.me.username : want) === item.assignee);
