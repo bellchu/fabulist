@@ -51,10 +51,15 @@ IDs → human review → epics, features and stories → requirements traceabili
    Projects are **archived** rather than deleted: an archived project leaves the list, becomes read-only
    (reads, search and Ask still work) and keeps its audit trail. Only an administrator can delete an
    archived project permanently.
-6. **Review discussions**: comment threads on requirements and stories, with resolve/reopen and
+6. **Dividing the review**: requirements and stories can be assigned to a person (a picker of the named accounts, or free text on an
+   installation without accounts; **Assign…** does many at once). Each list filters by assignee, the project list opens with **Waiting for you** for
+   the draft items assigned to you across projects, and an optional webhook subscription (`item.assigned`) lets a chat bridge tell the person.
+   Every requirement and story has an address (`#/p/<project>/requirements/REQ-002`) that opens it: the keys in search results and the audit trail
+   are links, and the drawers have a **Copy link** button.
+7. **Review discussions**: comment threads on requirements and stories, with resolve/reopen and
    open-discussion badges. Viewers (business reviewers) can comment without edit rights.
    Editing is concurrency-safe: each requirement and story carries a revision. If two people open the same item and the first saves, the second is told it changed (their text stays in the editor) instead of silently overwriting. API clients can send `rev` for the same protection; without it a save always applies.
-7. **Audit trail**: every manual edit, review decision, deletion, sync and AI run is recorded
+8. **Audit trail**: every manual edit, review decision, deletion, sync and AI run is recorded
    with who, when and field-level changes. The project's **Audit** tab lets reviewers filter by action and user and page through the whole trail; it also exports as CSV (oldest first).
    **Portability**: *Project settings > Download archive* exports a whole project (documents, requirements, stories with
    their keys, statuses and order, baselines, comments and the audit history) as one versioned JSON file, and the
@@ -62,7 +67,7 @@ IDs → human review → epics, features and stories → requirements traceabili
    *(imported)*). Imported items go through the same validation as manual edits, nothing is written unless the whole file
    is valid, and the audit trail gets an *imported* entry stating that the earlier entries come from the archive and are
    not verified here. AI run logs, repository connections and tracker links stay behind (they belong to the installation).
-8. **Export**: a stakeholder HTML report (preview in the browser, print to PDF; it states when it was generated and its scope, shows a status breakdown, has page numbers and repeating table headers, and ends with a review-and-approval block; baseline exports also state the version and who froze it), Excel (stories, requirements, RTM sheets), Jira CSV, Azure DevOps CSV,
+9. **Export**: a stakeholder HTML report (preview in the browser, print to PDF; it states when it was generated and its scope, shows a status breakdown, has page numbers and repeating table headers, and ends with a review-and-approval block; baseline exports also state the version and who froze it), Excel (stories, requirements, RTM sheets), Jira CSV, Azure DevOps CSV,
    Markdown, CSV, JSON and Gherkin `.feature` test scenarios (tagged with story, requirement and
    compliance IDs for end-to-end traceability), or push directly to **Jira**, **Azure DevOps** or **GitHub Issues**, publish a **Confluence** page,
    or to any system through a signed JSON **webhook**. Tracker pushes are
