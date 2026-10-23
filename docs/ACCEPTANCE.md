@@ -24,6 +24,7 @@ What a business owner or a security reviewer can check before rollout, and which
 | 17 | Accessible to everyone | No serious WCAG A/AA problems in light, dark or forced colours; keyboard-only use; screen readers hear navigation | `tests/ui/a11y.py`, `tests/ui/keyboard.py`, `tests/ui/forced_colors.py`, `tests/ui/page_titles.py`, `scripts/live-smoke-k8s.sh` |
 | 18 | Operators can see and be alerted | Metrics, dashboards, alerts with runbook rows, request ids for support | `tests/test_monitoring.py`, `tests/test_request_ids.py`, `tests/test_admin_system.py` |
 | 19 | Supply chain | Pinned dependencies, weekly updates, image scan before every deploy, bill of materials | `tests/test_deploy_guard.py`, `scripts/scan-image-k8s.sh`, `scripts/sbom-k8s.sh` |
+| 20 | Reorganise a backlog without opening every item | Change, tag, assign, merge or split many requirements at once; tags keep one spelling; compliance coverage is visible and exportable; every change is in the audit trail | `tests/test_bulk_tag.py`, `tests/test_merge_requirements.py`, `tests/test_split_requirement.py`, `tests/test_compliance_summary.py`, `tests/test_tag_spelling.py`, `tests/ui/bulk_tag.py`, `tests/ui/merge_requirements.py`, `tests/ui/split_requirement.py`, `tests/ui/a11y_bulk_tools.py` |
 
 ## What is not covered
 
