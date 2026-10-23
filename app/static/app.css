@@ -203,7 +203,7 @@ table.table { width: 100%; border-collapse: collapse; background: var(--surface)
 
 /* ---- toolbar ---- */
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
-.toolbar .search { max-width: 260px; }
+.toolbar .search { max-width: 170px; }
 .toolbar select { width: auto; }
 .bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 12px; border-radius: var(--radius); background: var(--accent-soft); color: var(--accent-text); margin-bottom: 12px; border: 1px solid #aacbff; box-shadow: var(--shadow); }
 .bulk-sticky { position: sticky; top: calc(var(--header-h) + var(--nav-h) + 8px); z-index: 8; }  /* stays reachable while scrolling a long list */
