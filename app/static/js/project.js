@@ -664,7 +664,7 @@ async function viewRequirements(body) {
         h("td", { class: "statement" }, r.statement,
           r.issues.length ? h("div", { class: "issues" }, r.issues.map((i) => h("span", { class: "chip", title: i.message }, issueIcon(i.severity), i.code))) : null),
         h("td", { class: "small muted hide-sm" }, r.section,
-          r.compliance_tags?.length ? h("div", { class: "row", style: { flexWrap: "wrap", gap: "4px", marginTop: "4px" } }, r.compliance_tags.map((t) => badge(t, "gray"))) : null),
+          r.compliance_tags?.length ? h("div", { class: "row", style: { flexWrap: "wrap", gap: "4px", marginTop: "4px" } }, r.compliance_tags.map((t) => badge(t))) : null),
         h("td", { class: "hide-sm" }, scorePill(r.quality_score)),
         h("td", {}, h("div", { class: "row", style: { flexWrap: "wrap" } }, badge(r.status, statusTone[r.status]), talkBadge(talk[r.id])), r.assignee ? h("div", { class: "small muted" }, "→ " + r.assignee) : null)))
         : h("tr", {}, h("td", { colspan: "7", class: "muted", style: { textAlign: "center", padding: "28px" } }, "No requirements match the filters.")),
@@ -1105,7 +1105,8 @@ function storyTable(rows, redraw, pick) {
           changed();
         } }))),
       h("td", { class: "mono nowrap" }, rowOpener(s.key)),
-      h("td", {}, h("b", {}, s.title), h("div", { class: "small muted" }, s.persona)),
+      h("td", {}, h("b", {}, s.title), h("div", { class: "small muted" }, s.persona),
+        s.compliance_tags?.length ? h("div", { class: "row", style: { flexWrap: "wrap", gap: "4px", marginTop: "4px" } }, s.compliance_tags.map((t) => badge(t))) : null),
       h("td", { class: "small hide-sm" }, s.epic, h("div", { class: "muted" }, s.feature)),
       h("td", { class: "nowrap hide-sm" }, h("span", { class: "row" }, h("span", { class: "dot " + s.priority }), s.priority)),
       h("td", { class: "hide-sm" }, s.story_points || "–"),

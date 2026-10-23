@@ -67,6 +67,7 @@ with sync_playwright() as p:
     page.get_by_role("button", name="List").click()
     page.wait_for_selector("tr.clickable")
     check(page.locator("tr.clickable").count() == 3, "three stories before filtering")
+    check(page.locator("tr", has_text="Export invoices").locator(".badge", has_text="GDPR").count() == 1, "the stories list shows a story's compliance tags")
     page.get_by_label("Compliance tag").select_option("GDPR")
     page.wait_for_function("document.querySelectorAll('tr.clickable').length === 2")
     check(True, "filtering stories by the tag leaves the two that carry it")
