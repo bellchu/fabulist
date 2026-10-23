@@ -36,3 +36,12 @@ def test_a_blank_tag_is_refused_and_other_projects_are_untouched(client):
     other, other_ids = _setup(client)
     client.post("/api/projects/%s/requirements/tag" % pid, json={"ids": other_ids, "tag": "HIPAA"})
     assert "HIPAA" not in sum(_tags(client, other).values(), []), "ids from another project are ignored"
+
+
+def test_stories_can_be_tagged_in_bulk_too(client):
+    pid = client.post("/api/projects", json={"name": "Story tags", "platform": "generic"}).json()["id"]
+    ids = [client.post("/api/projects/%s/stories" % pid, json={"title": t}).json()["id"] for t in ("Export invoices", "Email receipts")]
+    assert client.post("/api/projects/%s/stories/tag" % pid, json={"ids": ids, "tag": "SOX"}).json() == {"updated": 2}
+    assert client.post("/api/projects/%s/stories/tag" % pid, json={"ids": ids[:1], "tag": "SOX", "remove": True}).json() == {"updated": 1}
+    tags = {s["title"]: s["compliance_tags"] for s in client.get("/api/projects/%s/stories" % pid).json()}
+    assert tags == {"Export invoices": [], "Email receipts": ["SOX"]}
