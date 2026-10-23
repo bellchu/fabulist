@@ -281,7 +281,7 @@ Measured on the cluster with `scripts/load-test-k8s.sh` (offline AI provider, on
 | 20 requesters uploading a 6 MB Word file at the same moment | all stored in about 40 s (two are read at a time); memory peak 580-640 MiB (measured over several releases; it grew with the extra audit and ownership bookkeeping, still under the 1 GiB the test uses) |
 | one project with 1,100 BRDs (up to 165 MB of text) | storing 85 BRDs/s; listing documents 0.04 s; passage search 10 ms; project export streams in 0.3 s with a 210 MiB peak; read into requirements in 44 batched runs |
 | 6 runs of 46 sections against an AI provider that fails 25% of requests (rate limits, server errors, non-JSON replies) | all 6 finish; with three quick attempts per request only 4 did, and a run of hundreds of sections would almost never finish |
-| 300 projects | home list, project summary, metrics scrape and admin overview about 10 ms each (home list 0.23 s with the activity column) |
+| 300 projects | home list, project summary, metrics scrape and admin overview about 10-20 ms each (the home list, with its activity column, 20 ms) |
 | search across projects (`GET /api/search`) with 50,600 requirements | 0.08 s for a common word, 0.07 s when nothing matches (every requirement read); no index needed at this size |
 | one project with 50,600 requirements | no crash (it ran the pod out of memory before near-duplicate detection was bounded); 3-5 s per heavy call, 372 MiB peak |
 
