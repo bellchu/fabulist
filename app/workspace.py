@@ -972,6 +972,16 @@ def _check_assignee(name: str) -> None:
         raise HTTPException(400, "Unknown person: %s. Choose someone from the list of accounts." % name)
 
 
+def _project_tags(c, pid: str) -> Dict[str, str]:
+    """Lower-cased -> spelling of every compliance tag in use in the project (requirements and stories): one spelling per tag."""
+    known: Dict[str, str] = {}
+    for table in ("requirements", "stories"):
+        for r in c.execute("SELECT data->'compliance_tags' AS tags FROM %s WHERE project_id=%%s" % table, (pid,)).fetchall():
+            for t in r["tags"] or []:
+                known.setdefault(t.lower(), t)
+    return known
+
+
 def _save_item(table: str, pid: str, iid: Optional[str], body: Dict[str, Any], who: str) -> str:
     statuses = STATUSES if table == "requirements" else STORY_STATUSES
     fields = REQ_FIELDS if table == "requirements" else STORY_FIELDS
@@ -1008,6 +1018,8 @@ def _save_item(table: str, pid: str, iid: Optional[str], body: Dict[str, Any], w
         _check_assignee(item["assignee"])
     kind = _kind(table)
     with db.conn() as c:
+        known = _project_tags(c, pid)
+        item["compliance_tags"] = sorted({known.setdefault(t.lower(), t) for t in item.get("compliance_tags") or []})
         if iid:
             changes = history.diff(dict(current, status=old_status), dict(item, status=status))
             if c.execute("UPDATE %s SET data=%%s, status=%%s, rev=rev+1 WHERE id=%%s AND rev=%%s" % table,
@@ -1419,8 +1431,7 @@ def _bulk_tag(table: str, pid: str, body: TagIn, who: str) -> Dict[str, int]:
     updated = 0
     with db.conn() as c:
         # One spelling per tag: typing "sox" reuses the "SOX" already in the project, so filters and the compliance matrix do not split it in two.
-        known = {t.lower(): t for r in c.execute("SELECT data->'compliance_tags' AS tags FROM %s WHERE project_id=%%s" % table, (pid,)).fetchall() for t in r["tags"] or []}
-        tag = known.get(tag.lower(), tag)
+        tag = _project_tags(c, pid).get(tag.lower(), tag)
         for r in c.execute("SELECT id, seq, data FROM %s WHERE project_id=%%s AND id = ANY(%%s) FOR UPDATE" % table, (pid, body.ids)).fetchall():
             old = r["data"].get("compliance_tags") or []
             new = [t for t in old if t.lower() != tag.lower()] if body.remove else list(dict.fromkeys(old + [tag]))
