@@ -42,7 +42,7 @@ git ls-files -z --cached --others --exclude-standard | COPYFILE_DISABLE=1 tar --
 echo "== lint + tests"
 # PYTEST_ARGS narrows the run (e.g. "tests/test_api.py -k stuck"); REPEAT=N runs it N times, to chase a test that fails now and then.
 # COVERAGE=1 measures which lines of app/ the tests run and prints the files below 100% (coverage.py, installed only for that run).
-if [ -n "${COVERAGE:-}" ]; then PYTEST="python -m coverage run --source=app -m pytest"; EXTRA="pip install -q --root-user-action=ignore coverage==7.6.10 &&"; REPORT="&& python -m coverage report --skip-covered --sort=cover"
+if [ -n "${COVERAGE:-}" ]; then PYTEST="python -m coverage run --source=app -m pytest"; EXTRA="pip install -q --root-user-action=ignore coverage==7.6.10 &&"; REPORT="&& python -m coverage report --skip-covered --show-missing --sort=cover"
 else PYTEST="python -m pytest"; EXTRA=""; REPORT=""; fi
 kubectl -n "$NS" exec ci -c py -- sh -c \
   "apt-get update -qq >/dev/null && apt-get install -y -qq git >/dev/null && pip install -q --root-user-action=ignore -r requirements-dev.txt && $EXTRA \
