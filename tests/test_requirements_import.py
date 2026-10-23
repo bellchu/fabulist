@@ -163,3 +163,16 @@ def test_hostile_files_are_contained(client):
     assert _import(client, pid, wide).json()["created"] == 1
     # a non-string csv value does not crash the endpoint
     assert client.post("/api/projects/%s/requirements/import" % pid, json={"csv": 12345}).status_code == 400
+
+
+def test_every_field_of_the_requirements_export_survives_the_round_trip(client):
+    a = _project(client, "Rich source")
+    client.post("/api/projects/%s/requirements" % a, json={
+        "statement": "The system shall export invoices to CSV on request.", "type": "functional", "epic": "Billing", "section": "Invoices", "source_id": "BR-9",
+        "source_ref": "BRD 1 > Billing", "actors": ["Buyer", "Accountant"], "product_scope": ["Devices", "Software"], "compliance_tags": ["SOX", "PCI-DSS"], "status": "approved"})
+    exported = client.get("/api/projects/%s/export?format=requirements-csv" % a).text
+    b = _project(client, "Rich copy")
+    assert _import(client, b, exported).json()["created"] == 1
+    want, got = _reqs(client, a)[0], _reqs(client, b)[0]
+    for field in ("statement", "type", "epic", "section", "source_id", "source_ref", "actors", "product_scope", "compliance_tags", "status"):
+        assert sorted(got[field]) == sorted(want[field]) if isinstance(want[field], list) else got[field] == want[field], field
