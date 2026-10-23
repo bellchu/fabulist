@@ -36,7 +36,7 @@ with sync_playwright() as p:
     for title in ("Export invoices", "Email receipts"):
         ctx.request.post(f"{BASE}/api/projects/{pid}/stories", data={"title": title}, headers=H)
     page.goto(f"{BASE}/#/p/{pid}/stories")
-    page.wait_for_selector("tr.clickable")
+    page.get_by_label("Select US-001").wait_for()
     page.get_by_label("Select US-001").check()
     page.get_by_label("Select US-002").check()
     page.get_by_role("button", name="Tag…").click()
