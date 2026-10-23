@@ -43,10 +43,12 @@ with sync_playwright() as p:
         page.wait_for_selector(".page-head")
         fits(page, "home")
         for tab in ("overview", "sources", "requirements", "stories", "trace", "audit", "export"):
+            page.evaluate("document.querySelectorAll('.page-head').forEach((e) => e.remove())")  # the old page's header would satisfy the wait below
             page.goto(f"{BASE}/#/p/{pid}/{tab}")
             page.wait_for_selector(".page-head")
             fits(page, tab)
         for route in ("admin/overview", "admin/users", "admin/providers", "admin/settings", "admin/integrations", "admin/taxonomy", "admin/activity", "account", "compliance", "search/" + "q" * 120):
+            page.evaluate("document.querySelectorAll('.page-head').forEach((e) => e.remove())")  # the old page's header would satisfy the wait below
             page.goto(f"{BASE}/#/{route}")
             page.wait_for_selector(".page-head")
             fits(page, route.split("/")[0] + "/" + route.split("/")[-1][:12])

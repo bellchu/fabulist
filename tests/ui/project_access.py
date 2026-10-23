@@ -77,7 +77,7 @@ with sync_playwright() as p:
     priya.locator(".modal").get_by_role("button", name="Save").click()
     priya.wait_for_selector(".modal", state="detached")
     priya.reload()
-    priya.wait_for_selector(".page-head")
+    priya.wait_for_selector(".tabs")  # the project itself has loaded: a missing badge now means it is really gone
     check(priya.locator(".page-head").get_by_text("Private").count() == 0, "priya: opened to everyone again, the badge is gone")
     browser.close()
 sys.exit(1 if failures else 0)
