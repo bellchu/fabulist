@@ -31,6 +31,7 @@ with sync_playwright() as p:
     page.get_by_role("button", name="Try a sample project").click()
     page.wait_for_selector(".page-head h1:has-text('Sample: order to cash')")
     check("/sources" in page.url, "one click lands on the new project's Sources tab")
+    page.wait_for_selector("text=order-to-cash-brd.md", timeout=10000)  # the header draws first; the documents list follows its own request
     check("order-to-cash-brd.md" in page.locator(".content").inner_text(), "with the BRD already there")
     page.goto(page.url.replace("/sources", "/requirements"))
     page.locator(".runbox .btn-primary").click()
