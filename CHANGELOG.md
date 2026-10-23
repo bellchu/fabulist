@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- **Fix: long unbroken text no longer widens the page on a phone.** A project name with no spaces (or a long URL in a requirement) pushed the home page 867 px and the project header and "Recent changes" about 500 px off a 375 px screen. They now wrap. `tests/ui/phone_overflow.py` visits every project tab and the bulk dialogs at phone width with such text.
 - **Fix: the bulk bar pushed the page sideways on a phone.** With Assign…, Set…, Tag… and Merge… added, the row of buttons was wider than the screen (268 px over at 375 px). It now wraps. A phone-width browser test guards it.
 - The Traceability page has a **Compliance matrix** download beside the traceability matrix, shown once compliance tags are in use.
 - **Press ? for the keyboard shortcuts.** The review drawers' shortcuts were only hinted at once a drawer was open. `?` (outside text fields and dialogs) now lists every shortcut: search, save, approve and next, previous and next, close.

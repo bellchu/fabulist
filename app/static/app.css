@@ -90,6 +90,8 @@ p { margin: 0; }
 /* ---- page header (record / object home) ---- */
 .page-head { display: flex; align-items: center; gap: 12px; padding: 16px; margin-bottom: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); flex-wrap: wrap; }
 .page-head .sub { color: var(--text-3); margin-top: 2px; }
+.break { min-width: 0; overflow-wrap: anywhere; }  /* text a person typed (one long word, a URL) wraps instead of widening the page */
+.page-head .grow { min-width: 0; } .page-head h1 { overflow-wrap: anywhere; }  /* a long unbroken name wraps instead of widening the page */
 .object-icon { width: 32px; height: 32px; border-radius: 4px; display: grid; place-items: center; color: #fff; background: #5867e8; flex: none; }
 .object-icon svg { width: 20px; height: 20px; }
 .object-icon.setup { background: #706e6b; } .object-icon.project { background: #7f8de1; } .object-icon.teal { background: #06a59a; }
@@ -284,6 +286,7 @@ table.table { width: 100%; border-collapse: collapse; background: var(--surface)
 .project-card { padding: 16px; display: flex; flex-direction: column; gap: 10px; color: var(--text); }
 .project-card:hover { border-color: var(--accent); text-decoration: none; color: var(--text); }
 .project-card h3 { color: var(--accent); font-size: 14px; }
+.project-card, .project-card h3, .project-card p { min-width: 0; overflow-wrap: anywhere; }  /* a long unbroken name wraps inside the card instead of widening the page */
 .kv { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .kv div { border-left: 3px solid var(--border); padding: 0 8px; }
 .kv b { display: block; font-size: 18px; font-weight: 300; } .kv span { font-size: 12px; color: var(--text-3); }

@@ -15,19 +15,24 @@ def check(ok, what):
         failures.append(what)
 
 
+WIDE = """[...document.querySelectorAll('body *')].filter((e) => e.getBoundingClientRect().right > window.innerWidth + 1 && !e.closest('.table-wrap, .context-bar, .scroll-x, [data-scroll]'))
+  .slice(0, 4).map((e) => e.tagName + '.' + e.className + ' ' + (e.textContent || '').slice(0, 40))"""
+
+
 def fits(page, what):
     page.wait_for_timeout(500)
     over = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
-    check(over <= 0, f"{what}: no sideways scroll ({over}px over)")
+    check(over <= 0, f"{what}: no sideways scroll ({over}px over)" + ("" if over <= 0 else " " + str(page.evaluate(WIDE))))
 
 
 with sync_playwright() as p:
     browser = p.chromium.launch()
     ctx = browser.new_context(viewport={"width": 375, "height": 800}, bypass_csp=True)
-    pid = ctx.request.post(BASE + "/api/projects", data={"name": "Phone sweep", "platform": "generic"}, headers=H).json()["id"]
-    for text in ("The system shall export invoices to CSV on request.", "The system shall email order confirmations to buyers."):
+    pid = ctx.request.post(BASE + "/api/projects", data={"name": "Phone sweep" + "w" * 90, "platform": "generic"}, headers=H).json()["id"]
+    for text in ("The system shall export invoices to CSV on request, see https://example.com/" + "p" * 150, "The system shall email order confirmations to buyers."):
         ctx.request.post(f"{BASE}/api/projects/{pid}/requirements", data={"statement": text, "compliance_tags": ["SOX"]}, headers=H)
     ctx.request.post(f"{BASE}/api/projects/{pid}/stories", data={"title": "Export invoices", "requirement_ids": ["REQ-001"], "compliance_tags": ["SOX"]}, headers=H)
+    ctx.request.post(BASE + "/api/projects", data={"name": "Unbroken" + "x" * 90, "description": "y" * 200 + " " + "z" * 120, "platform": "generic"}, headers=H)
     page = ctx.new_page()
     page.goto(BASE + "/#/")
     page.wait_for_selector(".page-head")

@@ -415,7 +415,7 @@ export function historyList(entries, { showItem = false, group = showItem, link 
     const fields = Object.entries(e.changes || {});
     return h("div", { class: "row", style: { alignItems: "flex-start" } },
       h("span", { class: "dot", style: { marginTop: "7px", background: e.action === "deleted" ? "var(--red)" : e.action === "created" ? "var(--green)" : "var(--accent)" } }),
-      h("div", { class: "grow small" },
+      h("div", { class: "grow small break" },
         h("div", {}, h("b", {}, e.actor), " " + e.action + " ", showItem ? (e.item_key ? (link && link(e) ? h("a", { class: "mono", href: link(e) }, e.item_key) : h("span", { class: "mono" }, e.item_key)) : KIND_NOUN.has(e.item_type) ? e.item_type : null) : null,
           h("span", { class: "muted" }, " · " + timeAgo(e.created))),
         showItem && e.summary ? h("div", { class: "muted" }, e.summary) : null,
