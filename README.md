@@ -68,7 +68,7 @@ IDs → human review → epics, features and stories → requirements traceabili
    is valid, and the audit trail gets an *imported* entry stating that the earlier entries come from the archive and are
    not verified here. AI run logs, repository connections and tracker links stay behind (they belong to the installation).
 9. **Export**: a stakeholder HTML report (preview in the browser, print to PDF; it states when it was generated and its scope, shows a status breakdown, has page numbers and repeating table headers, and ends with a review-and-approval block; baseline exports also state the version and who froze it), Excel (stories, requirements, RTM sheets), Jira CSV, Azure DevOps CSV,
-   Markdown, CSV, JSON and Gherkin `.feature` test scenarios (tagged with story, requirement and
+   Markdown, CSV (including a traceability matrix and a per-tag **compliance matrix** for auditors), JSON and Gherkin `.feature` test scenarios (tagged with story, requirement and
    compliance IDs for end-to-end traceability), or push directly to **Jira**, **Azure DevOps** or **GitHub Issues**, publish a **Confluence** page,
    or to any system through a signed JSON **webhook**. Tracker pushes are
    idempotent: epics and stories are linked to their issues, so pushing again updates them
