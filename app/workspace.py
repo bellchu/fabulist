@@ -94,6 +94,10 @@ class SetFieldIn(BaseModel):
     value: str = Field(max_length=200)
 
 
+class SplitIn(BaseModel):
+    statements: List[str] = Field(min_length=2, max_length=10)
+
+
 class TagIn(BaseModel):
     ids: List[str] = Field(min_length=1, max_length=2000)
     tag: str = Field(max_length=80)
@@ -1380,6 +1384,28 @@ def merge_requirements(pid: str, body: MergeIn, request: Request):
 def set_requirements(pid: str, body: SetFieldIn, request: Request):
     _project(pid)
     return _bulk_set("requirements", pid, body, history.actor(request))
+
+
+@router.post("/api/projects/{pid}/requirements/{rid}/split")
+def split_requirement(pid: str, rid: str, body: SplitIn, request: Request):
+    """The opposite of merging: the first statement replaces the text of this requirement; each other becomes a new draft requirement carrying the same
+    epic, section, type, actors, scope, tags and where-it-was-stated, with a note saying what it was split from."""
+    _project(pid)
+    who = history.actor(request)
+    statements = [t.strip() for t in body.statements]
+    if any(len(t) < 8 or len(t) > 1000 for t in statements):
+        raise HTTPException(400, "Each part needs a statement of 8 to 1000 characters")
+    row = db.one("SELECT seq, data FROM requirements WHERE id=%s AND project_id=%s", (rid, pid))
+    if not row:
+        raise HTTPException(404, "Requirement not found")
+    key = history.item_key("requirement", row["seq"])
+    shared = {k: row["data"].get(k) for k in ("type", "actors", "epic", "section", "source_ref", "product_scope", "compliance_tags") if row["data"].get(k)}
+    _save_item("requirements", pid, rid, {"statement": statements[0]}, who)
+    created = []
+    for text in statements[1:]:
+        new = _save_item("requirements", pid, None, dict(shared, statement=text, notes="Split from %s." % key), who)
+        created.append(history.item_key("requirement", db.one("SELECT seq FROM requirements WHERE id=%s", (new,))["seq"]))
+    return {"kept": key, "created": created}
 
 
 @router.post("/api/projects/{pid}/requirements/tag")
