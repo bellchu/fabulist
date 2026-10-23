@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- **Fix: the bulk bar pushed the page sideways on a phone.** With Assign…, Set…, Tag… and Merge… added, the row of buttons was wider than the screen (268 px over at 375 px). It now wraps. A phone-width browser test guards it.
 - The Traceability page has a **Compliance matrix** download beside the traceability matrix, shown once compliance tags are in use.
 - **Press ? for the keyboard shortcuts.** The review drawers' shortcuts were only hinted at once a drawer was open. `?` (outside text fields and dialogs) now lists every shortcut: search, save, approve and next, previous and next, close.
 - Saving a single requirement or story also reuses the project's spelling of a compliance tag (`sox` becomes `SOX`), and tags that differ only in case collapse. A spreadsheet import of requirements does the same, and so do AI runs that add to what is already there (a run that replaces everything starts fresh).
