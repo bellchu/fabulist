@@ -10,7 +10,7 @@ const TABS = [["overview", "Overview"], ["sources", "Sources"], ["requirements",
 const TYPE_COLORS = { business: "#5867e8", functional: "#0176d3", "non-functional": "#dd7a01", constraint: "#ba0517", rule: "#06a59a" };
 
 // Filters survive re-renders within the session.
-const filters = { reqAssignee: "", storyAssignee: "", reqQ: "", reqType: "", reqTag: "", reqStatus: "", reqFlagged: false, reqSort: "", reqDir: 1, storySort: "", storyDir: 1, storyQ: "", storyStatus: "", storyTag: "", storyView: "map", storyReady: "", traceGaps: false, exportScope: "all" };
+const filters = { reqAssignee: "", storyAssignee: "", reqQ: "", reqType: "", reqTag: "", reqStatus: "", reqFlagged: false, reqSort: "", reqDir: 1, storySort: "", storyDir: 1, storyQ: "", storyStatus: "", storyTag: "", storyView: "map", exportTag: "", storyReady: "", traceGaps: false, exportScope: "all" };
 let ctx = null;
 let pollTimer = null;
 
@@ -1374,24 +1374,30 @@ async function viewExport(body) {
   const p = ctx.project;
   const grid = h("div", { class: "grid grid-3" });
   const note = h("div", { class: "muted small" });
+  const tagNames = Object.keys(p.compliance || {}).sort();
+  if (filters.exportTag && !tagNames.includes(filters.exportTag)) filters.exportTag = "";
+  const tagParam = () => (filters.exportTag ? "&tag=" + encodeURIComponent(filters.exportTag) : "");  // one regulation's evidence: its requirements and the stories that implement them
+  const tagSel = tagNames.length ? select([["", "All compliance"], ...tagNames.map((t) => [t, t])], filters.exportTag, { "aria-label": "Compliance tag" }) : null;
+  if (tagSel) tagSel.addEventListener("change", () => { filters.exportTag = tagSel.value; render(); });
   const render = () => {
     const approvedOnly = filters.exportScope === "approved";
     const n = approvedOnly ? p.stories_approved : p.stories;
     note.textContent = approvedOnly
       ? p.stories_approved + " approved stories and " + p.requirements_approved + " approved requirements will be exported."
       : p.stories + " stories (excluding rejected) and " + p.requirements + " requirements (excluding excluded) will be exported.";
+    if (filters.exportTag) note.textContent += " Narrowed to the requirements tagged " + filters.exportTag + " and the stories that implement them or carry the tag.";
     grid.replaceChildren(...state.meta.formats.map((f) => h("div", { class: "card card-body stack", style: { gap: "8px" } },
       h("div", { class: "row" }, icon(f.ext === "xlsx" ? "chart" : "file"), h("h3", { class: "grow" }, f.label), badge("." + f.ext)),
       h("p", { class: "muted small grow" }, f.description),
       h("div", { class: "row" }, h("button", { class: "btn btn-sm", disabled: !n && !(approvedOnly ? p.requirements_approved : p.requirements),
-        onclick: () => download(base() + "/export?format=" + encodeURIComponent(f.id) + "&scope=" + (approvedOnly ? "approved" : "all")) }, icon("download"), "Download"),
+        onclick: () => download(base() + "/export?format=" + encodeURIComponent(f.id) + "&scope=" + (approvedOnly ? "approved" : "all") + tagParam()) }, icon("download"), "Download"),
         f.id === "html" ? h("a", { class: "btn btn-sm btn-ghost", target: "_blank", rel: "noopener",
-          href: base() + "/export?format=html&inline=true&scope=" + (approvedOnly ? "approved" : "all") }, "Preview") : null))));
+          href: base() + "/export?format=html&inline=true&scope=" + (approvedOnly ? "approved" : "all") + tagParam() }, "Preview") : null))));
   };
   mount(body, 
     h("div", { class: "card card-body", style: { marginBottom: "16px" } },
       h("div", { class: "row wrap" }, h("div", { class: "grow" }, h("h3", {}, "What to export"), note),
-        segmented([["approved", "Approved only"], ["all", "Everything in review"]], filters.exportScope, (v) => { filters.exportScope = v; render(); }))),
+        tagSel, segmented([["approved", "Approved only"], ["all", "Everything in review"]], filters.exportScope, (v) => { filters.exportScope = v; render(); }))),
     grid,
     await baselinesCard(),
     await pushCard());
