@@ -14,12 +14,21 @@ export async function renderCompliance(content) {
     mount(content, head, h("div", { class: "card" }, empty({ iconName: "shield", title: "No compliance tags yet", text: "Tag requirements (Tag… in a project's requirements list) and they are counted here." })));
     return;
   }
-  mount(content, head, h("div", { class: "card table-wrap" }, h("table", { class: "table", "aria-label": "Compliance coverage by tag" },
-    h("thead", {}, h("tr", {}, ["Tag", "Requirements", "Covered by stories", "Projects"].map((x) => h("th", { scope: "col" }, x)))),
-    h("tbody", {}, tags.map((t) => h("tr", {},
+  const q = h("input", { type: "search", class: "search", placeholder: "Filter tags or projects", "aria-label": "Filter tags or projects" });
+  const body = h("tbody");
+  const draw = () => {
+    const want = q.value.trim().toLowerCase();
+    const shown = tags.filter((t) => !want || t.tag.toLowerCase().includes(want) || t.projects.some((p) => p.name.toLowerCase().includes(want)));
+    body.replaceChildren(...(shown.length ? shown.map((t) => h("tr", {},
       h("td", {}, h("a", { href: "#/search/" + encodeURIComponent(t.tag), title: "Everything tagged " + t.tag }, t.tag)),
       h("td", {}, String(t.requirements)),
       h("td", {}, t.covered + " of " + t.requirements + (t.covered < t.requirements ? " – gaps" : "")),
       h("td", { class: "small" }, h("span", { class: "row wrap" }, t.projects.map((p) =>
-        h("a", { class: "chip", href: "#/p/" + p.id + "/overview", title: p.covered + " of " + p.requirements + " covered" }, p.name + " · " + p.requirements))))))))));
+        h("a", { class: "chip", href: "#/p/" + p.id + "/overview", title: p.covered + " of " + p.requirements + " covered" }, p.name + " · " + p.requirements)))))
+    ) : [h("tr", {}, h("td", { colspan: "4", class: "muted", style: { textAlign: "center", padding: "24px" } }, "No tag or project matches."))]));
+  };
+  q.addEventListener("input", draw);
+  draw();
+  mount(content, head, tags.length > 5 ? h("div", { class: "toolbar" }, q) : null, h("div", { class: "card table-wrap" }, h("table", { class: "table", "aria-label": "Compliance coverage by tag" },
+    h("thead", {}, h("tr", {}, ["Tag", "Requirements", "Covered by stories", "Projects"].map((x) => h("th", { scope: "col" }, x)))), body)));
 }
