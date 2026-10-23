@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
-from . import audit, config, db, embeddings, exporters, history, integrations, llm, metrics, parsing, pipeline, quality, settings
+from . import audit, config, db, embeddings, exporters, history, integrations, llm, metrics, parsing, pipeline, quality, settings, users
 from .fairuse import ai_fair_use
 from .profiles import PLATFORMS
 
@@ -836,9 +836,9 @@ def list_runs(pid: str, limit: int = 20):
 # ---- requirements --------------------------------------------------------
 
 REQ_FIELDS = {"statement", "type", "actors", "source_id", "rationale", "epic", "section", "source_ref",
-              "product_scope", "compliance_tags", "notes"}
+              "product_scope", "compliance_tags", "notes", "assignee"}
 STORY_FIELDS = {"epic", "feature", "title", "persona", "narrative", "acceptance_criteria", "priority", "story_points",
-                "labels", "requirement_ids", "product_scope", "variant_criteria", "compliance_tags", "open_questions", "notes"}
+                "labels", "requirement_ids", "product_scope", "variant_criteria", "compliance_tags", "open_questions", "notes", "assignee"}
 
 
 _dupe_cache: "OrderedDict[str, Tuple[Tuple[int, int, int, int], Dict[str, List[str]]]]" = OrderedDict()
@@ -915,6 +915,16 @@ def _stale() -> HTTPException:
     return HTTPException(409, STALE)
 
 
+def _is_person(name: str) -> bool:
+    """With named accounts, work is assigned to a person who exists and can sign in; without them it is free text (a name or a team)."""
+    return not users.auth_enabled() or bool(db.one("SELECT 1 AS x FROM users WHERE username=%s AND disabled IS NOT TRUE", (name,)))
+
+
+def _check_assignee(name: str) -> None:
+    if not _is_person(name):
+        raise HTTPException(400, "Unknown person: %s. Choose someone from the list of accounts." % name)
+
+
 def _save_item(table: str, pid: str, iid: Optional[str], body: Dict[str, Any], who: str) -> str:
     statuses = STATUSES if table == "requirements" else STORY_STATUSES
     fields = REQ_FIELDS if table == "requirements" else STORY_FIELDS
@@ -947,6 +957,8 @@ def _save_item(table: str, pid: str, iid: Optional[str], body: Dict[str, Any], w
         item = pipeline.normalize_story(merged)
         if item is None:
             raise HTTPException(400, "Title is required")
+    if item.get("assignee") and item["assignee"] != current.get("assignee", ""):
+        _check_assignee(item["assignee"])
     kind = _kind(table)
     with db.conn() as c:
         if iid:
@@ -1047,7 +1059,7 @@ _IMPORT_COLUMNS = {  # header (lower case, spaces and underscores alike) -> fiel
     "statement": "statement", "requirement": "statement", "text": "statement", "description": "statement",
     "type": "type", "epic": "epic", "section": "section", "feature": "section", "source id": "source_id", "sourceid": "source_id",
     "source ref": "source_ref", "actors": "actors", "actor": "actors", "product scope": "product_scope", "compliance tags": "compliance_tags",
-    "compliance": "compliance_tags", "rationale": "rationale", "status": "status"}
+    "compliance": "compliance_tags", "rationale": "rationale", "status": "status", "assignee": "assignee", "owner": "assignee"}
 _LIST_FIELDS = ("actors", "product_scope", "compliance_tags")
 
 
@@ -1100,7 +1112,7 @@ _STORY_COLUMNS = {
     "story points": "story_points", "points": "story_points", "estimate": "story_points",
     "acceptance criteria": "acceptance_criteria", "acceptance": "acceptance_criteria", "criteria": "acceptance_criteria",
     "requirement ids": "requirement_ids", "requirements": "requirement_ids", "requirement": "requirement_ids",
-    "labels": "labels", "status": "status"}
+    "labels": "labels", "status": "status", "assignee": "assignee", "owner": "assignee"}
 
 
 @router.post("/api/projects/{pid}/stories/import")
@@ -1165,6 +1177,8 @@ def _import_story_rows(pid: str, rows: List[Dict[str, Any]], who: str, origin: s
         item = pipeline.normalize_story(raw)
         if item is None:
             errors.append("line %d: the title is missing" % line)
+        elif item["assignee"] and not _is_person(item["assignee"]):
+            errors.append("line %d: %s is not a person with an account" % (line, item["assignee"]))
         elif pipeline._norm_key(item["title"]) in seen:
             skipped += 1
         else:
@@ -1212,6 +1226,8 @@ def _import_rows(pid: str, rows: List[Dict[str, Any]], who: str, origin: str) ->
             errors.append("line %d: status must be draft, approved or excluded" % line)
         elif item is None:
             errors.append("line %d: the statement is missing or shorter than 8 characters" % line)
+        elif item["assignee"] and not _is_person(item["assignee"]):
+            errors.append("line %d: %s is not a person with an account" % (line, item["assignee"]))
         elif pipeline._norm_key(item["statement"]) in seen:
             skipped += 1
         else:
