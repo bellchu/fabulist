@@ -7,6 +7,8 @@ serialized, kits, devices...). The business domain the AI is told about and the 
 classes are settings (Admin), so other industries can use it: set the domain, then replace
 the product taxonomy with your own classes (CSV import).
 
+**Contents:** [Workflow](#workflow) · [Admin dashboard](#admin-dashboard) · [Configuration](#configuration-environment) · [Development](#development) · [API](#api) ([cookbook](#automation-cookbook)) · [Who can see a project](#who-can-see-a-project) · [Deploy to Kubernetes](#deploy-to-kubernetes) · [Security](#security) · [Operations](#operations) ([capacity](#capacity-and-sizing), [runbook](#runbook)) · [Architecture](#architecture) · [Contributing](#contributing) · [License](#license). Also: [architecture notes](docs/ARCHITECTURE.md), [acceptance scenarios](docs/ACCEPTANCE.md), [changelog](CHANGELOG.md), [security policy](SECURITY.md).
+
 ## Workflow
 
 The app follows common business-analysis practice: BRD → atomic requirements with stable
