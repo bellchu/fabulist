@@ -1609,9 +1609,9 @@ def bulk_stories(pid: str, body: BulkIn, request: Request):
 
 
 @router.get("/api/projects/{pid}/history")
-def project_history(pid: str, item_id: str = "", limit: int = 100, actor: str = "", action: str = "", before: int = 0):
+def project_history(pid: str, item_id: str = "", limit: int = 100, actor: str = "", action: str = "", before: int = 0, item: str = ""):
     _project(pid)
-    return history.entries(pid, item_id, max(1, min(limit, 500)), actor, action, before)
+    return history.entries(pid, item_id, max(1, min(limit, 500)), actor, action, before, item)
 
 
 @router.get("/api/projects/{pid}/history/filters")

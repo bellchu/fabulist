@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- **Audit trail: filter to one item.** The Audit tab gains an item box (`REQ-014`, `US-003`; case does not matter) next to the action and user filters, and `GET /api/projects/{id}/history` takes `item=`. "What happened to this requirement?" no longer means scrolling.
 - **Fix: changing more than 2,000 items at once failed.** "Select all matching" in a big project followed by Approve, Assign…, Set… or Tag… sent more ids than one request may carry and ended in a list-length error. The browser now sends them in batches of 2,000 and reports the total; `tests/ui/bulk_over_limit.py` tags 2,200 requirements in one go.
 - **Fix: a Stories export lost its compliance tags, product scope and open questions when imported again.** The README promises that Fabulist's own export imports back; those three columns were silently dropped. They now come across (tags in the project's own spelling), and a hand-made sheet may name them Compliance, Product scope and Open questions.
 - **Fix: the project overview scrolled sideways at 320 px** (the width WCAG reflow requires) once the Compliance coverage card was showing: a card's wide table stretched its grid column. Cards now shrink to fit and the table scrolls inside. The phone sweep now runs at 320 px.
