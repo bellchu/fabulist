@@ -45,3 +45,16 @@ def test_stories_can_be_tagged_in_bulk_too(client):
     assert client.post("/api/projects/%s/stories/tag" % pid, json={"ids": ids[:1], "tag": "SOX", "remove": True}).json() == {"updated": 1}
     tags = {s["title"]: s["compliance_tags"] for s in client.get("/api/projects/%s/stories" % pid).json()}
     assert tags == {"Export invoices": [], "Email receipts": ["SOX"]}
+
+
+def test_a_tag_typed_in_another_case_reuses_the_spelling_already_in_the_project(client):
+    pid, ids = _setup(client)
+    client.post("/api/projects/%s/requirements/tag" % pid, json={"ids": ids[1:2], "tag": "sox"})
+    assert _tags(client, pid)["REQ-002"] == ["SOX"], "REQ-001 already says SOX"
+    client.post("/api/projects/%s/requirements/tag" % pid, json={"ids": ids[1:2], "tag": "gdpr", "remove": True})
+    client.post("/api/projects/%s/requirements/tag" % pid, json={"ids": ids[2:3], "tag": "sox", "remove": True})
+    assert _tags(client, pid)["REQ-003"] == ["GDPR", "PCI-DSS"], "removing a tag that is not there changes nothing"
+    client.post("/api/projects/%s/requirements/tag" % pid, json={"ids": ids[0:1], "tag": "Gdpr", "remove": True})
+    assert _tags(client, pid)["REQ-001"] == ["SOX"]
+    client.post("/api/projects/%s/requirements/tag" % pid, json={"ids": ids[2:3], "tag": "PCI-dss", "remove": True})
+    assert _tags(client, pid)["REQ-003"] == ["GDPR"], "removal also ignores case"

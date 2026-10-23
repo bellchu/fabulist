@@ -1418,9 +1418,12 @@ def _bulk_tag(table: str, pid: str, body: TagIn, who: str) -> Dict[str, int]:
     kind = _kind(table)
     updated = 0
     with db.conn() as c:
+        # One spelling per tag: typing "sox" reuses the "SOX" already in the project, so filters and the compliance matrix do not split it in two.
+        known = {t.lower(): t for r in c.execute("SELECT data->'compliance_tags' AS tags FROM %s WHERE project_id=%%s" % table, (pid,)).fetchall() for t in r["tags"] or []}
+        tag = known.get(tag.lower(), tag)
         for r in c.execute("SELECT id, seq, data FROM %s WHERE project_id=%%s AND id = ANY(%%s) FOR UPDATE" % table, (pid, body.ids)).fetchall():
             old = r["data"].get("compliance_tags") or []
-            new = [t for t in old if t != tag] if body.remove else list(dict.fromkeys(old + [tag]))
+            new = [t for t in old if t.lower() != tag.lower()] if body.remove else list(dict.fromkeys(old + [tag]))
             if new == old:
                 continue
             c.execute("UPDATE %s SET data = jsonb_set(data, '{compliance_tags}', %%s::jsonb), rev = rev + 1 WHERE id=%%s" % table, (json.dumps(new), r["id"]))

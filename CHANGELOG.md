@@ -4,6 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
+- Bulk Tag… ignores case: typing `sox` when the project already says `SOX` adds `SOX` (and removing `sox` removes `SOX`), so a tag is never split in two by spelling.
 - The Tag… dialog suggests the compliance tags already in use in the project, so one spelling is used for each (the filter, the overview and the compliance matrix group by exact text).
 - **Compliance matrix export.** A new export format, *Compliance matrix (CSV)*: one row per compliance tag and requirement, with the stories that cover it and gaps flagged, sorted by tag. It is what an auditor asks for tag by tag, and it follows the export scope (all or approved).
 - **Compliance coverage on the project overview.** A table of each compliance tag with how many active requirements carry it and how many of those a story covers (`compliance` in `GET /api/projects/{id}`); shown only when tags are in use. Each tag links to the requirements list filtered to it.
