@@ -626,6 +626,7 @@ async function viewRequirements(body) {
       }) }, l)),
     bulkAssign("requirement", selected, refresh),
     bulkSet("requirement", selected, refresh),
+    bulkTag(selected, refresh),
     selected.size >= 2 ? bulkMerge(reqs, selected, refresh) : null,
     h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); renderTable(); renderBulk(); } }, "Clear"))] : []));
 
@@ -752,6 +753,20 @@ function bulkSet(kind, selected, refresh) {
       toast(r.updated + " " + (r.updated === 1 ? kind : plural) + " updated", "ok"); selected.clear(); await refresh();
     } }],
   }) }, "Set…");
+}
+
+// "Tag…" in the requirements bulk bar: add a compliance tag to everything selected, or take it off.
+function bulkTag(selected, refresh) {
+  const tag = h("input", { type: "text", maxlength: "80", "aria-label": "Compliance tag", placeholder: "e.g. SOX" });
+  const mode = select([["add", "Add to all"], ["remove", "Remove from all"]], "add", { "aria-label": "Action" });
+  return h("button", { class: "btn btn-sm", title: "Add or remove a compliance tag", onclick: () => modal({
+    title: "Tag " + selected.size + " requirement" + (selected.size === 1 ? "" : "s"), description: "Each change is recorded in the audit trail.",
+    body: h("div", { class: "stack" }, field("Action", mode), field("Compliance tag", tag)),
+    actions: [{ label: "Apply", kind: "btn-primary", onClick: async () => {
+      const r = await api.post(base() + "/requirements/tag", { ids: [...selected], tag: tag.value, remove: mode.value === "remove" });
+      toast(r.updated + " requirement" + (r.updated === 1 ? "" : "s") + " updated", "ok"); selected.clear(); await refresh();
+    } }],
+  }) }, "Tag…");
 }
 
 // "Merge…" in the requirements bulk bar (two or more selected): pick the one to keep; the others are retired into it.

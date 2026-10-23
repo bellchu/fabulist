@@ -94,6 +94,12 @@ class SetFieldIn(BaseModel):
     value: str = Field(max_length=200)
 
 
+class TagIn(BaseModel):
+    ids: List[str] = Field(min_length=1, max_length=2000)
+    tag: str = Field(max_length=80)
+    remove: bool = False
+
+
 class BulkIn(BaseModel):
     ids: List[str] = Field(min_length=1, max_length=2000)
     status: str
@@ -1374,6 +1380,28 @@ def merge_requirements(pid: str, body: MergeIn, request: Request):
 def set_requirements(pid: str, body: SetFieldIn, request: Request):
     _project(pid)
     return _bulk_set("requirements", pid, body, history.actor(request))
+
+
+@router.post("/api/projects/{pid}/requirements/tag")
+def tag_requirements(pid: str, body: TagIn, request: Request):
+    """Add a compliance tag to, or remove it from, many requirements at once."""
+    _project(pid)
+    tag = body.tag.strip()
+    if not tag:
+        raise HTTPException(400, "A tag is needed")
+    who = history.actor(request)
+    updated = 0
+    with db.conn() as c:
+        for r in c.execute("SELECT id, seq, data FROM requirements WHERE project_id=%s AND id = ANY(%s) FOR UPDATE", (pid, body.ids)).fetchall():
+            old = r["data"].get("compliance_tags") or []
+            new = [t for t in old if t != tag] if body.remove else list(dict.fromkeys(old + [tag]))
+            if new == old:
+                continue
+            c.execute("UPDATE requirements SET data = jsonb_set(data, '{compliance_tags}', %s::jsonb), rev = rev + 1 WHERE id=%s", (json.dumps(new), r["id"]))
+            history.record(c, pid, "requirement", r["id"], history.item_key("requirement", r["seq"]), "edited", who, _label(r["data"]),
+                           {"compliance_tags": {"from": ", ".join(old), "to": ", ".join(new)}})
+            updated += 1
+    return {"updated": updated}
 
 
 @router.post("/api/projects/{pid}/stories/set")
