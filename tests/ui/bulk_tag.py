@@ -63,5 +63,8 @@ with sync_playwright() as p:
     page.get_by_label("Compliance tag").select_option("GDPR")
     page.wait_for_function("document.querySelectorAll('tr.clickable').length === 2")
     check(True, "filtering stories by the tag leaves the two that carry it")
+    page.goto(f"{BASE}/#/p/{pid}/overview")
+    page.wait_for_selector("text=Compliance coverage")
+    check(page.locator("tr", has_text="SOX").locator("text=0 of 2").count() == 1, "the overview shows SOX on 2 requirements, none covered yet")
     browser.close()
 sys.exit(1 if failures else 0)
