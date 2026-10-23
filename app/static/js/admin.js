@@ -437,7 +437,8 @@ async function viewUsers(content) {
       role.addEventListener("change", guard(async () => { await api.patch("/api/admin/users/" + u.id, { role: role.value }); toast(u.username + " is now " + role.value, "ok"); }));
       return h("tr", {},
         h("td", {}, h("b", {}, u.username)), h("td", { style: { minWidth: "150px" } }, role),
-        h("td", {}, u.disabled ? badge("Disabled", "red") : badge("Active", "green")),
+        h("td", {}, h("div", { class: "row wrap", style: { gap: "4px" } }, u.disabled ? badge("Disabled", "red") : badge("Active", "green"),
+          u.must_change ? badge("Must change password", "amber") : null)),
         h("td", { class: "small hide-sm" + (u.last_seen ? " muted" : ""), title: u.last_seen || "" }, u.last_seen ? timeAgo(u.last_seen) : "never"),
         h("td", { class: "muted small hide-sm" }, timeAgo(u.created)),
         h("td", { style: { textAlign: "right" } }, h("div", { class: "row wrap", style: { justifyContent: "flex-end", gap: "0" } },
@@ -478,13 +479,15 @@ function userDialog(data, u) {
   const username = h("input", { type: "text", autocomplete: "off", placeholder: "e.g. jane.analyst" });
   const role = select(Object.entries(data.roles), "analyst");
   const password = h("input", { type: "password", autocomplete: "new-password", placeholder: "At least 12 characters" });
+  const must = h("input", { type: "checkbox", checked: true, id: "must-change" });
   modal({
     title: isNew ? "Add user" : "Reset password for " + u.username,
     description: "Share the password through a secure channel; it can't be viewed again.",
-    body: h("div", { class: "stack" }, isNew ? h("div", { class: "form-grid" }, field("Username", username), field("Role", role)) : null, field("Password", password)),
+    body: h("div", { class: "stack" }, isNew ? h("div", { class: "form-grid" }, field("Username", username), field("Role", role)) : null, field("Password", password),
+      h("label", { class: "row small", for: "must-change" }, must, "They must choose their own password when they first sign in (the one you set is known to you)")),
     actions: [{ label: isNew ? "Add user" : "Set password", kind: "btn-primary", onClick: async () => {
-      if (isNew) await api.post("/api/admin/users", { username: username.value, role: role.value, password: password.value });
-      else await api.patch("/api/admin/users/" + u.id, { password: password.value });
+      if (isNew) await api.post("/api/admin/users", { username: username.value, role: role.value, password: password.value, must_change: must.checked });
+      else await api.patch("/api/admin/users/" + u.id, { password: password.value, must_change: must.checked });
       toast(isNew ? "User added" : "Password updated", "ok"); rerender();
     } }],
   });

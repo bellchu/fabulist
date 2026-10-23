@@ -127,7 +127,10 @@ async function route() {
   const busy = setTimeout(() => setBusy(true), 150);
   try {
     if (!state.meta) [state.meta, state.me] = await Promise.all([api.get("/api/meta"), api.get("/api/me")]);
-    await refreshProjects();
+    if (state.me.must_change) {  // an administrator chose this password: nothing else works until its owner replaces it
+      state.projects = [];
+      if (parts[0] !== "account") { location.hash = "#/account"; return; }
+    } else await refreshProjects();
     if (ticket !== rendering) return;
     const content = shell(parts);
     if (parts[0] === "p" && parts[1]) await renderProject(content, parts[1], parts[2] || "overview");

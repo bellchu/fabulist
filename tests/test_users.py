@@ -30,7 +30,7 @@ def test_password_hashing():
 
 def test_roles_are_enforced(secured):
     c = secured
-    assert c.get("/api/me", auth=creds("ana")).json() == {"username": "ana", "role": "analyst", "sso": False, "named": True}
+    assert c.get("/api/me", auth=creds("ana")).json() == {"username": "ana", "role": "analyst", "sso": False, "named": True, "must_change": False}
     assert c.get("/api/projects", auth=("ana", "wrong-password!!")).status_code == 401
     # analyst: projects yes, admin no
     pid = c.post("/api/projects", json={"name": "P", "platform": "generic"}, auth=creds("ana")).json()["id"]
