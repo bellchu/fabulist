@@ -1448,7 +1448,7 @@ async function baselinesCard() {
           h("td", { class: "small hide-sm" }, timeAgo(b.created), h("div", { class: "muted" }, "by " + (b.actor || "–"))),
           h("td", { style: { textAlign: "right" } },
             h("span", { class: "row wrap", style: { justifyContent: "flex-end" } }, fmtSel,
-              h("button", { class: "btn btn-sm", onclick: () => download(base() + "/baselines/" + b.id + "/export?format=" + encodeURIComponent(fmtSel.value)) }, icon("download"), "Export"),
+              h("button", { class: "btn btn-sm", onclick: () => download(base() + "/baselines/" + b.id + "/export?format=" + encodeURIComponent(fmtSel.value) + (filters.exportTag ? "&tag=" + encodeURIComponent(filters.exportTag) : "")) }, icon("download"), "Export"),
               h("button", { class: "btn btn-sm", title: "Compare with the current backlog", "aria-label": "Compare " + b.name + " with the current backlog", onclick: () => compare(b) }, "Compare"))));
       }))))
       : h("div", { class: "card-body muted small" }, "No baselines yet. Create one when the backlog is signed off."));
