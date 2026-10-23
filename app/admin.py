@@ -2,13 +2,14 @@
 import csv
 import io
 import json
+import os
 import re
 import time
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Request, Response
 
-from . import audit, config, db, embeddings, exporters, llm, metrics, settings, taxonomy
+from . import audit, config, db, embeddings, exporters, llm, metrics, pipeline, settings, taxonomy
 from .fairuse import ai_fair_use
 
 router = APIRouter(prefix="/api/admin")
@@ -147,6 +148,40 @@ def provider_models(body: Dict[str, Any] = Body(...)):
 @router.post("/providers/{pid}/test", dependencies=[Depends(ai_fair_use)])
 def test_provider(pid: str):
     return llm.test_connection(settings.get_provider(pid), settings.get_settings())
+
+
+SAMPLE_BRD_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples", "order-to-cash-brd.md")
+
+
+@router.post("/providers/{pid}/evaluate", dependencies=[Depends(ai_fair_use)])
+def evaluate_provider(pid: str, request: Request):
+    """How does this provider do on a BRD whose answer is known? Runs the extraction on the built-in sample (twelve numbered requirements, one of
+    them an open item that must stay open) and scores it: how many of the twelve numbers were found, what was missed, whether the TBD survived,
+    and what it cost in time, requests and tokens. A trial before relying on a provider, not a benchmark."""
+    profile = settings.get_provider(pid)
+    with open(SAMPLE_BRD_PATH, encoding="utf-8") as f:
+        text = f.read()
+    expected = sorted(set(re.findall(r"\b(BR-\d+):", text)))
+    usage = {"in": 0, "out": 0, "requests": 0}
+    started = time.monotonic()
+    error, items = "", []
+    try:
+        items = pipeline.extract_requirements([{"id": "sample", "filename": "order-to-cash-brd.md", "text": text}], "generic", profile,
+                                              settings.get_settings(), lambda m: None, usage)
+    except Exception as exc:  # noqa: BLE001 - an unreachable or misbehaving provider is the answer, not a server error
+        error = str(exc)[:300] or type(exc).__name__
+    found = sorted({i.get("source_id") for i in items if i.get("source_id") in expected})
+    missing = [e for e in expected if e not in found]
+    kept_tbd = any("tbd" in (i.get("statement") or "").lower() for i in items)
+    seconds = round(time.monotonic() - started, 1)
+    verdict = ("The provider could not be used: " + error) if error else (
+        "Found %d of %d requirement numbers%s; %s the open item (TBD) %s; %d requests, %.1f s." % (
+            len(found), len(expected), (" (missed " + ", ".join(missing) + ")") if missing else "", "kept" if kept_tbd else "LOST",
+            "as it was" if kept_tbd else "(it was resolved or dropped)", usage.get("requests", 0), seconds))
+    audit.record(request, "provider evaluated", profile["name"], verdict[:280])
+    return {"provider": profile["name"], "model": profile.get("model") or "", "expected": len(expected), "found": len(found), "missing": missing,
+            "items": len(items), "kept_tbd": kept_tbd, "seconds": seconds, "requests": usage.get("requests", 0), "tokens_in": usage.get("in", 0),
+            "tokens_out": usage.get("out", 0), "error": error, "verdict": verdict}
 
 
 # ---- product taxonomy ----------------------------------------------------

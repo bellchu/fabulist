@@ -94,6 +94,13 @@ async function viewProviders(content) {
         result.replaceChildren(r.ok ? h("div", { class: "callout ok" }, icon("check"), "Connected in " + duration(r.latency_ms) + (r.reply ? " · replied “" + r.reply + "”" : ""))
           : h("div", { class: "callout error" }, icon("alert"), r.error));
       }) }, icon("play"), "Test"),
+      h("button", { class: "btn btn-sm", title: "Run the built-in sample BRD (twelve numbered requirements) through this provider and score it", onclick: guard(async () => {
+        result.replaceChildren(h("span", { class: "muted" }, "Evaluating on the sample BRD… this can take a minute."));
+        const r = await api.post("/api/admin/providers/" + p.id + "/evaluate");
+        const good = !r.error && r.found === r.expected && r.kept_tbd;
+        result.replaceChildren(h("div", { class: "callout " + (r.error ? "error" : good ? "ok" : "warn"), role: "status" }, icon(good ? "check" : "alert"),
+          h("div", {}, h("b", {}, p.name + ": "), r.verdict, !r.error && r.tokens_in + r.tokens_out ? " " + fmt(r.tokens_in + r.tokens_out) + " tokens." : "")));
+      }) }, icon("sparkles"), "Evaluate"),
       h("button", { class: "btn btn-sm", onclick: () => providerDialog(data, p) }, icon("edit"), "Edit"),
       p.is_default ? null : h("button", { class: "btn btn-sm", onclick: guard(async () => {
         await api.post("/api/admin/providers/" + p.id + "/default"); state.meta = null; toast(p.name + " is now the default", "ok"); rerender();
