@@ -190,6 +190,29 @@ def search_everywhere(request: Request, q: str = "", limit: int = 30):
             "stories": [dict(s, key=history.item_key("story", s.pop("seq"))) for s in stories]}
 
 
+@router.get("/api/compliance")
+def compliance_overview(request: Request):
+    """Every compliance tag across the projects this person may see (not archived; excluded requirements do not count): how many requirements carry it,
+    how many of those a live story covers, and the same per project. Tags that differ only in case are one tag."""
+    visible, args = "p.archived IS NULL", []  # type: str, List[Any]
+    if getattr(request.state, "role", "admin") != "admin":
+        visible += " AND (p.visibility = 'everyone' OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.username = %s))"
+        args.append(history.actor(request))
+    rows = db.rows("""SELECT min(t.tag) AS tag, p.id AS project_id, p.name AS project_name, count(*) AS requirements,
+               count(*) FILTER (WHERE EXISTS (SELECT 1 FROM stories s WHERE s.project_id = r.project_id AND s.status <> 'rejected'
+                                              AND s.data->'requirement_ids' ? ('REQ-' || lpad((r.seq + 1)::text, 3, '0')))) AS covered
+        FROM requirements r JOIN projects p ON p.id = r.project_id
+        CROSS JOIN LATERAL jsonb_array_elements_text(coalesce(r.data->'compliance_tags', '[]'::jsonb)) AS t(tag)
+        WHERE %s AND r.status <> 'excluded' GROUP BY lower(t.tag), p.id, p.name ORDER BY lower(t.tag), p.name""" % visible, args)
+    tags: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        t = tags.setdefault(r["tag"].lower(), {"tag": r["tag"], "requirements": 0, "covered": 0, "projects": []})
+        t["requirements"] += r["requirements"]
+        t["covered"] += r["covered"]
+        t["projects"].append({"id": r["project_id"], "name": r["project_name"], "requirements": r["requirements"], "covered": r["covered"]})
+    return {"tags": list(tags.values())}
+
+
 @router.get("/api/me/assigned")
 def assigned_to_me(request: Request):
     """What is waiting for this person: requirements and stories assigned to them that are still drafts, by project (the projects they may see,

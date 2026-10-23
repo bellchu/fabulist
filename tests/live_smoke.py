@@ -29,7 +29,7 @@ with sync_playwright() as p:
         page.goto(BASE + "/#/")
         page.wait_for_selector(".global-search")
         projects = page.evaluate("fetch('/api/projects').then(r => r.json())")
-        pages = ["#/", "#/account", "#/search/the"] + ["#/admin/" + t for t in ("overview", "providers", "settings", "taxonomy", "integrations", "users", "activity")]
+        pages = ["#/", "#/account", "#/compliance", "#/search/the"] + ["#/admin/" + t for t in ("overview", "providers", "settings", "taxonomy", "integrations", "users", "activity")]
         for project in projects[:3]:
             pages += ["#/p/%s/%s" % (project["id"], tab) for tab in ("overview", "sources", "requirements", "stories", "trace", "audit", "export")]
         pages.append("/docs")
