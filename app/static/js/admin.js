@@ -94,10 +94,10 @@ async function viewProviders(content) {
         result.replaceChildren(r.ok ? h("div", { class: "callout ok" }, icon("check"), "Connected in " + duration(r.latency_ms) + (r.reply ? " · replied “" + r.reply + "”" : ""))
           : h("div", { class: "callout error" }, icon("alert"), r.error));
       }) }, icon("play"), "Test"),
-      h("button", { class: "btn btn-sm", title: "Run the built-in sample BRD (twelve numbered requirements) through this provider and score it", onclick: guard(async () => {
-        result.replaceChildren(h("span", { class: "muted" }, "Evaluating on the sample BRD… this can take a minute."));
-        const r = await api.post("/api/admin/providers/" + p.id + "/evaluate");
-        const good = !r.error && r.found === r.expected && r.kept_tbd;
+      h("button", { class: "btn btn-sm", title: "Run the built-in sample BRD through this provider (extraction, then stories for its twelve requirements) and score it: about four AI requests", onclick: guard(async () => {
+        result.replaceChildren(h("span", { class: "muted" }, "Evaluating on the sample BRD (requirements, then stories)… this can take a minute."));
+        const r = await api.post("/api/admin/providers/" + p.id + "/evaluate?stages=requirements,stories");
+        const good = !r.error && r.found === r.expected && r.kept_tbd && r.stories && !r.stories.error && r.stories.covered === r.stories.requirements && r.stories.gherkin === r.stories.stories;
         result.replaceChildren(h("div", { class: "callout " + (r.error ? "error" : good ? "ok" : "warn"), role: "status" }, icon(good ? "check" : "alert"),
           h("div", {}, h("b", {}, p.name + ": "), r.verdict, !r.error && r.tokens_in + r.tokens_out ? " " + fmt(r.tokens_in + r.tokens_out) + " tokens." : "")));
       }) }, icon("sparkles"), "Evaluate"),
