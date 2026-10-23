@@ -4,7 +4,7 @@ Notable user-visible and operational changes, newest first.
 
 ## Unreleased
 
-- **Compliance coverage on the project overview.** A table of each compliance tag with how many active requirements carry it and how many of those a story covers (`compliance` in `GET /api/projects/{id}`); shown only when tags are in use.
+- **Compliance coverage on the project overview.** A table of each compliance tag with how many active requirements carry it and how many of those a story covers (`compliance` in `GET /api/projects/{id}`); shown only when tags are in use. Each tag links to the requirements list filtered to it.
 - **Filter requirements by compliance tag.** With tags applied in bulk, the requirements list gains an "All compliance" filter (shown once any requirement has a tag) next to type and status; the stories list has the same filter.
 - **Tag… for stories too.** The bulk Tag… that landed for requirements now exists in the stories bulk bar (`POST /api/projects/{id}/stories/tag`), same behaviour and audit trail.
 - **Split a requirement by hand.** Merge had no opposite: a requirement that says two things could only be split with the AI. **Split…** in the requirement's drawer takes two or more statements; the first replaces the original, the others become new draft requirements with the same epic, section, actors, scope, tags and source plus a "Split from REQ-x" note (`POST /api/projects/{id}/requirements/{rid}/split`). Every part is in the audit trail.

@@ -66,5 +66,8 @@ with sync_playwright() as p:
     page.goto(f"{BASE}/#/p/{pid}/overview")
     page.wait_for_selector("text=Compliance coverage")
     check(page.locator("tr", has_text="SOX").locator("text=0 of 2").count() == 1, "the overview shows SOX on 2 requirements, none covered yet")
+    page.get_by_role("link", name="SOX").click()
+    page.wait_for_function("document.querySelectorAll('tr.clickable').length === 2")
+    check(page.get_by_label("Compliance tag").input_value() == "SOX", "the tag on the overview opens the requirements already filtered to it")
     browser.close()
 sys.exit(1 if failures else 0)
