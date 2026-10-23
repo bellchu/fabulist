@@ -634,7 +634,7 @@ async function viewRequirements(body) {
       }) }, l)),
     bulkAssign("requirement", selected, refresh),
     bulkSet("requirement", selected, refresh),
-    bulkTag("requirement", selected, refresh),
+    bulkTag("requirement", reqs, selected, refresh),
     selected.size >= 2 ? bulkMerge(reqs, selected, refresh) : null,
     h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); renderTable(); renderBulk(); } }, "Clear"))] : []));
 
@@ -765,13 +765,15 @@ function bulkSet(kind, selected, refresh) {
 }
 
 // "Tag…" in the bulk bars: add a compliance tag to everything selected (requirements or stories), or take it off.
-function bulkTag(kind, selected, refresh) {
+function bulkTag(kind, items, selected, refresh) {
   const plural = kind === "story" ? "stories" : "requirements";
-  const tag = h("input", { type: "text", maxlength: "80", "aria-label": "Compliance tag", placeholder: "e.g. SOX" });
+  const known = [...new Set(items.flatMap((x) => x.compliance_tags || []))].sort();  // offered as suggestions: one spelling per tag keeps the filter and the matrix tidy
+  const tag = h("input", { type: "text", maxlength: "80", "aria-label": "Compliance tag", placeholder: "e.g. SOX", list: "known-tags" });
+  const options = h("datalist", { id: "known-tags" }, known.map((t) => h("option", { value: t })));
   const mode = select([["add", "Add to all"], ["remove", "Remove from all"]], "add", { "aria-label": "Action" });
   return h("button", { class: "btn btn-sm", title: "Add or remove a compliance tag", onclick: () => modal({
     title: "Tag " + selected.size + " " + (selected.size === 1 ? kind : plural), description: "Each change is recorded in the audit trail.",
-    body: h("div", { class: "stack" }, field("Action", mode), field("Compliance tag", tag)),
+    body: h("div", { class: "stack" }, field("Action", mode), field("Compliance tag", tag), options),
     actions: [{ label: "Apply", kind: "btn-primary", onClick: async () => {
       const r = await api.post(base() + "/" + plural + "/tag", { ids: [...selected], tag: tag.value, remove: mode.value === "remove" });
       toast(r.updated + " " + (r.updated === 1 ? kind : plural) + " updated", "ok"); selected.clear(); await refresh();
@@ -973,7 +975,7 @@ async function viewStories(body) {
       }) }, l)),
     bulkAssign("story", selected, refresh),
     bulkSet("story", selected, refresh),
-    bulkTag("story", selected, refresh),
+    bulkTag("story", stories, selected, refresh),
     h("button", { class: "btn btn-sm btn-ghost", onclick: () => { selected.clear(); render(); } }, "Clear"))] : []));
   const paging = { limit: PAGE };  // rows of the list view drawn so far
   const render = () => {
