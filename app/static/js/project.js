@@ -663,7 +663,8 @@ async function viewRequirements(body) {
         h("td", { class: "hide-sm" }, badge(r.type, typeTone[r.type])),
         h("td", { class: "statement" }, r.statement,
           r.issues.length ? h("div", { class: "issues" }, r.issues.map((i) => h("span", { class: "chip", title: i.message }, issueIcon(i.severity), i.code))) : null),
-        h("td", { class: "small muted hide-sm" }, r.section),
+        h("td", { class: "small muted hide-sm" }, r.section,
+          r.compliance_tags?.length ? h("div", { class: "row", style: { flexWrap: "wrap", gap: "4px", marginTop: "4px" } }, r.compliance_tags.map((t) => badge(t, "gray"))) : null),
         h("td", { class: "hide-sm" }, scorePill(r.quality_score)),
         h("td", {}, h("div", { class: "row", style: { flexWrap: "wrap" } }, badge(r.status, statusTone[r.status]), talkBadge(talk[r.id])), r.assignee ? h("div", { class: "small muted" }, "→ " + r.assignee) : null)))
         : h("tr", {}, h("td", { colspan: "7", class: "muted", style: { textAlign: "center", padding: "28px" } }, "No requirements match the filters.")),
