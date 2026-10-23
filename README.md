@@ -219,6 +219,15 @@ sleep 2; while [ "$(status)" = running ] || [ "$(status)" = queued ]; do sleep 1
 curl -fsS -H "Authorization: Bearer $TOKEN" "$HOST/api/projects/$PID/export?format=xlsx" -o backlog.xlsx
 ```
 
+Tidying and compliance evidence use the same calls the bulk bar does (ids are the `id` fields of the lists):
+
+```sh
+api -X POST "$HOST/api/projects/$PID/requirements/tag" -d '{"ids":["..."],"tag":"SOX"}'          # add; "remove":true takes it off
+api -X POST "$HOST/api/projects/$PID/tags/rename" -d '{"from":"sox","to":"SOX"}'                 # across requirements and stories
+api -X POST "$HOST/api/projects/$PID/requirements/merge" -d '{"keep":"...","merge":["..."]}'     # fold duplicates into one
+curl -fsS -H "Authorization: Bearer $TOKEN" "$HOST/api/projects/$PID/export?format=compliance-csv&tag=SOX" -o sox-evidence.csv
+```
+
 Existing requirements go in with `POST /api/projects/{id}/requirements/import-file` (multipart, `.csv` or `.xlsx`). A `429` carries `Retry-After` (seconds): wait that long and repeat the call. A `503` means the database is briefly unavailable and also carries `Retry-After`. To hear when a run ends instead of polling, add a webhook integration with "Also tell this webhook when an AI run finishes".
 
 ## Who can see a project
