@@ -339,9 +339,36 @@ def note_delivery(iid: str, event: str, ok: bool, note: str = "") -> None:
         logging.getLogger("fabulist").warning("could not record the delivery to %s", iid, exc_info=True)
 
 
+def _subscribers(event_group: str) -> List[Dict[str, Any]]:
+    """Webhook integrations that opted in to a group of events ('runs', 'assignments'); `events` is a comma-separated set."""
+    return db.rows("SELECT * FROM integrations WHERE kind='webhook' AND %s = ANY(string_to_array(events, ','))", (event_group,))
+
+
+def announce_assignment(project_id: str, kind: str, assignee: str, items: List[Dict[str, str]], actor: str) -> None:
+    """Tell the webhooks that opted in that work was assigned (not cleared): who assigned what to whom. On its own thread, like every notification."""
+    hooks = _subscribers("assignments")
+    if not hooks or not assignee or not items:
+        return
+
+    def deliver() -> None:
+        project = db.one("SELECT id, name FROM projects WHERE id=%s", (project_id,))
+        if not project:
+            return
+        payload = {"event": "item.assigned", "sent_at": db.now(), "project": {"id": project["id"], "name": project["name"]}, "assignee": assignee,
+                   "assigned_by": actor, "items": [dict(i, kind=kind) for i in items]}
+        for hook in hooks:
+            try:
+                client_for(hook)._post(payload)
+                note_delivery(hook["id"], "item.assigned", True)
+            except Exception as exc:  # noqa: BLE001 - logged and remembered, never raised
+                logging.getLogger("fabulist").warning("assignment notification to %s failed: %s", hook["name"], exc)
+                note_delivery(hook["id"], "item.assigned", False, "%s: %s" % (type(exc).__name__, exc))
+    threading.Thread(target=deliver, name="assign-notify", daemon=True).start()
+
+
 def announce_run(run_id: str) -> None:
     """Tell the webhooks that opted in that a run finished. Runs on its own thread: a slow or broken receiver must never hold a run slot or fail a run."""
-    hooks = db.rows("SELECT * FROM integrations WHERE kind='webhook' AND events='runs'")
+    hooks = _subscribers("runs")
     if not hooks:
         return
 
@@ -420,7 +447,8 @@ def push(project_id: str, conn: Dict[str, Any], target: str, stories: List[Dict[
 
 def _public(r: Dict[str, Any]) -> Dict[str, Any]:
     out = {k: r[k] for k in ("id", "kind", "name", "base_url", "username", "target", "key_hint", "created")}
-    out.update(kind_label=KINDS.get(r["kind"], r["kind"]), has_token=bool(r["token_enc"]), notify_runs=r["kind"] == "webhook" and r.get("events") == "runs")
+    out.update(kind_label=KINDS.get(r["kind"], r["kind"]), has_token=bool(r["token_enc"]), notify_runs=r["kind"] == "webhook" and "runs" in (r.get("events") or "").split(","),
+                notify_assignments=r["kind"] == "webhook" and "assignments" in (r.get("events") or "").split(","))
     out["last_delivery"] = ({"event": r["last_event"], "at": r["last_event_at"], "ok": bool(r["last_event_ok"]), "note": r.get("last_event_note") or ""}
                             if r["kind"] == "webhook" and r.get("last_event_at") else None)
     return out
@@ -456,7 +484,7 @@ def _save(body: Dict[str, Any], iid: Optional[str]) -> Dict[str, Any]:
     hint = current["key_hint"] if current else ""
     if token:
         enc, hint = settings.encrypt_secret(token), "…" + token[-4:]
-    events = "runs" if kind == "webhook" and body.get("notify_runs") else ""
+    events = ",".join(e for e, wanted in (("runs", body.get("notify_runs")), ("assignments", body.get("notify_assignments"))) if kind == "webhook" and wanted)
     if iid:
         db.execute("UPDATE integrations SET kind=%s, name=%s, base_url=%s, username=%s, target=%s, token_enc=%s, key_hint=%s, events=%s WHERE id=%s",
                    (kind, name, base_url, username, target, enc, hint, events, iid))

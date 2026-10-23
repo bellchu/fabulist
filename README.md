@@ -87,7 +87,7 @@ def verify(secret: str, body: bytes, headers, tolerance=300) -> bool:
     return hmac.compare_digest(expected, headers["X-Fabulist-Signature-V2"])
 ```
 
-A webhook that ticks "Also tell this webhook when an AI run finishes" also receives `event: run.finished` with `project` (`id`, `name`) and `run` (`id`, `stage`, `status`, `items`, `error`, `started_by`, `tokens_in`, `tokens_out`, `duration_ms`); dispatch on the `event` field.
+A webhook that ticks "Also tell this webhook when work is assigned to someone" also receives `event: item.assigned` (`project`, `assignee`, `assigned_by`, and `items`: `kind`, `key`, `title`, `previous`; one event per assignment or bulk assignment; clearing an assignee sends nothing), which a chat bridge can turn into a message to that person. A webhook that ticks "Also tell this webhook when an AI run finishes" also receives `event: run.finished` with `project` (`id`, `name`) and `run` (`id`, `stage`, `status`, `items`, `error`, `started_by`, `tokens_in`, `tokens_out`, `duration_ms`); dispatch on the `event` field.
 
 `X-Fabulist-Signature` (HMAC of the body alone) is still sent for receivers written before V2, but it cannot detect replays.
 
