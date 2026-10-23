@@ -164,6 +164,25 @@ def search_everywhere(request: Request, q: str = "", limit: int = 30):
             "stories": [dict(s, key=history.item_key("story", s.pop("seq"))) for s in stories]}
 
 
+@router.get("/api/me/assigned")
+def assigned_to_me(request: Request):
+    """What is waiting for this person: requirements and stories assigned to them that are still drafts, by project (the projects they may see,
+    not archived), the project with the most waiting first."""
+    me = history.actor(request)
+    if me == "anonymous":
+        return {"requirements": 0, "stories": 0, "projects": []}
+    visible, args = "p.archived IS NULL", []  # type: str, List[Any]
+    if getattr(request.state, "role", "admin") != "admin":
+        visible += " AND (p.visibility = 'everyone' OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.username = %s))"
+        args.append(me)
+    rows = db.rows("SELECT p.id AS project_id, p.name AS project_name, "
+                   "(SELECT count(*) FROM requirements r WHERE r.project_id = p.id AND r.status = 'draft' AND r.data->>'assignee' = %%s) AS requirements, "
+                   "(SELECT count(*) FROM stories s WHERE s.project_id = p.id AND s.status = 'draft' AND s.data->>'assignee' = %%s) AS stories "
+                   "FROM projects p WHERE %s" % visible, (me, me, *args))
+    rows = sorted([r for r in rows if r["requirements"] or r["stories"]], key=lambda r: (-(r["requirements"] + r["stories"]), r["project_name"]))
+    return {"requirements": sum(r["requirements"] for r in rows), "stories": sum(r["stories"] for r in rows), "projects": rows}
+
+
 @router.get("/api/people")
 def people() -> List[Dict[str, str]]:
     """Named accounts, for choosing who can see a project (names and roles only)."""

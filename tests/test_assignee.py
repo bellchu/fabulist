@@ -116,3 +116,37 @@ def test_an_unknown_person_viewers_and_foreign_ids_are_handled(client, monkeypat
     assert client.post("/api/projects/%s/requirements/assign" % pid, json={"ids": ids, "assignee": "ben"}, auth=("vic", "vic-password-1")).status_code == 403
     assert client.post("/api/projects/%s/requirements/assign" % pid, json={"ids": ["nope"], "assignee": "ben"}, auth=ana).json() == {"updated": 0}
     assert client.post("/api/projects/%s/requirements/assign" % pid, json={"ids": [], "assignee": "ben"}, auth=ana).status_code == 422
+
+
+def test_what_is_waiting_for_me_across_projects(client, monkeypatch):
+    _auth(client, monkeypatch)
+    ana, ben = ("ana", "ana-password-1"), ("ben", "ben-password-1")
+    p1, ids1, sids1 = _three(client, ana)
+    p2, ids2, _ = _three(client, ana)
+    client.post("/api/projects/%s/requirements/assign" % p1, json={"ids": ids1[:2], "assignee": "ben"}, auth=ana)
+    client.post("/api/projects/%s/stories/assign" % p1, json={"ids": sids1, "assignee": "ben"}, auth=ana)
+    client.post("/api/projects/%s/requirements/assign" % p2, json={"ids": ids2[:1], "assignee": "ben"}, auth=ana)
+    mine = client.get("/api/me/assigned", auth=ben).json()
+    assert mine["requirements"] == 3 and mine["stories"] == 2
+    by = {p["project_id"]: p for p in mine["projects"]}
+    assert by[p1]["requirements"] == 2 and by[p1]["stories"] == 2 and by[p2]["requirements"] == 1 and by[p2]["stories"] == 0
+    assert [p["project_id"] for p in mine["projects"]][0] == p1, "the project with most waiting first"
+    assert client.get("/api/me/assigned", auth=ana).json() == {"requirements": 0, "stories": 0, "projects": []}
+
+
+def test_approved_work_is_no_longer_waiting_and_private_or_archived_projects_are_respected(client, monkeypatch):
+    _auth(client, monkeypatch)
+    ana, ben = ("ana", "ana-password-1"), ("ben", "ben-password-1")
+    pid, ids, _ = _three(client, ana)
+    client.post("/api/projects/%s/requirements/assign" % pid, json={"ids": ids, "assignee": "ben"}, auth=ana)
+    client.post("/api/projects/%s/requirements/bulk" % pid, json={"ids": ids[:2], "status": "approved"}, auth=ana)
+    assert client.get("/api/me/assigned", auth=ben).json()["requirements"] == 1, "approved and excluded items are done, not waiting"
+    client.put("/api/projects/%s/access" % pid, json={"visibility": "members", "members": []}, auth=ana)
+    assert client.get("/api/me/assigned", auth=ben).json()["requirements"] == 0, "a private project ben is not in does not show"
+    client.put("/api/projects/%s/access" % pid, json={"visibility": "everyone", "members": []}, auth=ana)
+    client.post("/api/projects/%s/archive" % pid, json={}, auth=ana)
+    assert client.get("/api/me/assigned", auth=ben).json()["requirements"] == 0, "nor an archived one"
+
+
+def test_anonymous_and_bootstrap_have_nothing_assigned(client):
+    assert client.get("/api/me/assigned").json() == {"requirements": 0, "stories": 0, "projects": []}
