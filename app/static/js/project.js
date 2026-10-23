@@ -1254,6 +1254,7 @@ async function viewAudit(body) {
   const facets = await api.get(base() + "/history/filters");
   const actionSel = select([["", "All actions"], ...facets.actions.map((a) => [a, a])], "", { "aria-label": "Filter by action", style: { width: "auto", minWidth: "180px" } });
   const actorSel = select([["", "All users"], ...facets.actors.map((a) => [a, a])], "", { "aria-label": "Filter by user", style: { width: "auto", minWidth: "180px" } });
+  const itemKey = h("input", { type: "search", class: "search", placeholder: "Item, e.g. REQ-014", "aria-label": "Filter by item key", style: { width: "auto", maxWidth: "180px" } });
   const list = h("div", { class: "card-body" });
   const more = h("button", { class: "btn", style: { margin: "0 16px 16px" } }, "Load more");
   const status = h("span", { class: "muted small" });
@@ -1263,6 +1264,7 @@ async function viewAudit(body) {
     const q = new URLSearchParams({ limit: AUDIT_PAGE });
     if (actionSel.value) q.set("action", actionSel.value);
     if (actorSel.value) q.set("actor", actorSel.value);
+    if (itemKey.value.trim()) q.set("item", itemKey.value.trim());
     if (rows.length) q.set("before", rows[rows.length - 1].n);
     const page = await api.get(base() + "/history?" + q);
     rows = rows.concat(page);
@@ -1273,10 +1275,11 @@ async function viewAudit(body) {
   };
   more.onclick = guard(() => load(false));
   actionSel.onchange = actorSel.onchange = guard(() => load(true));
+  itemKey.addEventListener("input", debounce(guard(() => load(true))));
   mount(body, h("div", { class: "card" },
     h("div", { class: "card-head" }, h("h3", {}, "Audit trail"), status,
       h("button", { class: "btn btn-sm right", onclick: () => download(base() + "/history.csv") }, icon("download"), "Export CSV")),
-    h("div", { class: "row wrap", style: { padding: "12px 16px 0" } }, actionSel, actorSel),
+    h("div", { class: "row wrap", style: { padding: "12px 16px 0" } }, actionSel, actorSel, itemKey),
     list, more));
   await load(true);
 }

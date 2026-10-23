@@ -35,10 +35,10 @@ def record(c: Any, project_id: str, item_type: str, item_id: str, key: str, acti
               (db.new_id(), project_id, item_type, item_id, key, action, who, summary[:300], json.dumps(changes or {}), db.now()))
 
 
-def entries(project_id: str, item_id: str = "", limit: int = 100, actor: str = "", action: str = "", before: int = 0) -> List[Dict[str, Any]]:
+def entries(project_id: str, item_id: str = "", limit: int = 100, actor: str = "", action: str = "", before: int = 0, item_key: str = "") -> List[Dict[str, Any]]:
     """Newest first. `before` is the `n` of the last row of the previous page (cursor paging)."""
     where, args = ["project_id=%s"], [project_id]
-    for clause, value in (("item_id=%s", item_id), ("actor=%s", actor), ("action=%s", action)):
+    for clause, value in (("item_id=%s", item_id), ("actor=%s", actor), ("action=%s", action), ("item_key=%s", item_key.strip().upper())):
         if value:
             where.append(clause)
             args.append(value)
