@@ -50,7 +50,7 @@ def test_full_workflow(client):
 
     s = client.patch("/api/projects/%s/stories/%s" % (pid, stories[0]["id"]), json={"status": "approved", "title": "Edited", "story_points": 5}).json()
     assert s["title"] == "Edited" and s["story_points"] == 5 and s["status"] == "approved"
-    for f in ("xlsx", "jira-csv", "azure-csv", "md", "stories-csv", "requirements-csv", "rtm-csv", "json"):
+    for f in ("xlsx", "jira-csv", "azure-csv", "md", "stories-csv", "requirements-csv", "rtm-csv", "compliance-csv", "json"):
         e = client.get("/api/projects/%s/export" % pid, params={"format": f, "scope": "all"})
         assert e.status_code == 200 and e.content, f
     approved = client.get("/api/projects/%s/export" % pid, params={"format": "json", "scope": "approved"}).json()
